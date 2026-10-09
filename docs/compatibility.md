@@ -26,7 +26,7 @@ Only results that were actually measured are recorded here. Concrete host addres
 
 ## Findings that affect the implementation
 
-1. **tmux 3.4 replaces tabs in `-F` output with `_`.** Tabs cannot be used as field separators. Use an encoding that survives, such as `#{q:...}` escaping or one field per line.
+1. **Separators in `-F` output depend on client flags.** Without `-u`, tmux 3.4 printed tabs as `_`; with `-u`, tabs in names come through unchanged. Neither tabs nor any other character can serve as a field separator for untrusted text, so the probe fetches each text field with its own `list-*` call as `<id> <value>`.
 2. **Disconnecting `docker exec` does not end the processes it started in the container.** The probe found 64 attached tmux clients; 59 of them had been idle for more than 7 days, and every one was the child of a `bash` started by `docker exec`. Consequences:
    - When the app closes a view it must explicitly `detach-client` its own client. Only dropping ssh leaves a client behind in the container.
    - The app should tag its clients (for example `docker exec -e AGENTMUX_CLIENT=<uuid>`) so that after a crash or network loss, the next connection cleans up only clients carrying its own tag.
