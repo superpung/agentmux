@@ -14,12 +14,28 @@ scripts/bundle-app.sh      # build and sign build/AgentMux.app
 open build/AgentMux.app
 ```
 
+## Configuration
+
+The app reads `AGENTMUX_CONFIG`, or `~/Library/Application Support/AgentMux/targets.json5`. The format is `config/targets.example.json5`. Targets with `access: "observe"` are only listed and probed; terminals open only on `access: "test"` targets.
+
+## Development tool
+
+```sh
+.build/arm64-apple-macosx/debug/agentmux-cli probe [target-id ...]     # read-only inventory and agent detection
+.build/arm64-apple-macosx/debug/agentmux-cli clients <target-id>       # read-only client list with AgentMux tags
+.build/arm64-apple-macosx/debug/agentmux-cli attach-test <target-id> <pane> [--type TEXT]   # test targets only
+.build/arm64-apple-macosx/debug/agentmux-cli release-orphans <target-id>                   # test targets only
+```
+
+Scripted app check: `AGENTMUX_OPEN=<target>/<pane> AGENTMUX_SMOKE_INPUT=<text> AGENTMUX_SMOKE_DUMP=<file>` opens the pane, pastes the text, writes the visible screen to the file and quits.
+
 ## Layout
 
 ```text
 Sources/CPTY/          forkpty + execve (C)
-Sources/AgentMuxCore/  transport, target adapters, tmux parsing, domain model (no UI)
+Sources/AgentMuxCore/  config, remote commands, tmux inventory, agent detection, attach/release
 Sources/AgentMux/      macOS app (SwiftUI + AppKit + GhosttyTerminal)
+Sources/agentmux-cli/  development tool for the remote path
 Tests/                 swift-testing unit tests
 Vendor/libghostty-spm/ pinned terminal engine with one resource-lookup patch
 config/                local target config (*.local.json5 is not committed)
@@ -28,4 +44,6 @@ docs/                  requirements, decision records, observed compatibility
 
 ## Status
 
-M0 in progress: toolchain, terminal engine and local PTY work. The remote side has only been probed read-only.
+- Read-only inventory of configured targets over one ssh connection per refresh, with agent detection from process evidence (type, version, config directory, confidence). Activity (working / waiting) is not detected yet.
+- Terminals on test targets: attach to a pane, type, disconnect, quit; the app's own tmux clients are released precisely (see ADR 0002).
+- Not done yet: activity detection, search (⌘K), filters, notifications, connection multiplexing, diagnostics export, path B (control mode).
