@@ -111,7 +111,7 @@ import Testing
     @Test func attachNeverStealsAndTagsTheClient() {
         let remote = RemoteCommand.attach(in: context, target: "$3", clientTag: "abc123")
         #expect(remote.contains("docker exec -it --user 1000 -e AGENTMUX_CLIENT=abc123 -e TERM=xterm-256color app01"))
-        #expect(remote.contains("tmux -u -L agentmux-test attach-session -E -f ignore-size -t '$3'"))
+        #expect(remote.contains("tmux -u -L agentmux-test attach-session -E -f ignore-size,active-pane -t '$3'"))
         #expect(!remote.contains(" -d"))
     }
 }

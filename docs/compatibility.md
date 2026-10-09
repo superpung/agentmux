@@ -40,3 +40,17 @@ Only results that were actually measured are recorded here. Concrete host addres
 5. **A Claude Code executable can show as `(deleted)`.** This happens when an auto-update replaces the binary while it is running; detection rules must accept it.
 6. **Claude Code also runs daemon, `bg-pty-host` and `bg-spare` processes, and Codex runs an `app-server` daemon.** They are not under any pane and must not be counted as pane agents.
 7. **The container has about 2,800 processes and the host is heavily loaded.** A script that ran `ps` once per pid did not finish in 20 seconds. Collection must read the whole table once and analyze it locally. Also, a `timeout` on the host side only ends the docker client; commands inside the container need their own time limit.
+8. **tmux can resolve a client name to a different client.** `display-message -c /dev/pts/23` returned the most recently active client (`/dev/pts/148`) instead of the stale client named `/dev/pts/23`. Never target clients by tty name; AgentMux finds its own clients by the `AGENTMUX_CLIENT` tag in `/proc/<client_pid>/environ` and sends SIGHUP to that pid.
+9. **The docker exec leak is reproducible.** On the isolated test server, hanging up only the local ssh left the tagged tmux client attached in the container; `ClientRelease` with the tag removed it.
+10. **Plain attach changes shared focus.** `attach-session -t %N` sets the window's active pane (and the session's current window when the pane is in another window) for every client. The `active-pane` client flag does not prevent this, and a plain client's input follows the window's shared active pane: after an external `select-pane`, typed text went to the newly selected pane. See ADR 0002.
+11. **Text encoding with `-u`.** Without `-u`, a command client without a UTF-8 locale prints CJK characters as `_`; with `-u` they come through. Newlines in names are printed as a literal `\n`; tabs come through as tabs. Quotes and `$(...)` are plain text.
+
+## Verified on the test server (`-L agentmux-test`)
+
+| Test | Result |
+|---|---|
+| Attach to `%0`, type `echo agentmux-ok-你好` | Text and output appear in `%0` |
+| Close with release | 1 client released; no client left; ssh exits |
+| Hang up ssh only | Tagged client stays; `release-orphans` releases it |
+| T-06 hostile session / window names | Parsed verbatim; nothing executed |
+| Duplicate `%0` on two servers | Kept apart by target (socket) |

@@ -3,10 +3,10 @@ import Foundation
 /// The read-only inventory script run inside a target, and its parser.
 ///
 /// The script only runs `tmux list-*` / `display-message -p`, one `ps` and
-/// reads under `/proc`; it writes no files. Output is line based: tmux 3.4
-/// replaces tabs and other control characters in `-F` output with `_`, so
-/// every untrusted text field is fetched by its own `list-*` call as
-/// `<id> <value>` and split on the first space.
+/// reads under `/proc`; it writes no files. Output is line based. tmux
+/// escapes newlines in names but may pass tabs through, so no character is
+/// a safe field separator: every untrusted text field is fetched by its own
+/// `list-*` call as `<id> <value>` and split on the first space.
 public enum InventoryProbe {
     public static let maxProcessLines = 3000
     public static let maxAgentCandidates = 64

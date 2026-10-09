@@ -75,7 +75,7 @@ public enum RemoteCommand {
         target: String,
         clientTag: String
     ) -> String {
-        let tmux = context.tmux.argv + ["attach-session", "-E", "-f", "ignore-size", "-t", target]
+        let tmux = context.tmux.argv + ["attach-session", "-E", "-f", "ignore-size,active-pane", "-t", target]
         guard let docker = context.container else {
             return ShellQuote.command(["env", "\(clientTagVariable)=\(clientTag)", "TERM=xterm-256color"] + tmux)
         }
