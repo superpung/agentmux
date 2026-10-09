@@ -1,0 +1,42 @@
+# Observed Environment and Compatibility
+
+Only results that were actually measured are recorded here. Concrete host addresses and container names live in `config/targets.local.json5`, which is not committed.
+
+## Local Mac (2026-10-10)
+
+| Item | Value |
+|---|---|
+| macOS | 15.5 (24F74), arm64 |
+| Xcode | Not installed. Command Line Tools 16.3 (provides the MacOSX 15.4 SDK) |
+| Swift | swift.org 6.4.0 toolchain in `~/Library/Developer/Toolchains` (current user only), invoked by path through `scripts/env.sh` |
+| SwiftPM build engine | `--build-system native`. The default swiftbuild engine in 6.4 needs `xcstringstool`, which ships only with Xcode |
+| ssh | OpenSSH 9.9p2 (system `/usr/bin/ssh`) |
+| Terminal engine | libghostty-spm 2.2.2026100901, vendored (see `Vendor/libghostty-spm/VENDORED`) |
+
+## Remote target (read-only probe, 2026-10-10)
+
+| Item | Value |
+|---|---|
+| Host | Ubuntu, kernel 5.15, x86_64, 48 cores; loadavg ≈ 41 during the probe |
+| SSH | Key authentication; works with `BatchMode=yes`; non-interactive stdout has no banner noise |
+| Docker | 28.1.1; the SSH user is in the `docker` group, no sudo needed |
+| Container | Ubuntu 24.04; default exec user is root; procps `ps`, `python3`, `jq` and `timeout` are present |
+| tmux | 3.4, default socket `/tmp/tmux-0/default` |
+| tmux options | `exit-unattached off`, `destroy-unattached off`, `synchronize-panes off`, `window-size latest`; no global hooks |
+
+## Findings that affect the implementation
+
+1. **tmux 3.4 replaces tabs in `-F` output with `_`.** Tabs cannot be used as field separators. Use an encoding that survives, such as `#{q:...}` escaping or one field per line.
+2. **Disconnecting `docker exec` does not end the processes it started in the container.** The probe found 64 attached tmux clients; 59 of them had been idle for more than 7 days, and every one was the child of a `bash` started by `docker exec`. Consequences:
+   - When the app closes a view it must explicitly `detach-client` its own client. Only dropping ssh leaves a client behind in the container.
+   - The app should tag its clients (for example `docker exec -e AGENTMUX_CLIENT=<uuid>`) so that after a crash or network loss, the next connection cleans up only clients carrying its own tag.
+   - `session_attached` cannot be used as a signal that someone is watching.
+3. **`window-size latest`:** the most recently active client sets the window size. The app must attach with `-f ignore-size` (supported by 3.4), otherwise it changes the layout the user sees in other clients.
+4. **Process evidence for agents (L1) is reliable:**
+   - The pane's foreground process is `bash`; the agent is its child.
+   - `/proc/<pid>/exe` tells Codex (`~/.codex/packages/standalone/releases/<ver>/bin/codex`) apart from Claude Code (`~/.local/share/claude/versions/<ver>`).
+   - The agent's environment contains `TMUX_PANE`, which maps it directly to a pane.
+   - The agent's environment contains `CODEX_HOME` / `CLAUDE_CONFIG_DIR`, which identifies the config directory. In use: `.codex`, `.codex-2`, `.claude-2`, `.claude-3`.
+5. **A Claude Code executable can show as `(deleted)`.** This happens when an auto-update replaces the binary while it is running; detection rules must accept it.
+6. **Claude Code also runs daemon, `bg-pty-host` and `bg-spare` processes, and Codex runs an `app-server` daemon.** They are not under any pane and must not be counted as pane agents.
+7. **The container has about 2,800 processes and the host is heavily loaded.** A script that ran `ps` once per pid did not finish in 20 seconds. Collection must read the whole table once and analyze it locally. Also, a `timeout` on the host side only ends the docker client; commands inside the container need their own time limit.

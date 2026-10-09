@@ -1,0 +1,48 @@
+// AgentMux development / test targets.
+//
+// Copy to config/targets.local.json5 (ignored by git) and fill it in.
+// - Never put passwords, private keys or tokens here. Authentication is left
+//   entirely to the system ssh, ssh-agent and ~/.ssh/config.
+// - Leave a field as "" when unsure; it will be probed read-only.
+// - JSON5: comments, trailing commas and unquoted keys are allowed.
+{
+  schemaVersion: 1,
+
+  hosts: [
+    {
+      id: "lab",                      // Short local name, only used for references in this file
+      displayName: "Lab server",
+      sshDestination: "",             // Preferably a Host alias from ~/.ssh/config; user@host also works
+      usualCommand: "",               // Optional: how you log in today, e.g. "ssh lab-host". Reference only, never executed as-is
+    },
+  ],
+
+  targets: [
+    {
+      id: "a",
+      hostId: "lab",                  // Refers to hosts[].id
+      kind: "docker",                 // "docker" = a container on the host; "host" = tmux on the host itself
+      container: "",                  // Container name or ID
+      execUser: "",                   // Value for docker exec --user (name or UID); "" = container default
+      tmuxPath: "",                   // "" = probe
+      tmuxSocket: { mode: "default" },
+      //   { mode: "default" }                    plain `tmux`, no -L / -S
+      //   { mode: "name", value: "xxx" }         `tmux -L xxx`
+      //   { mode: "path", value: "/tmp/x.sock" } `tmux -S /tmp/x.sock`
+
+      // What development may do on this target:
+      //   "observe" = list containers / tmux / processes and read screens only; no attach, no input, nothing created
+      //   "test"    = additionally create tmux sessions named agentmux-test-*, attach and type in them, and delete only those afterwards
+      access: "observe",
+
+      // Optional: Codex / Claude Code config directories (paths inside the container)
+      agentProfiles: [
+        // { label: "codex-main", provider: "codex",  configRoot: "/root/.codex" },
+        // { label: "claude-2",   provider: "claude", configRoot: "/root/.claude-2" },
+      ],
+
+      usualCommand: "",               // Optional: how you enter the container and tmux today
+      notes: "",                      // Optional: anything to keep in mind, e.g. "heavily loaded, poll gently"
+    },
+  ],
+}
