@@ -26,6 +26,11 @@ let package = Package(
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
             ]
         ),
+        // Development tool: read-only inventory of configured targets.
+        .executableTarget(
+            name: "agentmux-cli",
+            dependencies: ["AgentMuxCore"]
+        ),
         .testTarget(
             name: "AgentMuxCoreTests",
             dependencies: ["AgentMuxCore"]
