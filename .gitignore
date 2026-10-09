@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+build/
+*.app
+.DS_Store
+# Local target config: contains host and container details
+config/*.local.json5
+# Original Chinese handoff document; the English version is docs/requirements.md
+remote-agent-console-handoff.md
