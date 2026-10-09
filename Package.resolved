@@ -1,0 +1,15 @@
+{
+  "originHash" : "55e12836dfda6214c21da9d8c15eec72c78909ddcfa58b1dda56e949351df18b",
+  "pins" : [
+    {
+      "identity" : "displaylink",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Lakr233/DisplayLink.git",
+      "state" : {
+        "revision" : "41bea2661e04bebcb1c4f15fc0b6197850100fdd",
+        "version" : "3.0.1"
+      }
+    }
+  ],
+  "version" : 3
+}
