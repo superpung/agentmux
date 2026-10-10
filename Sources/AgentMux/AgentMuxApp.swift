@@ -40,20 +40,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Quitting detaches this app's own control clients and restores the
-    /// window sizes they forced. That restore is a server round-trip, so
-    /// terminate is deferred briefly to let it flush; the cap keeps quitting
-    /// from hanging on a slow host.
+    /// Quitting closes this app's own control clients. Each kills its grouped
+    /// session; closing the app's pipes ends the ssh clients, and
+    /// `destroy-unattached` removes any grouped session whose kill did not
+    /// land. The user's sessions and their window sizes are untouched (the
+    /// forced size was soft), so there is nothing to wait for.
     @MainActor
     func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
         model?.stopPolling()
-        let hadTerminals = model?.hasOpenTerminals ?? false
         model?.closeAllTerminals()
-        guard hadTerminals else { return .terminateNow }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            NSApp.reply(toApplicationShouldTerminate: true)
-        }
-        return .terminateLater
+        return .terminateNow
     }
 
     /// Runs `block` on the main thread from the run loop (in every common

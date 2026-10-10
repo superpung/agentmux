@@ -61,4 +61,7 @@ Only results that were actually measured are recorded here. Concrete host addres
 | Close mirror / quit app | No client and no buffer left |
 | App mirror of a 50×29 pane | Local grid exactly 50×29 |
 | App resizes remote window to fill the view | `resize-window -x -y` forces the pane to the view's grid (even with the user's other clients attached) |
-| Close / quit restores window-size | `set-window-option window-size latest` on close; `resize-window -A` must NOT follow it (it re-sets manual) |
+| App fills the view via a grouped session | `tmux -C new-session -t <session>` shares windows with its own current window/size; `refresh-client -C` soft-sizes the agent's window only |
+| Grouped session isolation (verified on real server) | user's current window (@27) and window list (0-5,7) unchanged while viewing; opt stays `latest` |
+| `destroy-unattached on` cleanup | grouped session auto-destroys when the control client leaves or the app dies (pipes close -> ssh exits); 0 leftover after quit |
+| `select-window -t %pane` | resolves to the pane's window |

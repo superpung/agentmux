@@ -27,7 +27,6 @@ public final class PaneMirror: @unchecked Sendable {
     private var requestedSize: Geometry?
     private var pendingSize: Geometry?
     private var sizeGeneration = 0
-    private var didForceSize = false
     private var silenced = Set<String>()
     private var onTerminalBytes: (@Sendable (Data) -> Void)?
     private var onGeometry: (@Sendable (Geometry) -> Void)?
@@ -58,6 +57,13 @@ public final class PaneMirror: @unchecked Sendable {
             self.onEnded = onEnded
         }
         try client.start { [weak self] event in self?.handle(event) }
+        // The client is attached to its own grouped session: remove it when
+        // the client leaves (or the app dies), and focus the agent's window
+        // so `refresh-client -C` sizes that window and not another.
+        client.send("set-option destroy-unattached on") { _ in }
+        if let target = TmuxQuote.id(paneID) {
+            client.send("select-window -t \(target)") { _ in }
+        }
         resync()
     }
 
@@ -114,34 +120,29 @@ public final class PaneMirror: @unchecked Sendable {
     }
 
     private func flushSize(_ generation: Int) {
-        guard !ended, generation == sizeGeneration, let size = pendingSize, size != requestedSize,
-              let target = TmuxQuote.id(paneID) else { return }
+        guard !ended, generation == sizeGeneration, let size = pendingSize, size != requestedSize else { return }
         requestedSize = size
-        didForceSize = true
-        client.send("resize-window -t \(target) -x \(size.columns) -y \(size.rows)") { _ in }
-    }
-
-    /// Restores the window to follow its clients again, undoing the forced
-    /// manual size. Best effort: a crash leaves the window manual until it is
-    /// viewed and closed again.
-    private func restoreWindowSize() {
-        guard didForceSize, let target = TmuxQuote.id(paneID) else { return }
-        // Only reset the option: it recomputes the size from the clients.
-        // A `resize-window -A` here would re-set the option back to manual.
-        client.send("set-window-option -t \(target) window-size latest") { _ in }
+        // Soft size: `refresh-client -C` sizes this client's current window
+        // (the agent's window, in our grouped session) under `window-size
+        // latest`. It is not forced, so it self-heals to the user's clients
+        // when we leave — no restore needed.
+        client.send("refresh-client -C \(size.columns)x\(size.rows)") { _ in }
     }
 
     public func close() {
         client.queue.async { [self] in
             guard !ended else { return }
-            restoreWindowSize()
+            // Remove our grouped session now; its windows survive in the
+            // user's session, and `destroy-unattached` is the crash-safety
+            // net if this command never lands.
+            client.send("kill-session -t \(RemoteCommand.groupedSessionName(clientTag: client.clientTag))") { _ in }
             ended = true
             onTerminalBytes = nil
             onGeometry = nil
             onEnded = nil
         }
-        // Give the restore commands a moment to flush before stdin closes.
-        client.queue.asyncAfter(deadline: .now() + 0.3) { [client] in client.close() }
+        // Let kill-session flush before stdin closes.
+        client.queue.asyncAfter(deadline: .now() + 0.2) { [client] in client.close() }
     }
 
     // MARK: - Queue-confined

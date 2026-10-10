@@ -83,10 +83,20 @@ public enum RemoteCommand {
         return ShellQuote.command(dockerExec(docker, interactiveTTY: true, environment: environment) + tmux)
     }
 
-    /// A tmux control-mode client for one session, without a tty. It drives
-    /// the window size to match the local view (via `refresh-client -C`), tmux
-    /// pauses a pane's output instead of buffering without bound when the
-    /// client falls behind (`pause-after`), and it exits when stdin closes.
+    /// Session name prefix for the per-view grouped sessions AgentMux creates.
+    public static let groupedSessionPrefix = "agentmux-"
+
+    public static func groupedSessionName(clientTag: String) -> String {
+        "\(groupedSessionPrefix)\(clientTag)"
+    }
+
+    /// A tmux control-mode client, without a tty, attached to a new session
+    /// *grouped* with `session`. A grouped session shares `session`'s windows
+    /// but has its own current window and size, so the view can focus and
+    /// size the agent's window without touching the user's other clients. The
+    /// mirror sets `destroy-unattached` so the grouped session is removed when
+    /// the client leaves (or the app dies and its stdin closes). `pause-after`
+    /// makes tmux pause a pane instead of buffering without bound.
     public static func controlAttach(
         in context: ExecutionContext,
         session: String,
@@ -94,7 +104,8 @@ public enum RemoteCommand {
         pauseAfterSeconds: Int
     ) -> String {
         let tmux = context.tmux.argv + [
-            "-C", "attach-session", "-E", "-f", "pause-after=\(pauseAfterSeconds)", "-t", session,
+            "-C", "new-session", "-s", groupedSessionName(clientTag: clientTag),
+            "-t", session, "-f", "pause-after=\(pauseAfterSeconds)",
         ]
         guard let docker = context.container else {
             return ShellQuote.command(["env", "\(clientTagVariable)=\(clientTag)"] + tmux)
