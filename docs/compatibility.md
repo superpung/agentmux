@@ -45,6 +45,8 @@ Only results that were actually measured are recorded here. Concrete host addres
 10. **Plain attach changes shared focus.** `attach-session -t %N` sets the window's active pane (and the session's current window when the pane is in another window) for every client. The `active-pane` client flag does not prevent this, and a plain client's input follows the window's shared active pane: after an external `select-pane`, typed text went to the newly selected pane. See ADR 0002.
 11. **Text encoding with `-u`.** Without `-u`, a command client without a UTF-8 locale prints CJK characters as `_`; with `-u` they come through. Newlines in names are printed as a literal `\n`; tabs come through as tabs. Quotes and `$(...)` are plain text.
 
+12. **Control mode details (tmux 3.4).** `tmux -C` works over `docker exec -i` without a tty and exits when stdin closes, leaving no client. Every command in a `;`-separated line gets its own `%begin`/`%end` reply, and the line stops at the first `%error`. Arguments starting with `%` must be quoted. In double-quoted words, `\$`, `\"`, `\\`, `\n` and `\t` read back verbatim. `send-keys -H` delivers raw bytes including UTF-8. There is no format for bracketed-paste mode; `paste-buffer -p` uses the pane's real mode.
+
 ## Verified on the test server (`-L agentmux-test`)
 
 | Test | Result |
@@ -54,3 +56,7 @@ Only results that were actually measured are recorded here. Concrete host addres
 | Hang up ssh only | Tagged client stays; `release-orphans` releases it |
 | T-06 hostile session / window names | Parsed verbatim; nothing executed |
 | Duplicate `%0` on two servers | Kept apart by target (socket) |
+| Control-mode mirror of `%0` while `%1` is the window's active pane | Typed text and output in `%0`; `%1` stays active; current window unchanged |
+| Paste of two lines into bash | One bracketed paste, not executed line by line |
+| Close mirror / quit app | No client and no buffer left |
+| App mirror of a 50×29 pane | Local grid exactly 50×29 |

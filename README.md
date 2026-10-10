@@ -44,6 +44,7 @@ docs/                  requirements, decision records, observed compatibility
 
 ## Status
 
-- Read-only inventory of configured targets over one ssh connection per refresh, with agent detection from process evidence (type, version, config directory, confidence). Activity (working / waiting) is not detected yet.
-- Terminals on test targets: attach to a pane, type, disconnect, quit; the app's own tmux clients are released precisely (see ADR 0002).
-- Not done yet: activity detection, search (⌘K), filters, notifications, connection multiplexing, diagnostics export, path B (control mode).
+- Read-only inventory of configured targets over one ssh connection per refresh, with agent detection from process evidence (type, version, config directory, confidence) and task titles from the agents' terminal titles. Activity (working / waiting) is not detected yet.
+- a Mac agent console-style window: Spaces, Agents, Terminals, device scope, ⌘K search.
+- Selecting a pane on an `interact` / `test` target opens a live mirror over tmux control mode: exact pane grid, input and paste go to that pane only, nothing shared in tmux changes (ADR 0003).
+- Not done yet: activity detection, notifications, connection multiplexing, diagnostics export, fitting large panes, OSC 52 clipboard policy.
