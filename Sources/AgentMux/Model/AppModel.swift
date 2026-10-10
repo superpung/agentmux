@@ -217,15 +217,36 @@ final class AppModel {
 
     // MARK: Selection and terminals
 
-    /// Selecting a pane on an attachable target opens its mirror at once,
-    /// as a Mac agent console does; mirroring changes nothing shared in tmux.
+    /// How many mirrors stay open at once. Open mirrors are live control-mode
+    /// connections to a shared, often loaded server, so the least-recently
+    /// viewed ones are closed rather than accumulating without bound.
+    static let maxOpenTerminals = 4
+
+    /// Most-recently viewed first; drives eviction.
+    private var recentlyViewed: [PaneRef] = []
+
+    /// Selecting a pane on an attachable target opens its mirror at once;
+    /// mirroring changes nothing shared in tmux.
     func select(_ ref: PaneRef) {
         selection = ref
-        if terminals[ref] == nil, state(ref.targetID)?.target.access.allowsAttach == true {
-            openTerminal(ref)
+        if state(ref.targetID)?.target.access.allowsAttach == true {
+            if terminals[ref] == nil { openTerminal(ref) }
+            recentlyViewed.removeAll { $0 == ref }
+            recentlyViewed.insert(ref, at: 0)
+            evictStaleTerminals()
         }
         for terminal in terminals.values {
             terminal.setActive(terminal.ref == ref)
+        }
+    }
+
+    /// Closes mirrors beyond the cap, oldest first, never the selected one.
+    private func evictStaleTerminals() {
+        while terminals.count > Self.maxOpenTerminals,
+              let victim = recentlyViewed.last(where: { $0 != selection && terminals[$0] != nil })
+        {
+            recentlyViewed.removeAll { $0 == victim }
+            closeTerminal(victim)
         }
     }
 
