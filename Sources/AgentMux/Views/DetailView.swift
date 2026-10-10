@@ -21,8 +21,8 @@ struct DetailView: View {
                 // switching; only the selected one is visible and live.
                 ForEach(Array(model.terminals.values), id: \.ref) { terminal in
                     let selected = terminal.ref == model.selection
-                    TerminalSurfaceView(context: terminal.state)
-                        .padding(.leading, 6)
+                    MirroredSurfaceView(state: terminal.state, geometry: terminal.geometry)
+                        .padding(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 6))
                         .opacity(selected ? 1 : 0)
                         .allowsHitTesting(selected)
                 }
@@ -125,10 +125,16 @@ private struct StatusBarView: View {
                     }
                     Spacer(minLength: 8)
                     if let terminal = model.terminal(for: ref) {
+                        if let geometry = terminal.geometry {
+                            Text(verbatim: "\(geometry.columns)×\(geometry.rows)")
+                        }
                         Text(verbatim: terminal.phaseText)
-                        Button("Disconnect View") { model.closeTerminal(ref) }
+                        Button("Redraw") { terminal.resync() }
                             .buttonStyle(.link)
-                            .help("Releases this app's tmux client. The pane and its programs keep running.")
+                            .help("Rebuild this view from the pane's current screen.")
+                        Button("Disconnect") { model.closeTerminal(ref) }
+                            .buttonStyle(.link)
+                            .help("Ends this view's tmux client. The pane and its programs keep running.")
                     }
                 } else {
                     Spacer()
@@ -165,27 +171,49 @@ private struct StatusBarView: View {
     }
 }
 
-/// Shown for a selected pane without an open terminal.
+/// The Ghostty surface at exactly the remote pane's grid, top-left aligned.
+/// Until the cell size is known the surface fills the area once, so it can
+/// report its metrics.
+private struct MirroredSurfaceView: View {
+    @ObservedObject var state: TerminalViewState
+    let geometry: PaneMirror.Geometry?
+    @Environment(\.displayScale) private var scale
+
+    var body: some View {
+        let size = frameSize
+        TerminalSurfaceView(context: state)
+            .frame(width: size?.width, height: size?.height)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .clipped()
+    }
+
+    private var frameSize: CGSize? {
+        guard let geometry, let metrics = state.surfaceSize,
+              metrics.cellWidthPixels > 0, metrics.cellHeightPixels > 0, scale > 0 else { return nil }
+        let cellWidth = CGFloat(metrics.cellWidthPixels) / scale
+        let cellHeight = CGFloat(metrics.cellHeightPixels) / scale
+        // Half a cell of slack so rounding never loses a column or row.
+        return CGSize(
+            width: CGFloat(geometry.columns) * cellWidth + cellWidth / 2,
+            height: CGFloat(geometry.rows) * cellHeight + cellHeight / 2
+        )
+    }
+}
+
+/// Shown for a selected pane without a mirror: view-only targets, or an
+/// open that failed.
 private struct PanePlaceholderView: View {
     @Environment(AppModel.self) private var model
     let ref: PaneRef
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             if let state = model.state(ref.targetID) {
                 if state.target.access.allowsAttach {
-                    Button("Open Terminal") {
-                        model.openTerminal(ref)
-                        model.terminal(for: ref)?.setActive(true)
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .controlSize(.large)
-                    .disabled(state.snapshot?.pane(ref.paneID) == nil)
-                    Text("Attaching makes this pane the current pane of its window (and its window the current window of the session) for every tmux client.")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 420)
+                    Text("Not connected").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.textSecondary)
+                    Button("Open Terminal") { model.select(ref) }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(state.snapshot?.pane(ref.paneID) == nil)
                 } else {
                     Text("View only").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.textSecondary)
                     Text("This target is configured as observe-only.")

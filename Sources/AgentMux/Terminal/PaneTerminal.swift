@@ -4,59 +4,77 @@ import Foundation
 import GhosttyTerminal
 import Observation
 
-/// Connects one Ghostty surface to one `RemoteTerminal`.
+/// One Ghostty surface mirroring one remote pane through `PaneMirror`.
 @MainActor
 @Observable
 final class PaneTerminal {
     enum Phase: Equatable {
         case connecting
-        case connected
-        /// The connection ended; input is disabled. The pane is untouched.
+        case live
+        /// The mirror ended; input is disabled. The pane is untouched.
         case ended(String)
-        /// The pane this view was opened for no longer exists in this form.
+        /// The tmux server changed under this view.
         case stale(String)
     }
 
     let ref: PaneRef
     let state = TerminalViewState(controller: GhosttyRuntime.controller)
     private(set) var phase: Phase = .connecting
-    private let remote: RemoteTerminal
+    /// The remote pane's size; the local grid is kept at exactly this size.
+    private(set) var geometry: PaneMirror.Geometry?
+    private let mirror: PaneMirror
     private let session: InMemoryTerminalSession
+    private let gate: InputGate
 
-    var clientTag: String { remote.clientTag }
+    var clientTag: String { mirror.clientTag }
 
-    init(ref: PaneRef, host: HostConfig, target: TargetConfig) throws {
-        let remote = try RemoteTerminal(host: host, target: target, tmuxTarget: ref.paneID, columns: 100, rows: 30)
+    init(ref: PaneRef, sessionID: String, host: HostConfig, target: TargetConfig) throws {
+        let mirror = try PaneMirror(host: host, target: target, session: sessionID, paneID: ref.paneID)
         let gate = InputGate()
         let session = InMemoryTerminalSession(
             write: { data in
-                // Input only reaches the remote while the view is live and selected.
-                if gate.isOpen { remote.write(data) }
+                // Keys and mouse reports reach the pane only while this view
+                // is selected and live.
+                if gate.isOpen { mirror.sendInput(data) }
             },
-            resize: { viewport in remote.resize(columns: viewport.columns, rows: viewport.rows) }
+            // The remote pane keeps its own size; the local grid follows it.
+            resize: { _ in }
         )
         self.ref = ref
-        self.remote = remote
+        self.mirror = mirror
         self.session = session
         self.gate = gate
 
-        remote.start(
-            onOutput: { [weak self] data in
-                session.receive(data)
-                if gate.claimFirstOutput() {
-                    Task { @MainActor in self?.markConnected() }
-                }
+        state.makePlatformView = {
+            let view = PasteInterceptingTerminalView(frame: .zero)
+            view.onPaste = { [weak self] text in self?.paste(text) ?? false }
+            return view
+        }
+        state.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
+
+        try mirror.start(
+            onTerminalBytes: { data in session.receive(data) },
+            onGeometry: { [weak self] geometry in
+                Task { @MainActor in self?.geometry = geometry }
             },
-            onExit: { [weak self] termination in
+            onEnded: { [weak self] reason in
                 gate.close()
-                Task { @MainActor in self?.markEnded(termination) }
+                Task { @MainActor in self?.markEnded(reason) }
             }
         )
-        state.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
+        gate.markLive()
+        phase = .live
         scheduleSmokeIfRequested()
     }
 
-    private let gate: InputGate
+    var phaseText: String {
+        switch phase {
+        case .connecting: "Connecting…"
+        case .live: "Mirroring · input goes to this pane only"
+        case let .ended(reason): "Disconnected: \(reason) · input disabled"
+        case let .stale(reason): "Stale: \(reason) · input disabled"
+        }
+    }
 
     /// Only the terminal on screen may send input; hidden ones drop it even
     /// if they still hold keyboard focus.
@@ -66,13 +84,14 @@ final class PaneTerminal {
         if active { state.requestFocus() }
     }
 
-    var phaseText: String {
-        switch phase {
-        case .connecting: "Connecting…"
-        case .connected: "Attached"
-        case let .ended(reason): "Disconnected: \(reason) · input disabled"
-        case let .stale(reason): "Stale: \(reason) · input disabled"
-        }
+    /// Pastes through tmux so bracketed paste follows the pane's real mode.
+    func paste(_ text: String) -> Bool {
+        guard gate.isOpen else { return false }
+        return mirror.paste(text)
+    }
+
+    func resync() {
+        mirror.resync()
     }
 
     func markStale(reason: String) {
@@ -80,28 +99,14 @@ final class PaneTerminal {
         phase = .stale(reason)
     }
 
-    func close() async {
+    func close() {
         gate.close()
-        await remote.close()
+        mirror.close()
     }
 
-    /// Stops input and hands over the connection, for closing it off the
-    /// main actor while the app quits.
-    func detachForQuit() -> RemoteTerminal {
-        gate.close()
-        return remote
-    }
-
-    private func markConnected() {
-        if phase == .connecting { phase = .connected }
-    }
-
-    private func markEnded(_ termination: PTYProcess.Termination) {
+    private func markEnded(_ reason: String) {
         if case .stale = phase { return }
-        phase = switch termination {
-        case let .exited(code): .ended("connection closed (exit \(code))")
-        case let .signaled(signal): .ended("connection closed (signal \(signal))")
-        }
+        phase = .ended(reason)
     }
 
     /// AGENTMUX_SMOKE_DUMP=<path> with AGENTMUX_OPEN: type AGENTMUX_SMOKE_INPUT
@@ -113,41 +118,57 @@ final class PaneTerminal {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(3))
             if let input, let self {
-                _ = self.state.paste(text: input)
-                _ = self.state.sendKey(.enter)
+                _ = self.paste(input)
+                try? await Task.sleep(for: .milliseconds(300))
+                self.mirror.sendInput(Data("\r".utf8))
             }
             try? await Task.sleep(for: .seconds(3))
             let text = self?.session.readViewportText() ?? "<no surface attached>"
             try? text.write(toFile: path, atomically: true, encoding: .utf8)
-            // Not from inside this main-actor job: quitting waits for work
-            // that needs the main thread.
             AppDelegate.performOnMainRunLoop { NSApp.terminate(nil) }
         }
+    }
+}
+
+/// ⌘V goes to tmux (`paste-buffer -p`) instead of Ghostty's local paste:
+/// the local mirror cannot know whether the remote program enabled
+/// bracketed paste before the view was opened.
+final class PasteInterceptingTerminalView: AppTerminalView {
+    var onPaste: ((String) -> Bool)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "v",
+           window?.firstResponder === self
+        {
+            if let text = NSPasteboard.general.string(forType: .string) {
+                _ = onPaste?(text)
+            }
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 
 /// Thread-safe switch read on the terminal's write path.
 final class InputGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var open = true
+    private var live = false
+    private var closed = false
     private var selected = true
-    private var sawOutput = false
 
-    var isOpen: Bool { lock.withLock { open && selected } }
+    var isOpen: Bool { lock.withLock { live && !closed && selected } }
+
+    func markLive() {
+        lock.withLock { live = true }
+    }
 
     func setSelected(_ value: Bool) {
         lock.withLock { selected = value }
     }
 
     func close() {
-        lock.withLock { open = false }
-    }
-
-    /// True exactly once, for the first output chunk.
-    func claimFirstOutput() -> Bool {
-        lock.withLock {
-            defer { sawOutput = true }
-            return !sawOutput
-        }
+        lock.withLock { closed = true }
     }
 }

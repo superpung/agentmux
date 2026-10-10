@@ -171,9 +171,7 @@ final class AppModel {
                snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)
             {
                 pendingOpen = nil
-                selection = ref
-                openTerminal(ref)
-                terminal(for: ref)?.setActive(true)
+                select(ref)
             }
         case let .failure(failure):
             state.lastFailure = failure
@@ -219,36 +217,42 @@ final class AppModel {
 
     // MARK: Selection and terminals
 
+    /// Selecting a pane on an attachable target opens its mirror at once,
+    /// as a Mac agent console does; mirroring changes nothing shared in tmux.
     func select(_ ref: PaneRef) {
         selection = ref
+        if terminals[ref] == nil, state(ref.targetID)?.target.access.allowsAttach == true {
+            openTerminal(ref)
+        }
+        for terminal in terminals.values {
+            terminal.setActive(terminal.ref == ref)
+        }
     }
-
 
     func terminal(for ref: PaneRef) -> PaneTerminal? {
         terminals[ref]
     }
 
     func openTerminal(_ ref: PaneRef) {
-        guard terminals[ref] == nil, let state = state(ref.targetID) else { return }
+        guard terminals[ref] == nil, let state = state(ref.targetID),
+              let sessionID = state.snapshot?.memberships.first(where: { $0.paneID == ref.paneID })?.sessionID
+        else { return }
         do {
-            terminals[ref] = try PaneTerminal(ref: ref, host: state.host, target: state.target)
+            terminals[ref] = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
         } catch {
             state.lastFailure = RemoteFailure(.remoteCommandFailed, detail: "\(error)")
         }
     }
 
-    /// Releases this view's tmux client and the local connection. Never
-    /// touches the pane.
+    /// Ends this view's mirror. The pane and its programs keep running.
     func closeTerminal(_ ref: PaneRef) {
-        guard let terminal = terminals.removeValue(forKey: ref) else { return }
-        Task { await terminal.close() }
+        terminals.removeValue(forKey: ref)?.close()
     }
 
-    /// Stops input on every view and returns their connections so they can
-    /// be released off the main actor while the app quits.
-    func detachAllForQuit() -> [RemoteTerminal] {
-        let open = terminals.values.map { $0.detachForQuit() }
+    /// Closes every mirror. Each control client leaves when its input
+    /// closes, so quitting right after is safe.
+    func closeAllTerminals() {
+        terminals.values.forEach { $0.close() }
         terminals.removeAll()
-        return open
     }
 }

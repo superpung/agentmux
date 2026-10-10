@@ -56,35 +56,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Quitting releases this app's own tmux clients and connections, and
-    /// nothing else. Gives up after a few seconds so an unreachable host
-    /// cannot block quitting; leftovers are released on the next connect.
-    ///
-    /// The release runs off the main actor and the reply goes through the
-    /// main run loop, because AppKit waits for the reply in a nested event
-    /// loop that may be running inside a main-actor job.
+    /// Quitting ends this app's own control clients and nothing else: each
+    /// one detaches when its input closes, which also happens if the app
+    /// dies. Tagged leftovers are released on the next connect.
     @MainActor
     func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
-        guard let model else { return .terminateNow }
-        model.stopPolling()
-        let remotes = model.detachAllForQuit()
-        guard !remotes.isEmpty else { return .terminateNow }
-        Task.detached {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    await withTaskGroup(of: Void.self) { closes in
-                        for remote in remotes {
-                            closes.addTask { _ = await remote.close() }
-                        }
-                    }
-                }
-                group.addTask { try? await Task.sleep(for: .seconds(5)) }
-                await group.next()
-                group.cancelAll()
-            }
-            AppDelegate.performOnMainRunLoop { NSApp.reply(toApplicationShouldTerminate: true) }
-        }
-        return .terminateLater
+        model?.stopPolling()
+        model?.closeAllTerminals()
+        return .terminateNow
     }
 
     /// Runs `block` on the main thread from the run loop (in every common

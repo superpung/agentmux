@@ -15,6 +15,12 @@ enum GhosttyRuntime {
             builder.withFontThicken(false)
             builder.withCursorStyle(.block)
             builder.withCursorStyleBlink(true)
+            // No padding inside the surface: the view is sized to exactly the
+            // remote pane's grid, and SwiftUI adds the margins.
+            builder.withWindowPaddingX(0)
+            builder.withWindowPaddingY(0)
+            // ⌘V is handled by PasteInterceptingTerminalView (paste through tmux).
+            builder.withCustom("keybind", "super+v=unbind")
             // Option as Meta, for readline chords in shells and agent TUIs.
             builder.withCustom("macos-option-as-alt", "true")
             builder.withCustom("copy-on-select", "clipboard")
