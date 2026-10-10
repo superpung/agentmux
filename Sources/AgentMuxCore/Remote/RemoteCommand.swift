@@ -83,6 +83,25 @@ public enum RemoteCommand {
         return ShellQuote.command(dockerExec(docker, interactiveTTY: true, environment: environment) + tmux)
     }
 
+    /// A tmux control-mode client for one session, without a tty. It never
+    /// sizes windows (`ignore-size`), tmux pauses a pane's output instead of
+    /// buffering without bound when the client falls behind (`pause-after`),
+    /// and it exits when stdin closes.
+    public static func controlAttach(
+        in context: ExecutionContext,
+        session: String,
+        clientTag: String,
+        pauseAfterSeconds: Int
+    ) -> String {
+        let tmux = context.tmux.argv + [
+            "-C", "attach-session", "-E", "-f", "ignore-size,pause-after=\(pauseAfterSeconds)", "-t", session,
+        ]
+        guard let docker = context.container else {
+            return ShellQuote.command(["env", "\(clientTagVariable)=\(clientTag)"] + tmux)
+        }
+        return ShellQuote.command(dockerExec(docker, interactiveTTY: false, environment: [clientTagVariable: clientTag]) + tmux)
+    }
+
     static func dockerExec(_ docker: DockerExec, interactiveTTY: Bool, environment: [String: String]) -> [String] {
         var argv = ["docker", "exec", interactiveTTY ? "-it" : "-i"]
         if let user = docker.user {
