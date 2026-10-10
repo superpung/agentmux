@@ -1,387 +1,190 @@
-// Layout and row design adapted from a Mac agent console's SidebarView
-// (a Mac agent console, an upstream reference, a noncommercial license;
-// reused for personal, non-distributed use).
 import AgentMuxCore
 import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
-    @Binding var collapsed: Bool
-    var width: CGFloat
-    @State private var spacesExpanded = true
-    @State private var agentsExpanded = true
-    @State private var terminalsExpanded = false
-    @State private var deviceButtonHovered = false
+    @Binding var selection: PaneRef?
+    @State private var query = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Titlebar strip: traffic lights on the left, collapse toggle on the right.
-            HStack {
-                Spacer()
-                TitlebarIconButton(systemName: "sidebar.left", help: "Hide Sidebar (⌘B)") {
-                    collapsed = true
+        List(selection: $selection) {
+            if agentSpaces.isEmpty, filteredPanes.isEmpty {
+                emptyRow
+            }
+            ForEach(agentSpaces, id: \.space) { group in
+                Section(group.label) {
+                    ForEach(group.agents) { agent in
+                        AgentRow(entry: agent, showDevice: model.showsAgentDeviceBadge)
+                            .tag(agent.ref)
+                    }
                 }
             }
-            .padding(.horizontal, 10)
-            .frame(height: TitlebarMetrics.height)
-            .windowTitlebarInteraction()
-
-            Spacer().frame(height: 8)
-
-            VStack(spacing: 1) {
-                actionRow(icon: "magnifyingglass", label: "Search", shortcut: "⌘K") {
-                    model.showSearch = true
+            if !filteredPanes.isEmpty {
+                Section("Terminals") {
+                    ForEach(filteredPanes) { pane in
+                        PaneRow(entry: pane, showDevice: model.showsPaneDeviceBadge)
+                            .tag(pane.ref)
+                    }
                 }
-                actionRow(icon: "arrow.clockwise", label: "Refresh", shortcut: "⌘R") {
+            }
+        }
+        .searchable(text: $query, placement: .sidebar, prompt: "Search agents")
+        .navigationTitle("AgentMux")
+        .toolbar {
+            ToolbarItem {
+                Button {
                     model.refreshAll()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .help("Refresh all targets")
             }
-            .padding(.horizontal, 10)
-
-            Spacer().frame(height: 10)
-
-            ScrollView {
-                VStack(spacing: 1) {
-                    groupHeader("Spaces", expanded: $spacesExpanded)
-                    if spacesExpanded {
-                        allSpacesRow
-                        ForEach(model.spaceEntries) { entry in
-                            SpaceRowView(entry: entry)
-                        }
-                    }
-                    Spacer().frame(height: 10)
-
-                    groupHeader("Agents", expanded: $agentsExpanded)
-                    if agentsExpanded {
-                        let agents = model.agentEntries
-                        if agents.isEmpty {
-                            Text(verbatim: emptyAgentsHint)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Theme.textGhost)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
-                        }
-                        ForEach(agents) { entry in
-                            AgentRowView(entry: entry)
-                        }
-                    }
-                    Spacer().frame(height: 10)
-
-                    let panes = model.paneEntries
-                    if !panes.isEmpty {
-                        groupHeader("Terminals", expanded: $terminalsExpanded, count: panes.count)
-                        if terminalsExpanded {
-                            ForEach(panes) { entry in
-                                PaneRowView(entry: entry)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 10)
-            }
-            .clipped()
-
-            Spacer(minLength: 0)
-            footer
         }
-        .frame(width: width)
-        .background(VisualEffectView(material: .sidebar).ignoresSafeArea())
+        .safeAreaInset(edge: .bottom) { StatusFooter() }
     }
 
-    private var emptyAgentsHint: String {
+    // MARK: Filtered data
+
+    private struct SpaceGroup: Hashable {
+        var space: SpaceKey
+        var label: String
+        var agents: [AgentEntry]
+    }
+
+    private func matches(_ haystack: String) -> Bool {
+        let terms = query.lowercased().split(separator: " ")
+        guard !terms.isEmpty else { return true }
+        let lower = haystack.lowercased()
+        return terms.allSatisfy { lower.contains($0) }
+    }
+
+    private var agentSpaces: [SpaceGroup] {
+        var order: [SpaceKey] = []
+        var grouped: [SpaceKey: [AgentEntry]] = [:]
+        for agent in model.agentEntries where matches("\(agent.title) \(agent.kind.label) \(agent.space.path) \(agent.device.name)") {
+            if grouped[agent.space] == nil { order.append(agent.space) }
+            grouped[agent.space, default: []].append(agent)
+        }
+        return order.map { SpaceGroup(space: $0, label: SpaceLabel.label($0.path), agents: grouped[$0] ?? []) }
+    }
+
+    private var filteredPanes: [PaneEntry] {
+        model.paneEntries.filter { matches("\($0.title) \($0.command) \($0.space.path) \($0.device.name)") }
+    }
+
+    private var emptyRow: some View {
+        let text: String
         if let failure = model.targets.compactMap(\.lastFailure).first, model.targets.allSatisfy({ $0.snapshot == nil }) {
-            return failure.kind.rawValue
+            text = failure.kind.rawValue
+        } else if model.targets.contains(where: { $0.snapshot == nil }) {
+            text = "Connecting…"
+        } else {
+            text = query.isEmpty ? "No agents found" : "No matches"
         }
-        return model.targets.contains { $0.snapshot == nil } ? "Connecting…" : "No agents"
-    }
-
-    private func actionRow(icon: String, label: LocalizedStringKey, shortcut: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 20, height: 20)
-                Text(label)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                Spacer()
-                Text(shortcut)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textGhost)
-            }
-            .padding(.horizontal, 4)
-            .frame(height: 32)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SidebarRowButtonStyle())
-        .focusEffectDisabled()
-    }
-
-    private func groupHeader(_ title: LocalizedStringKey, expanded: Binding<Bool>, count: Int? = nil) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) { expanded.wrappedValue.toggle() }
-        } label: {
-            HStack(spacing: 5) {
-                Text(title)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Theme.textTertiary)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Theme.textGhost)
-                    .rotationEffect(.degrees(expanded.wrappedValue ? 90 : 0))
-                Spacer(minLength: 0)
-                if let count {
-                    Text("\(count)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textGhost)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .padding(.horizontal, 8)
-        .frame(height: 28)
-    }
-
-    private var allSpacesRow: some View {
-        let selected = model.spaceFilter == nil
-        return Button {
-            model.spaceFilter = nil
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(selected ? Theme.textSecondary : Theme.textTertiary)
-                Text("All Spaces")
-                    .font(.system(size: 13))
-                    .foregroundStyle(selected ? Theme.text : Theme.textSecondary)
-                Spacer()
-                Text("\(model.scopeAgentCount)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textGhost)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SidebarRowButtonStyle(selected: selected))
-        .focusEffectDisabled()
-    }
-
-    // MARK: Footer (device scope)
-
-    private var footer: some View {
-        HStack(spacing: 6) {
-            Button {
-                model.showDevicePanel.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    if let device = model.devices.first(where: { $0.id == model.deviceFilter }) {
-                        DeviceIcon(osID: device.osID, size: 10)
-                            .foregroundStyle(Theme.textSecondary)
-                        Text(verbatim: device.name)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(Theme.text)
-                    } else {
-                        Image(systemName: "square.stack.3d.up")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Theme.textSecondary)
-                        Text("All Devices")
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(Theme.text)
-                    }
-                    Circle()
-                        .fill(connectionDotColor)
-                        .frame(width: 6, height: 6)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundStyle(Theme.textGhost)
-                }
-                .padding(.horizontal, 8)
-                .frame(height: 28)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .focusEffectDisabled()
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(deviceButtonHovered || model.showDevicePanel
-                        ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(Theme.itemWash))
-            )
-            .onHover { deviceButtonHovered = $0 }
-
-            Spacer()
-        }
-        .padding(.horizontal, 10)
-        .frame(height: SidebarFooterMetrics.deviceSwitcherHeight)
-    }
-
-    /// Green when every target in scope is online, red when any failed.
-    private var connectionDotColor: Color {
-        let scoped = model.targets.filter { model.deviceFilter == nil || $0.id == model.deviceFilter }
-        if scoped.contains(where: { $0.lastFailure != nil }) { return Theme.danger }
-        if scoped.allSatisfy(\.isOnline) { return Theme.success }
-        return Theme.warning
+        return Text(text).foregroundStyle(.secondary)
     }
 }
 
 // MARK: - Rows
 
-private struct SpaceRowView: View {
-    @Environment(AppModel.self) private var model
-    let entry: SpaceEntry
-    @State private var hovered = false
-
-    var body: some View {
-        let selected = model.spaceFilter == entry.key
-        Button {
-            model.spaceFilter = selected ? nil : entry.key
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(selected ? Theme.textSecondary : Theme.textTertiary)
-                Text(verbatim: entry.label)
-                    .font(.system(size: 13))
-                    .foregroundStyle(selected ? Theme.text : Theme.textSecondary)
-                    .lineLimit(1)
-                Spacer()
-                if let attention = entry.attention {
-                    AgentStatusGlyph(activity: attention)
-                }
-                if model.showsRowDeviceBadges {
-                    DeviceChip(device: entry.device)
-                }
-                Text("\(entry.agentCount)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textGhost)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(selected || hovered ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(.clear))
-            )
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .onHover { hovered = $0 }
-        .help(Text(verbatim: entry.key.path))
-    }
-}
-
-private struct AgentRowView: View {
-    @Environment(AppModel.self) private var model
+private struct AgentRow: View {
     let entry: AgentEntry
-    @State private var hovered = false
+    let showDevice: Bool
 
     var body: some View {
-        let selected = model.selection == entry.ref
-        Button {
-            model.select(entry.ref)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(verbatim: entry.title)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    AgentStatusGlyph(activity: entry.activity)
-                }
-                HStack(spacing: 5) {
-                    AgentKindBadge(kind: entry.kind)
-                    Text("·")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textGhost)
-                    Image(systemName: "folder")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(Theme.textTertiary)
-                    Text(verbatim: entry.spaceLabel)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if entry.activity.needsAttention {
-                        Text("needs input")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.warning)
-                    }
-                    if model.showsRowDeviceBadges {
-                        DeviceChip(device: entry.device)
+        HStack(spacing: 8) {
+            agentIcon
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.title)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(entry.kind.label)
+                    if showDevice {
+                        Text("·")
+                        Text(entry.device.name)
                     }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .frame(minHeight: 51)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(selected || hovered ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(.clear))
-            )
+            Spacer(minLength: 0)
+            AgentStatusGlyph(activity: entry.activity)
         }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .onHover { hovered = $0 }
-        .help(Text(verbatim: "\(entry.location) · \(entry.space.path)"))
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder private var agentIcon: some View {
+        if let resource = BrandIconLoader.agentIcon(for: entry.kind) {
+            BrandIcon(resource: resource, size: 15)
+        } else {
+            Image(systemName: "terminal")
+        }
     }
 }
 
-private struct PaneRowView: View {
-    @Environment(AppModel.self) private var model
+private struct PaneRow: View {
     let entry: PaneEntry
-    @State private var hovered = false
+    let showDevice: Bool
 
     var body: some View {
-        let selected = model.selection == entry.ref
-        Button {
-            model.select(entry.ref)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary)
-                    Text(verbatim: entry.title)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Text(verbatim: entry.location)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Theme.textGhost)
-                        .lineLimit(1)
-                }
-                HStack(spacing: 5) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(Theme.textTertiary)
-                    Text(verbatim: entry.spaceLabel)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if model.showsRowDeviceBadges {
-                        DeviceChip(device: entry.device)
-                    }
-                }
+        HStack(spacing: 8) {
+            Image(systemName: "terminal")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.title)
+                    .lineLimit(1)
+                Text(showDevice ? "\(entry.command) · \(entry.device.name)" : entry.command)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .frame(height: 51)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(selected || hovered ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(.clear))
-            )
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .onHover { hovered = $0 }
-        .help(Text(verbatim: entry.space.path))
+        .padding(.vertical, 2)
+    }
+}
+
+/// Connection summary pinned to the bottom of the sidebar.
+private struct StatusFooter: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 7, height: 7)
+                Text(statusText(now: context.date))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(.bar)
+        }
+    }
+
+    private var dotColor: Color {
+        if model.targets.contains(where: { $0.lastFailure != nil }) { return .red }
+        if model.targets.allSatisfy(\.isOnline) { return .green }
+        return .orange
+    }
+
+    private func statusText(now: Date) -> String {
+        if let failure = model.targets.compactMap(\.lastFailure).first,
+           model.targets.allSatisfy({ $0.snapshot == nil })
+        {
+            return failure.kind.rawValue
+        }
+        let newest = model.targets.compactMap(\.lastSuccess).max()
+        guard let newest else { return "Connecting…" }
+        let seconds = max(0, Int(now.timeIntervalSince(newest)))
+        let ago = seconds < 60 ? "\(seconds)s ago" : "\(seconds / 60)m ago"
+        return "\(model.scopeAgentCount) agents · updated \(ago)"
     }
 }

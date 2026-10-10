@@ -7,7 +7,7 @@ struct AgentMuxApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
-        Window("AgentMux", id: "main") {
+        WindowGroup {
             RootView()
                 .environment(model)
                 .onAppear {
@@ -15,12 +15,13 @@ struct AgentMuxApp: App {
                     model.startPolling()
                 }
         }
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unified(showsTitle: false))
+        .defaultSize(width: 1100, height: 720)
         .commands {
+            SidebarCommands()
             CommandGroup(after: .toolbar) {
-                Button("Refresh All") { model.refreshAll() }
-                    .keyboardShortcut("r", modifiers: [.command])
+                Button("Refresh") { model.refreshAll() }
+                    .keyboardShortcut("r", modifiers: .command)
+                Divider()
             }
         }
     }
@@ -33,23 +34,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Needed when launched as a bare executable rather than from a bundle.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        scheduleSnapshotIfRequested()
-    }
-
-    /// AGENTMUX_SNAPSHOT=<png path>: after the first refreshes, render the
-    /// window's content into a PNG and quit (layout checks without a
-    /// screen-recording permission; Metal and blur layers come out blank).
-    private func scheduleSnapshotIfRequested() {
-        guard let path = ProcessInfo.processInfo.environment["AGENTMUX_SNAPSHOT"] else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            if let window = NSApp.windows.first(where: { $0.isVisible }), let view = window.contentView,
-               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-            {
-                view.cacheDisplay(in: view.bounds, to: rep)
-                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
-            }
-            AppDelegate.performOnMainRunLoop { NSApp.terminate(nil) }
-        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {

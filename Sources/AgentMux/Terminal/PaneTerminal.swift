@@ -17,14 +17,23 @@ final class PaneTerminal {
         case stale(String)
     }
 
+    static let baseFontSize: CGFloat = 13
+
     let ref: PaneRef
     let state = TerminalViewState(controller: GhosttyRuntime.controller)
     private(set) var phase: Phase = .connecting
-    /// The remote pane's size; the local grid is kept at exactly this size.
+    /// The remote pane's size. The font is scaled so the whole grid fits.
     private(set) var geometry: PaneMirror.Geometry?
+    /// Font size chosen so `geometry` fits the available area, in points.
+    private(set) var fittedFontSize: CGFloat = PaneTerminal.baseFontSize
     private let mirror: PaneMirror
     private let session: InMemoryTerminalSession
     private let gate: InputGate
+
+    /// Cell size at the base font, in points, measured once from the surface.
+    @ObservationIgnored private var baseCellPoints: CGSize?
+    @ObservationIgnored private var availableSize: CGSize = .zero
+    @ObservationIgnored private var resyncTask: Task<Void, Never>?
 
     var clientTag: String { mirror.clientTag }
 
@@ -50,12 +59,18 @@ final class PaneTerminal {
             view.onPaste = { text in self?.paste(text) ?? false }
             return view
         }
-        state.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
+        var options = TerminalSurfaceOptions(backend: .inMemory(session))
+        // Pin the starting font so the measured base cell size is deterministic.
+        options.fontSize = Float(PaneTerminal.baseFontSize)
+        state.configuration = options
 
         try mirror.start(
             onTerminalBytes: { data in session.receive(data) },
             onGeometry: { [weak self] geometry in
-                Task { @MainActor in self?.geometry = geometry }
+                Task { @MainActor in
+                    self?.geometry = geometry
+                    self?.recomputeFont()
+                }
             },
             onEnded: { [weak self] reason in
                 gate.close()
@@ -73,6 +88,42 @@ final class PaneTerminal {
         case .live: "Mirroring · input goes to this pane only"
         case let .ended(reason): "Disconnected: \(reason) · input disabled"
         case let .stale(reason): "Stale: \(reason) · input disabled"
+        }
+    }
+
+    /// Called by the view with its available size and the surface's current
+    /// cell metrics. Learns the base cell size (before any font override),
+    /// then scales the font so the whole remote grid fits.
+    func updateLayout(available: CGSize, cellPixels: CGSize?, scale: CGFloat) {
+        availableSize = available
+        if baseCellPoints == nil, fittedFontSize == PaneTerminal.baseFontSize,
+           let cellPixels, cellPixels.width > 0, cellPixels.height > 0, scale > 0
+        {
+            baseCellPoints = CGSize(width: cellPixels.width / scale, height: cellPixels.height / scale)
+        }
+        recomputeFont()
+    }
+
+    /// Scales the font down so `geometry` columns × rows fit `availableSize`.
+    /// Only shrinks: a small pane keeps the base font and sits top-left.
+    private func recomputeFont() {
+        guard let geometry, let cell = baseCellPoints,
+              availableSize.width > 1, availableSize.height > 1,
+              geometry.columns > 0, geometry.rows > 0 else { return }
+        let base = PaneTerminal.baseFontSize
+        let fitWidth = availableSize.width / (CGFloat(geometry.columns) * cell.width)
+        let fitHeight = availableSize.height / (CGFloat(geometry.rows) * cell.height)
+        let scale = min(1, fitWidth, fitHeight)
+        // Half-point steps so small size changes do not thrash the surface.
+        let font = max(4, (base * scale * 2).rounded(.down) / 2)
+        guard abs(font - fittedFontSize) >= 0.25 else { return }
+        fittedFontSize = font
+        state.configuration.fontSize = Float(font)
+        // Changing the font rebuilds the surface; redraw once it settles.
+        resyncTask?.cancel()
+        resyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(140))
+            self?.mirror.resync()
         }
     }
 
@@ -101,6 +152,7 @@ final class PaneTerminal {
 
     func close() {
         gate.close()
+        resyncTask?.cancel()
         mirror.close()
     }
 

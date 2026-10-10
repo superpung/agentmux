@@ -154,9 +154,14 @@ extension AppModel {
 
     var scopeAgentCount: Int { allAgentEntries.count }
 
-    /// Whether rows need a device chip: only when more than one target is shown.
-    var showsRowDeviceBadges: Bool {
-        deviceFilter == nil && targets.count > 1
+    /// The device name is shown on a row only when that kind of row actually
+    /// spans more than one device; otherwise it is noise on every row.
+    var showsAgentDeviceBadge: Bool {
+        deviceFilter == nil && Set(allAgentEntries.map(\.device.name)).count > 1
+    }
+
+    var showsPaneDeviceBadge: Bool {
+        deviceFilter == nil && Set(paneEntries.map(\.device.name)).count > 1
     }
 
     func agentEntry(_ ref: PaneRef) -> AgentEntry? {
