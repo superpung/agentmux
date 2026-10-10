@@ -8,6 +8,8 @@ import Foundation
 //   agentmux-cli attach-test <target-id> <tmux-target> [--seconds N] [--type TEXT] [--leak] [--then-select PANE]
 //                                                attach like the app does (test targets only)
 //   agentmux-cli release-orphans <target-id>     release every AgentMux-tagged client (test targets only)
+//   agentmux-cli mirror-test <target-id> <session-id> <pane-id> [--type TEXT] [--paste TEXT]
+//                                                mirror a pane over control mode, optionally typing
 //
 // Global option: --config path (default config/targets.local.json5)
 
@@ -112,6 +114,40 @@ case "attach-test":
         print("release: \(await terminal.close())")
     }
     try await Task.sleep(for: .seconds(1))
+
+case "mirror-test":
+    // mirror-test <target-id> <session-id> <pane-id> [--type TEXT] [--paste TEXT] [--seconds N]
+    let (host, target) = target(rest.first)
+    guard rest.count >= 3 else { fail("mirror-test <target-id> <session-id> <pane-id> [--type TEXT] [--paste TEXT] [--seconds N]", code: 2) }
+    let mirror: PaneMirror
+    do {
+        mirror = try PaneMirror(host: host, target: target, session: rest[1], paneID: rest[2])
+    } catch {
+        fail("cannot mirror: \(error)")
+    }
+    let received = ByteCounter()
+    let first = ByteCounter()
+    try mirror.start(
+        onTerminalBytes: { data in
+            if first.value == 0 { first.add(data.count) } else { received.add(data.count) }
+        },
+        onGeometry: { print("geometry \($0.columns)x\($0.rows)") },
+        onEnded: { print("ended: \($0)") }
+    )
+    print("mirror client tag \(mirror.clientTag)")
+    try await Task.sleep(for: .seconds(2))
+    print("initial screen \(first.value) bytes")
+    if let text = option("--type", in: rest) {
+        mirror.sendInput(Data((text + "\r").utf8))
+        print("typed \(text.debugDescription) + CR")
+    }
+    if let text = option("--paste", in: rest) {
+        print("paste accepted: \(mirror.paste(text))")
+    }
+    try await Task.sleep(for: .seconds(option("--seconds", in: rest).flatMap(Double.init) ?? 3))
+    print("live output \(received.value) bytes")
+    mirror.close()
+    try await Task.sleep(for: .seconds(2))
 
 case "release-orphans":
     let (host, target) = target(rest.first)
