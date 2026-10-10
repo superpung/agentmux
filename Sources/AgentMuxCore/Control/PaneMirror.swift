@@ -24,6 +24,10 @@ public final class PaneMirror: @unchecked Sendable {
     private var live = false
     private var ended = false
     private var geometry: Geometry?
+    private var requestedSize: Geometry?
+    private var pendingSize: Geometry?
+    private var sizeGeneration = 0
+    private var didForceSize = false
     private var silenced = Set<String>()
     private var onTerminalBytes: (@Sendable (Data) -> Void)?
     private var onGeometry: (@Sendable (Geometry) -> Void)?
@@ -90,14 +94,54 @@ public final class PaneMirror: @unchecked Sendable {
         return true
     }
 
+    /// Drives the remote window to `columns`×`rows` so the pane fills the
+    /// local view. `refresh-client -C` is only a soft request that other
+    /// active clients override, so this forces the size with `resize-window`
+    /// (which sets the window to `manual`); `close()` restores `latest`.
+    /// Debounced, because a window drag produces a stream of sizes. tmux
+    /// reflows the pane and sends a layout change, which triggers a resync.
+    public func setViewportSize(columns: Int, rows: Int) {
+        guard columns > 0, rows > 0 else { return }
+        client.queue.async { [self] in
+            guard !ended, requestedSize != Geometry(columns: columns, rows: rows) else { return }
+            pendingSize = Geometry(columns: columns, rows: rows)
+            sizeGeneration += 1
+            let generation = sizeGeneration
+            client.queue.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                self?.flushSize(generation)
+            }
+        }
+    }
+
+    private func flushSize(_ generation: Int) {
+        guard !ended, generation == sizeGeneration, let size = pendingSize, size != requestedSize,
+              let target = TmuxQuote.id(paneID) else { return }
+        requestedSize = size
+        didForceSize = true
+        client.send("resize-window -t \(target) -x \(size.columns) -y \(size.rows)") { _ in }
+    }
+
+    /// Restores the window to follow its clients again, undoing the forced
+    /// manual size. Best effort: a crash leaves the window manual until it is
+    /// viewed and closed again.
+    private func restoreWindowSize() {
+        guard didForceSize, let target = TmuxQuote.id(paneID) else { return }
+        // Only reset the option: it recomputes the size from the clients.
+        // A `resize-window -A` here would re-set the option back to manual.
+        client.send("set-window-option -t \(target) window-size latest") { _ in }
+    }
+
     public func close() {
         client.queue.async { [self] in
+            guard !ended else { return }
+            restoreWindowSize()
             ended = true
             onTerminalBytes = nil
             onGeometry = nil
             onEnded = nil
         }
-        client.close()
+        // Give the restore commands a moment to flush before stdin closes.
+        client.queue.asyncAfter(deadline: .now() + 0.3) { [client] in client.close() }
     }
 
     // MARK: - Queue-confined

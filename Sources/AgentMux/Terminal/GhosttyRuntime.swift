@@ -1,8 +1,10 @@
 // Theme and font settings adapted from a Mac agent console's GhosttyRuntime
 // (a Mac agent console, an upstream reference, a noncommercial license;
 // reused for personal, non-distributed use).
+import AppKit
 import Foundation
 import GhosttyTerminal
+import SwiftUI
 
 /// The one Ghostty app object every surface shares. The theme carries both
 /// palettes; Ghostty switches with the view's effective appearance.
@@ -32,6 +34,16 @@ enum GhosttyRuntime {
 
     static let darkBackground = "#101012"
     static let lightBackground = "#FFFFFF"
+
+    /// The terminal background, for the detail pane behind a centred surface so
+    /// the letterbox margins read as terminal padding.
+    static var terminalBackgroundColor: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return dark ? NSColor(srgbRed: 0x10 / 255, green: 0x10 / 255, blue: 0x12 / 255, alpha: 1)
+                : NSColor.white
+        })
+    }
 
     /// Apple Terminal's 16-color ANSI palette.
     static let darkPalette: [(Int, Int, Int)] = [

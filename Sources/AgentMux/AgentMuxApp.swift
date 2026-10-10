@@ -40,14 +40,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Quitting ends this app's own control clients and nothing else: each
-    /// one detaches when its input closes, which also happens if the app
-    /// dies. Tagged leftovers are released on the next connect.
+    /// Quitting detaches this app's own control clients and restores the
+    /// window sizes they forced. That restore is a server round-trip, so
+    /// terminate is deferred briefly to let it flush; the cap keeps quitting
+    /// from hanging on a slow host.
     @MainActor
     func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
         model?.stopPolling()
+        let hadTerminals = model?.hasOpenTerminals ?? false
         model?.closeAllTerminals()
-        return .terminateNow
+        guard hadTerminals else { return .terminateNow }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     /// Runs `block` on the main thread from the run loop (in every common

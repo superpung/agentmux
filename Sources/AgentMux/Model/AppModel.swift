@@ -254,6 +254,8 @@ final class AppModel {
         terminals[ref]
     }
 
+    var hasOpenTerminals: Bool { !terminals.isEmpty }
+
     func openTerminal(_ ref: PaneRef) {
         guard terminals[ref] == nil, let state = state(ref.targetID),
               let sessionID = state.snapshot?.memberships.first(where: { $0.paneID == ref.paneID })?.sessionID

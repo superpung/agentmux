@@ -60,3 +60,5 @@ Only results that were actually measured are recorded here. Concrete host addres
 | Paste of two lines into bash | One bracketed paste, not executed line by line |
 | Close mirror / quit app | No client and no buffer left |
 | App mirror of a 50×29 pane | Local grid exactly 50×29 |
+| App resizes remote window to fill the view | `resize-window -x -y` forces the pane to the view's grid (even with the user's other clients attached) |
+| Close / quit restores window-size | `set-window-option window-size latest` on close; `resize-window -A` must NOT follow it (it re-sets manual) |

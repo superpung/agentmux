@@ -7,7 +7,7 @@ struct DetailView: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .textBackgroundColor)
+            GhosttyRuntime.terminalBackgroundColor
             // Every open terminal stays mounted so its screen survives
             // switching; only the selected one is visible and live.
             ForEach(Array(model.terminals.values), id: \.ref) { terminal in
@@ -23,7 +23,6 @@ struct DetailView: View {
                 EmptyStateView()
             }
         }
-        .ignoresSafeArea()
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         .toolbar { toolbarContent }
@@ -75,33 +74,13 @@ struct DetailView: View {
 /// area (a Metal layer ignores SwiftUI clipping, so it must not overflow).
 private struct MirroredSurfaceView: View {
     let terminal: PaneTerminal
-    // Observed directly so cell-metric changes (a font rebuild) re-run the fit;
-    // reaching surfaceSize through the Observable terminal would not republish.
-    @ObservedObject private var state: TerminalViewState
-    @Environment(\.displayScale) private var scale
-    @State private var available: CGSize = .zero
-
-    init(terminal: PaneTerminal) {
-        self.terminal = terminal
-        state = terminal.state
-    }
 
     var body: some View {
-        GeometryReader { geo in
-            TerminalSurfaceView(context: state)
-                .onAppear { available = geo.size; report() }
-                .onChange(of: geo.size) { _, size in available = size; report() }
-                .onChange(of: cellPixels) { _, _ in report() }
-        }
-    }
-
-    private var cellPixels: CGSize? {
-        guard let m = state.surfaceSize else { return nil }
-        return CGSize(width: CGFloat(m.cellWidthPixels), height: CGFloat(m.cellHeightPixels))
-    }
-
-    private func report() {
-        terminal.updateLayout(available: available, cellPixels: cellPixels, scale: scale)
+        // The surface fills the detail pane at a fixed font; its grid size
+        // drives the remote window size (see PaneTerminal), so the pane
+        // reflows to fill the view like a normal terminal.
+        TerminalSurfaceView(context: terminal.state)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
