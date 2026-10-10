@@ -45,9 +45,9 @@ final class PaneTerminal {
         self.session = session
         self.gate = gate
 
-        state.makePlatformView = {
+        state.makePlatformView = { [weak self] in
             let view = PasteInterceptingTerminalView(frame: .zero)
-            view.onPaste = { [weak self] text in self?.paste(text) ?? false }
+            view.onPaste = { text in self?.paste(text) ?? false }
             return view
         }
         state.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
