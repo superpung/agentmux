@@ -22,6 +22,7 @@ public enum InventoryProbe {
         tm() { "$T" \(flags) "$@"; }
         echo "@@begin 1 \(nonce)"
         echo "@@uid $(id -u 2>/dev/null)"
+        echo "@@os $(sed -n 's/^ID=//p' /etc/os-release 2>/dev/null | tr -d '"' | head -n 1)"
         if ! command -v "$T" >/dev/null 2>&1; then echo "@@error tmux-not-found"; echo "@@end \(nonce)"; exit 0; fi
         echo "@@tmux $("$T" -V 2>&1 | head -n 1)"
         if ! server=$(tm display-message -p '#{pid} #{start_time} #{socket_path}' 2>&1); then
@@ -102,6 +103,8 @@ public enum InventoryProbe {
             }
             if let rest = line.dropPrefix("@@uid ") {
                 snapshot.uid = Int(rest)
+            } else if let rest = line.dropPrefix("@@os ") {
+                snapshot.osID = rest.isEmpty ? nil : rest
             } else if let rest = line.dropPrefix("@@tmux ") {
                 snapshot.tmuxVersion = rest
             } else if let rest = line.dropPrefix("@@server ") {

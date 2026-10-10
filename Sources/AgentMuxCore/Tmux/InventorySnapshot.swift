@@ -77,6 +77,8 @@ public struct InventorySnapshot: Sendable, Equatable {
 
     public var container: Container?
     public var uid: Int?
+    /// `ID` from /etc/os-release, e.g. `ubuntu`.
+    public var osID: String?
     public var tmuxVersion: String?
     public var server: Server?
     public var sessions: [Session] = []

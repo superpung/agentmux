@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AttachError: Error, Equatable {
-    /// Development policy: `observe` targets are never attached to.
+    /// `observe` targets are never attached to.
     case targetIsObserveOnly(String)
 }
 
@@ -28,7 +28,7 @@ public final class RemoteTerminal: @unchecked Sendable {
         columns: UInt16,
         rows: UInt16
     ) throws {
-        guard target.access == .test else {
+        guard target.access.allowsAttach else {
             throw AttachError.targetIsObserveOnly(target.id)
         }
         let destination = try SSHDestination(host.sshDestination)

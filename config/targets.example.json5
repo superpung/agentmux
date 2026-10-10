@@ -31,8 +31,9 @@
       //   { mode: "path", value: "/tmp/x.sock" } `tmux -S /tmp/x.sock`
 
       // What development may do on this target:
-      //   "observe" = list containers / tmux / processes and read screens only; no attach, no input, nothing created
-      //   "test"    = additionally create tmux sessions named agentmux-test-*, attach and type in them, and delete only those afterwards
+      //   "observe"  = list containers / tmux / processes and read screens only; no attach, no input, nothing created
+      //   "interact" = additionally attach to existing panes and type into them; nothing is created or destroyed
+      //   "test"     = like "interact", and may create tmux sessions named agentmux-test-* and delete only those
       access: "observe",
 
       // Optional: Codex / Claude Code config directories (paths inside the container)

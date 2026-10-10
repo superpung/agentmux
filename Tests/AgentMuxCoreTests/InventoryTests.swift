@@ -253,3 +253,21 @@ arg -p
         #expect(throws: ConfigError.missingContainer(target: "a")) { try target.executionContext() }
     }
 }
+
+@Suite struct AgentTitleTests {
+    @Test(arguments: [
+        ("✳ demo-dev-v6", AgentKind.claudeCode, "demo-dev-v6"),
+        ("⠂ Fix login bug", .claudeCode, "Fix login bug"),
+        ("demo-dev-v5 | demo", .codex, "demo-dev-v5"),
+        ("#42 fix", .claudeCode, "#42 fix"),
+        ("ra-v2", .codex, "ra-v2"),
+    ])
+    func extractsTaskTitles(_ sample: (String, AgentKind, String)) {
+        #expect(AgentTitle.from(paneTitle: sample.0, kind: sample.1) == sample.2)
+    }
+
+    @Test(arguments: ["", "Claude Code", "✳ Claude Code", "  "])
+    func genericTitlesAreNil(_ title: String) {
+        #expect(AgentTitle.from(paneTitle: title, kind: .claudeCode) == nil)
+    }
+}

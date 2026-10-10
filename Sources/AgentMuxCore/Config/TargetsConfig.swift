@@ -55,8 +55,12 @@ public struct TargetConfig: Codable, Sendable, Equatable, Identifiable {
     public enum Access: String, Codable, Sendable {
         /// Read-only: list, ps, /proc reads. No attach, no input, nothing created.
         case observe
-        /// May attach, type and create `agentmux-test-*` sessions.
+        /// May attach and send input to existing panes. Creates and destroys nothing.
+        case interact
+        /// Like `interact`, and may also create and kill `agentmux-test-*` sessions.
         case test
+
+        public var allowsAttach: Bool { self != .observe }
     }
 
     public struct Socket: Codable, Sendable, Equatable {
@@ -77,6 +81,8 @@ public struct TargetConfig: Codable, Sendable, Equatable, Identifiable {
     }
 
     public var id: String
+    /// Name shown in the app; defaults to the container name.
+    public var displayName: String?
     public var hostId: String
     public var kind: Kind
     public var container: String?
