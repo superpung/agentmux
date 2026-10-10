@@ -7,7 +7,7 @@ import Observation
 /// Connects one Ghostty surface to one `RemoteTerminal`.
 @MainActor
 @Observable
-final class TerminalController {
+final class PaneTerminal {
     enum Phase: Equatable {
         case connecting
         case connected
@@ -18,7 +18,7 @@ final class TerminalController {
     }
 
     let ref: PaneRef
-    let state = TerminalViewState()
+    let state = TerminalViewState(controller: GhosttyRuntime.controller)
     private(set) var phase: Phase = .connecting
     private let remote: RemoteTerminal
     private let session: InMemoryTerminalSession
@@ -64,6 +64,15 @@ final class TerminalController {
         gate.setSelected(active)
         state.isSurfaceVisible = active
         if active { state.requestFocus() }
+    }
+
+    var phaseText: String {
+        switch phase {
+        case .connecting: "Connecting…"
+        case .connected: "Attached"
+        case let .ended(reason): "Disconnected: \(reason) · input disabled"
+        case let .stale(reason): "Stale: \(reason) · input disabled"
+        }
     }
 
     func markStale(reason: String) {

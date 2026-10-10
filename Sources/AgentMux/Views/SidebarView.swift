@@ -1,191 +1,387 @@
+// Layout and row design adapted from a Mac agent console's SidebarView
+// (a Mac agent console, an upstream reference, a noncommercial license;
+// reused for personal, non-distributed use).
 import AgentMuxCore
 import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Binding var collapsed: Bool
+    var width: CGFloat
+    @State private var spacesExpanded = true
+    @State private var agentsExpanded = true
+    @State private var terminalsExpanded = false
+    @State private var deviceButtonHovered = false
 
     var body: some View {
-        @Bindable var model = model
-        List(selection: $model.selection) {
-            Section("Agents") {
-                let rows = model.agentRows
-                if rows.isEmpty {
-                    Text("No agents found yet").foregroundStyle(.secondary)
-                }
-                ForEach(rows) { row in
-                    AgentRowView(row: row)
-                        .tag(row.ref)
-                }
-            }
-            ForEach(model.targets) { state in
-                Section {
-                    TargetTreeView(state: state)
-                } header: {
-                    TargetHeaderView(state: state)
+        VStack(spacing: 0) {
+            // Titlebar strip: traffic lights on the left, collapse toggle on the right.
+            HStack {
+                Spacer()
+                TitlebarIconButton(systemName: "sidebar.left", help: "Hide Sidebar (⌘B)") {
+                    collapsed = true
                 }
             }
-        }
-        .listStyle(.sidebar)
-    }
-}
+            .padding(.horizontal, 10)
+            .frame(height: TitlebarMetrics.height)
+            .windowTitlebarInteraction()
 
-struct AgentRowView: View {
-    let row: AgentRow
+            Spacer().frame(height: 8)
 
-    var body: some View {
-        HStack(spacing: 8) {
-            AgentBadge(kind: row.kind)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: row.location).lineLimit(1)
-                Text(verbatim: [row.targetID, row.configDirectory.map { ($0 as NSString).lastPathComponent }]
-                    .compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-    }
-}
-
-struct AgentBadge: View {
-    let kind: AgentKind
-
-    var body: some View {
-        Text(label)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
-            .foregroundStyle(color)
-    }
-
-    private var label: String {
-        switch kind {
-        case .codex: "Codex"
-        case .claudeCode: "Claude"
-        case .none: "shell"
-        case .unknown: "?"
-        }
-    }
-
-    private var color: Color {
-        switch kind {
-        case .codex: .blue
-        case .claudeCode: .orange
-        case .none, .unknown: .secondary
-        }
-    }
-}
-
-struct TargetHeaderView: View {
-    let state: TargetState
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(verbatim: state.target.id)
-            if let container = state.target.container {
-                Text(verbatim: "· \(container)").foregroundStyle(.secondary)
-            }
-            if state.target.access == .observe {
-                Text("observe").font(.caption2).foregroundStyle(.secondary)
-            }
-            Spacer()
-            FreshnessView(state: state)
-        }
-    }
-}
-
-/// Connection state in words, with the time of the last verification.
-struct FreshnessView: View {
-    let state: TargetState
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 4) {
-                if state.isRefreshing {
-                    ProgressView().controlSize(.mini)
+            VStack(spacing: 1) {
+                actionRow(icon: "magnifyingglass", label: "Search", shortcut: "⌘K") {
+                    model.showSearch = true
                 }
-                Text(verbatim: text(now: context.date))
-                    .font(.caption2)
-                    .foregroundStyle(state.lastFailure == nil ? Color.secondary : Color.red)
+                actionRow(icon: "arrow.clockwise", label: "Refresh", shortcut: "⌘R") {
+                    model.refreshAll()
+                }
             }
-        }
-    }
+            .padding(.horizontal, 10)
 
-    private func text(now: Date) -> String {
-        let verified = state.lastSuccess.map { "verified \(Self.ago($0, now: now))" }
-        if let failure = state.lastFailure {
-            return ["\(failure.kind.rawValue)", verified].compactMap { $0 }.joined(separator: " · ")
-        }
-        return verified ?? "connecting"
-    }
+            Spacer().frame(height: 10)
 
-    static func ago(_ date: Date, now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
-        return seconds < 60 ? "\(seconds)s ago" : "\(seconds / 60)m ago"
-    }
-}
-
-struct TargetTreeView: View {
-    let state: TargetState
-
-    var body: some View {
-        if let snapshot = state.snapshot {
-            if let failure = snapshot.failure {
-                Text(verbatim: "\(failure.kind.rawValue) \(failure.detail)").font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(snapshot.sessions) { session in
-                DisclosureGroup {
-                    let rows = snapshot.memberships.filter { $0.sessionID == session.id }
-                    ForEach(windowIDs(rows), id: \.self) { windowID in
-                        DisclosureGroup {
-                            ForEach(rows.filter { $0.windowID == windowID }, id: \.paneID) { row in
-                                if let pane = snapshot.pane(row.paneID), let ref = state.ref(for: pane.id) {
-                                    PaneRowView(pane: pane, row: row, detection: state.detections[pane.id])
-                                        .tag(ref)
-                                }
-                            }
-                        } label: {
-                            let window = snapshot.windows.first { $0.id == windowID }
-                            let index = rows.first { $0.windowID == windowID }?.windowIndex ?? 0
-                            Text(verbatim: "\(index): \(window?.name ?? windowID)").lineLimit(1)
+            ScrollView {
+                VStack(spacing: 1) {
+                    groupHeader("Spaces", expanded: $spacesExpanded)
+                    if spacesExpanded {
+                        allSpacesRow
+                        ForEach(model.spaceEntries) { entry in
+                            SpaceRowView(entry: entry)
                         }
                     }
-                } label: {
-                    Text(verbatim: session.name).lineLimit(1)
+                    Spacer().frame(height: 10)
+
+                    groupHeader("Agents", expanded: $agentsExpanded)
+                    if agentsExpanded {
+                        let agents = model.agentEntries
+                        if agents.isEmpty {
+                            Text(verbatim: emptyAgentsHint)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.textGhost)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                        }
+                        ForEach(agents) { entry in
+                            AgentRowView(entry: entry)
+                        }
+                    }
+                    Spacer().frame(height: 10)
+
+                    let panes = model.paneEntries
+                    if !panes.isEmpty {
+                        groupHeader("Terminals", expanded: $terminalsExpanded, count: panes.count)
+                        if terminalsExpanded {
+                            ForEach(panes) { entry in
+                                PaneRowView(entry: entry)
+                            }
+                        }
+                    }
                 }
+                .padding(.horizontal, 10)
             }
-        } else if let failure = state.lastFailure {
-            Text(verbatim: "\(failure.kind.rawValue) \(failure.detail)")
-                .font(.caption)
-                .foregroundStyle(.red)
-        } else {
-            Text("Connecting…").foregroundStyle(.secondary)
+            .clipped()
+
+            Spacer(minLength: 0)
+            footer
         }
+        .frame(width: width)
+        .background(VisualEffectView(material: .sidebar).ignoresSafeArea())
     }
 
-    private func windowIDs(_ rows: [InventorySnapshot.Membership]) -> [String] {
-        var seen = Set<String>()
-        return rows.map(\.windowID).filter { seen.insert($0).inserted }
+    private var emptyAgentsHint: String {
+        if let failure = model.targets.compactMap(\.lastFailure).first, model.targets.allSatisfy({ $0.snapshot == nil }) {
+            return failure.kind.rawValue
+        }
+        return model.targets.contains { $0.snapshot == nil } ? "Connecting…" : "No agents"
+    }
+
+    private func actionRow(icon: String, label: LocalizedStringKey, shortcut: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 20, height: 20)
+                Text(label)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textSecondary)
+                Spacer()
+                Text(shortcut)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textGhost)
+            }
+            .padding(.horizontal, 4)
+            .frame(height: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SidebarRowButtonStyle())
+        .focusEffectDisabled()
+    }
+
+    private func groupHeader(_ title: LocalizedStringKey, expanded: Binding<Bool>, count: Int? = nil) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { expanded.wrappedValue.toggle() }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.textGhost)
+                    .rotationEffect(.degrees(expanded.wrappedValue ? 90 : 0))
+                Spacer(minLength: 0)
+                if let count {
+                    Text("\(count)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textGhost)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+    }
+
+    private var allSpacesRow: some View {
+        let selected = model.spaceFilter == nil
+        return Button {
+            model.spaceFilter = nil
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(selected ? Theme.textSecondary : Theme.textTertiary)
+                Text("All Spaces")
+                    .font(.system(size: 13))
+                    .foregroundStyle(selected ? Theme.text : Theme.textSecondary)
+                Spacer()
+                Text("\(model.scopeAgentCount)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textGhost)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SidebarRowButtonStyle(selected: selected))
+        .focusEffectDisabled()
+    }
+
+    // MARK: Footer (device scope)
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Button {
+                model.showDevicePanel.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    if let device = model.devices.first(where: { $0.id == model.deviceFilter }) {
+                        DeviceIcon(osID: device.osID, size: 10)
+                            .foregroundStyle(Theme.textSecondary)
+                        Text(verbatim: device.name)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Theme.text)
+                    } else {
+                        Image(systemName: "square.stack.3d.up")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Theme.textSecondary)
+                        Text("All Devices")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Theme.text)
+                    }
+                    Circle()
+                        .fill(connectionDotColor)
+                        .frame(width: 6, height: 6)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Theme.textGhost)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(deviceButtonHovered || model.showDevicePanel
+                        ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(Theme.itemWash))
+            )
+            .onHover { deviceButtonHovered = $0 }
+
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .frame(height: SidebarFooterMetrics.deviceSwitcherHeight)
+    }
+
+    /// Green when every target in scope is online, red when any failed.
+    private var connectionDotColor: Color {
+        let scoped = model.targets.filter { model.deviceFilter == nil || $0.id == model.deviceFilter }
+        if scoped.contains(where: { $0.lastFailure != nil }) { return Theme.danger }
+        if scoped.allSatisfy(\.isOnline) { return Theme.success }
+        return Theme.warning
     }
 }
 
-struct PaneRowView: View {
-    let pane: InventorySnapshot.Pane
-    let row: InventorySnapshot.Membership
-    let detection: AgentDetection?
+// MARK: - Rows
+
+private struct SpaceRowView: View {
+    @Environment(AppModel.self) private var model
+    let entry: SpaceEntry
+    @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            if let detection, detection.kind == .codex || detection.kind == .claudeCode {
-                AgentBadge(kind: detection.kind)
+        let selected = model.spaceFilter == entry.key
+        Button {
+            model.spaceFilter = selected ? nil : entry.key
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(selected ? Theme.textSecondary : Theme.textTertiary)
+                Text(verbatim: entry.label)
+                    .font(.system(size: 13))
+                    .foregroundStyle(selected ? Theme.text : Theme.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                if let attention = entry.attention {
+                    AgentStatusGlyph(activity: attention)
+                }
+                if model.showsRowDeviceBadges {
+                    DeviceChip(device: entry.device)
+                }
+                Text("\(entry.agentCount)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textGhost)
             }
-            Text(verbatim: "\(row.paneIndex) \(pane.currentCommand)").lineLimit(1)
-            Text(verbatim: pane.id).font(.caption2).foregroundStyle(.tertiary)
-            if pane.dead {
-                Text("dead").font(.caption2).foregroundStyle(.red)
-            }
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(selected || hovered ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(.clear))
+            )
         }
-        .help(Text(verbatim: pane.currentPath))
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .onHover { hovered = $0 }
+        .help(Text(verbatim: entry.key.path))
+    }
+}
+
+private struct AgentRowView: View {
+    @Environment(AppModel.self) private var model
+    let entry: AgentEntry
+    @State private var hovered = false
+
+    var body: some View {
+        let selected = model.selection == entry.ref
+        Button {
+            model.select(entry.ref)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(verbatim: entry.title)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    AgentStatusGlyph(activity: entry.activity)
+                }
+                HStack(spacing: 5) {
+                    AgentKindBadge(kind: entry.kind)
+                    Text("·")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textGhost)
+                    Image(systemName: "folder")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text(verbatim: entry.spaceLabel)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if entry.activity.needsAttention {
+                        Text("needs input")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.warning)
+                    }
+                    if model.showsRowDeviceBadges {
+                        DeviceChip(device: entry.device)
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .frame(minHeight: 51)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(selected || hovered ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(.clear))
+            )
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .onHover { hovered = $0 }
+        .help(Text(verbatim: "\(entry.location) · \(entry.space.path)"))
+    }
+}
+
+private struct PaneRowView: View {
+    @Environment(AppModel.self) private var model
+    let entry: PaneEntry
+    @State private var hovered = false
+
+    var body: some View {
+        let selected = model.selection == entry.ref
+        Button {
+            model.select(entry.ref)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text(verbatim: entry.title)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text(verbatim: entry.location)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textGhost)
+                        .lineLimit(1)
+                }
+                HStack(spacing: 5) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(Theme.textTertiary)
+                    Text(verbatim: entry.spaceLabel)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if model.showsRowDeviceBadges {
+                        DeviceChip(device: entry.device)
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .frame(height: 51)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(selected || hovered ? AnyShapeStyle(Theme.itemWashSelected) : AnyShapeStyle(.clear))
+            )
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .onHover { hovered = $0 }
+        .help(Text(verbatim: entry.space.path))
     }
 }

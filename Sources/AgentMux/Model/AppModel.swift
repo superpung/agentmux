@@ -49,17 +49,6 @@ final class TargetState: Identifiable {
     }
 }
 
-/// An agent row in the aggregated sidebar section.
-struct AgentRow: Identifiable, Hashable {
-    var ref: PaneRef
-    var kind: AgentKind
-    var version: String?
-    var configDirectory: String?
-    var location: String
-    var targetID: String
-    var id: PaneRef { ref }
-}
-
 @MainActor
 @Observable
 final class AppModel {
@@ -67,17 +56,28 @@ final class AppModel {
     private(set) var configError: String?
     private(set) var configPath: String?
     var selection: PaneRef?
-    private(set) var terminals: [PaneRef: TerminalController] = [:]
+    /// Sidebar scope: one target (nil = all) and one working directory (nil = all).
+    var deviceFilter: String? {
+        didSet { if oldValue != deviceFilter { spaceFilter = nil } }
+    }
+    var spaceFilter: SpaceKey?
+    var showDevicePanel = false
+    var showSearch = false
+    private(set) var terminals: [PaneRef: PaneTerminal] = [:]
 
     private var pollers: [String: Task<Void, Never>] = [:]
     private var releasedOrphans: Set<String> = []
     /// AGENTMUX_OPEN=<target-id>/<pane-id>: select and open that pane once it
     /// is discovered (used by scripted smoke tests).
-    @ObservationIgnored private var pendingOpen: (targetID: String, paneID: String)? = {
-        guard let value = ProcessInfo.processInfo.environment["AGENTMUX_OPEN"],
+    @ObservationIgnored private var pendingOpen = AppModel.paneFromEnvironment("AGENTMUX_OPEN")
+    /// AGENTMUX_SELECT=<target-id>/<pane-id>: only select it (no attach).
+    @ObservationIgnored private var pendingSelect = AppModel.paneFromEnvironment("AGENTMUX_SELECT")
+
+    private static func paneFromEnvironment(_ name: String) -> (targetID: String, paneID: String)? {
+        guard let value = ProcessInfo.processInfo.environment[name],
               let slash = value.firstIndex(of: "/") else { return nil }
         return (String(value[..<slash]), String(value[value.index(after: slash)...]))
-    }()
+    }
 
     init() {
         loadConfig()
@@ -161,6 +161,12 @@ final class AppModel {
                 invalidateTerminals(of: state)
             }
             await releaseOrphansOnce(state)
+            if let pending = pendingSelect, pending.targetID == state.id,
+               snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)
+            {
+                pendingSelect = nil
+                selection = ref
+            }
             if let pending = pendingOpen, pending.targetID == state.id,
                snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)
             {
@@ -178,9 +184,10 @@ final class AppModel {
 
     /// After a crash or lost connection, tagged clients of earlier views stay
     /// attached (docker exec keeps them alive). Release them once per run,
-    /// keeping the views that are open now. Test targets only.
+    /// keeping the views that are open now. Only clients carrying the
+    /// AgentMux tag are touched.
     private func releaseOrphansOnce(_ state: TargetState) async {
-        guard state.target.access == .test, !releasedOrphans.contains(state.id),
+        guard state.target.access.allowsAttach, !releasedOrphans.contains(state.id),
               let context = try? state.target.executionContext() else { return }
         releasedOrphans.insert(state.id)
         let live = terminals.values.filter { $0.ref.targetID == state.id }.map(\.clientTag)
@@ -203,25 +210,6 @@ final class AppModel {
         targets.first { $0.id == targetID }
     }
 
-    var agentRows: [AgentRow] {
-        targets.flatMap { state -> [AgentRow] in
-            guard let snapshot = state.snapshot else { return [] }
-            return snapshot.panes.compactMap { pane in
-                guard let detection = state.detections[pane.id],
-                      detection.kind == .codex || detection.kind == .claudeCode,
-                      let ref = state.ref(for: pane.id) else { return nil }
-                return AgentRow(
-                    ref: ref,
-                    kind: detection.kind,
-                    version: detection.version,
-                    configDirectory: detection.configDirectory,
-                    location: location(of: pane.id, in: snapshot),
-                    targetID: state.id
-                )
-            }
-        }
-    }
-
     /// `session:window.pane` using the first membership.
     func location(of paneID: String, in snapshot: InventorySnapshot) -> String {
         guard let row = snapshot.memberships.first(where: { $0.paneID == paneID }) else { return paneID }
@@ -229,16 +217,21 @@ final class AppModel {
         return "\(session):\(row.windowIndex).\(row.paneIndex)"
     }
 
-    // MARK: Terminals
+    // MARK: Selection and terminals
 
-    func terminal(for ref: PaneRef) -> TerminalController? {
+    func select(_ ref: PaneRef) {
+        selection = ref
+    }
+
+
+    func terminal(for ref: PaneRef) -> PaneTerminal? {
         terminals[ref]
     }
 
     func openTerminal(_ ref: PaneRef) {
         guard terminals[ref] == nil, let state = state(ref.targetID) else { return }
         do {
-            terminals[ref] = try TerminalController(ref: ref, host: state.host, target: state.target)
+            terminals[ref] = try PaneTerminal(ref: ref, host: state.host, target: state.target)
         } catch {
             state.lastFailure = RemoteFailure(.remoteCommandFailed, detail: "\(error)")
         }

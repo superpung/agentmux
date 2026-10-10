@@ -18,6 +18,7 @@ cp "$BIN/AgentMux" "$APP/Contents/MacOS/AgentMux"
 for bundle in "$BIN"/*.bundle; do
   [ -e "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"
 done
+cp Resources/Icons/*.svg "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

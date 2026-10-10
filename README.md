@@ -16,7 +16,7 @@ open build/AgentMux.app
 
 ## Configuration
 
-The app reads `AGENTMUX_CONFIG`, or `~/Library/Application Support/AgentMux/targets.json5`. The format is `config/targets.example.json5`. Targets with `access: "observe"` are only listed and probed; terminals open only on `access: "test"` targets.
+The app reads `AGENTMUX_CONFIG`, or `~/Library/Application Support/AgentMux/targets.json5`. The format is `config/targets.example.json5`. Targets with `access: "observe"` are only listed and probed; terminals open on `interact` and `test` targets.
 
 ## Development tool
 
