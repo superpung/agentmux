@@ -53,14 +53,8 @@ struct SidebarView: View {
     @Binding var selection: PaneRef?
     @State private var query = ""
     @AppStorage("sidebarGroupBy") private var groupingRaw = GroupBy.project.rawValue
-    @AppStorage("sidebarSubgroupBy") private var subgroupingRaw = ""
 
     private var grouping: GroupBy { GroupBy(rawValue: groupingRaw) ?? .project }
-    /// The optional second level; ignored when it equals the primary dimension.
-    private var subgrouping: GroupBy? {
-        guard let sub = GroupBy(rawValue: subgroupingRaw), sub != grouping else { return nil }
-        return sub
-    }
 
     var body: some View {
         List(selection: $selection) {
@@ -69,15 +63,9 @@ struct SidebarView: View {
             }
             ForEach(groups) { group in
                 Section {
-                    ForEach(group.leaves) { leaf in
-                        if subgrouping != nil, !leaf.label.isEmpty {
-                            subHeader(leaf.label)
-                        }
-                        ForEach(leaf.agents) { agent in
-                            AgentRow(entry: agent, showDevice: showDevice)
-                                .tag(agent.ref)
-                                .listRowInsets(rowInsets)
-                        }
+                    ForEach(group.agents) { agent in
+                        AgentRow(entry: agent, showDevice: showDevice)
+                            .tag(agent.ref)
                     }
                 } header: {
                     if !group.label.isEmpty { Text(group.label) }
@@ -115,50 +103,24 @@ struct SidebarView: View {
                     Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
                 }
             }
-            Picker("Then by", selection: $subgroupingRaw) {
-                Text("None").tag("")
-                ForEach(GroupBy.allCases.filter { $0 != grouping }) { option in
-                    Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
-                }
-            }
         } label: {
             Label("Group by", systemImage: "rectangle.3.group")
         }
-        .help("Group agents, and optionally add a second level")
+        .help("Group agents by container, project, session or status")
     }
 
     // MARK: Grouped data
 
-    /// A smallest group of agents, time-sorted. Its label is empty when there
-    /// is no subgrouping (it fills its parent section directly).
-    private struct Leaf: Identifiable {
+    private struct Group: Identifiable {
         var id: String
         var label: String
         var agents: [AgentEntry]
     }
 
-    private struct Group: Identifiable {
-        var id: String
-        var label: String
-        var leaves: [Leaf]
-    }
-
-    /// The container is already a section/subheader, so its per-row badge is
+    /// The container is already the section header, so its per-row badge is
     /// redundant then.
     private var showDevice: Bool {
-        grouping != .container && subgrouping != .container && model.showsAgentDeviceBadge
-    }
-
-    private var rowInsets: EdgeInsets? {
-        subgrouping == nil ? nil : EdgeInsets(top: 2, leading: 26, bottom: 2, trailing: 10)
-    }
-
-    private func subHeader(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .fontWeight(.medium)
-            .foregroundStyle(.secondary)
-            .listRowInsets(EdgeInsets(top: 7, leading: 14, bottom: 1, trailing: 10))
+        grouping != .container && model.showsAgentDeviceBadge
     }
 
     private func matches(_ haystack: String) -> Bool {
@@ -173,40 +135,35 @@ struct SidebarView: View {
     }
 
     private var groups: [Group] {
-        partition(matchedAgents, by: grouping).map { primary in
-            let leaves: [Leaf]
-            if let sub = subgrouping {
-                leaves = partition(primary.agents, by: sub).map { secondary in
-                    Leaf(id: secondary.key, label: secondary.label, agents: byTime(secondary.agents))
-                }
-            } else {
-                leaves = [Leaf(id: "·", label: "", agents: byTime(primary.agents))]
-            }
-            return Group(id: primary.key, label: primary.label, leaves: leaves)
-        }
-    }
-
-    /// Groups agents on one dimension. Group order is semantic for status and
-    /// first-seen (stable) otherwise, so whole sections don't reshuffle; agents
-    /// within a leaf are time-sorted separately.
-    private func partition(_ agents: [AgentEntry], by dim: GroupBy) -> [(key: String, label: String, agents: [AgentEntry])] {
         var order: [String] = []
         var labels: [String: String] = [:]
         var map: [String: [AgentEntry]] = [:]
-        for agent in agents {
-            let k = dim.key(agent)
-            if map[k] == nil { order.append(k); labels[k] = dim.label(agent) }
+        for agent in matchedAgents {
+            let k = grouping.key(agent)
+            if map[k] == nil { order.append(k); labels[k] = grouping.label(agent) }
             map[k, default: []].append(agent)
         }
-        if dim == .status {
+        // Group order: semantic for status, stable (first-seen) otherwise, so
+        // whole sections don't reshuffle as agents come and go.
+        if grouping == .status {
             order.sort { Self.statusRank($0) < Self.statusRank($1) }
         }
-        return order.map { (key: $0, label: labels[$0] ?? $0, agents: map[$0] ?? []) }
+        return order.map { Group(id: $0, label: labels[$0] ?? $0, agents: sorted(map[$0] ?? [])) }
     }
 
-    /// Most-recently-active first; unknown ages last.
-    private func byTime(_ agents: [AgentEntry]) -> [AgentEntry] {
-        agents.sorted { ($0.lastActiveSeconds ?? .max) < ($1.lastActiveSeconds ?? .max) }
+    /// Within a group: needs-attention first, then working, then the rest —
+    /// each tier most-recently-active first (unknown ages last).
+    private func sorted(_ agents: [AgentEntry]) -> [AgentEntry] {
+        agents.sorted { a, b in
+            let ra = Self.activityRank(a.activity), rb = Self.activityRank(b.activity)
+            if ra != rb { return ra < rb }
+            return (a.lastActiveSeconds ?? .max) < (b.lastActiveSeconds ?? .max)
+        }
+    }
+
+    static func activityRank(_ activity: AgentActivity) -> Int {
+        if activity.needsAttention { return 0 }
+        return activity == .working ? 1 : 2
     }
 
     static func statusBucket(_ activity: AgentActivity) -> (id: String, label: String) {
