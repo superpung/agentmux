@@ -265,6 +265,7 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                             if let r = u.rateLimitPercent { parts.append("limit \(r)%") }
                             if !parts.isEmpty { line += " usage[\(parts.joined(separator: " "))]" }
                         }
+                        if let a = snapshot.lastActiveSeconds[pane.id] { line += " active[\(a)s]" }
                         line += " (\(detection.confidence.rawValue): \(detection.evidence.joined(separator: ", ")))"
                         if !detection.children.isEmpty {
                             line += " children: \(detection.children.map { "\($0.kind.rawValue)#\($0.pid)" }.joined(separator: " "))"

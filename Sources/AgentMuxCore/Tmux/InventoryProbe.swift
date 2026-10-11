@@ -79,7 +79,13 @@ public enum InventoryProbe {
               ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
               echo "log $ev $lage"
               clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
-              [ -n "$clpane" ] && echo "@@active $clpane $lage"
+              # Last active = the last real turn (assistant/user), NOT the file
+              # mtime: Claude Code keeps touching the transcript with bookkeeping
+              # (modes, hooks, latches) long after the agent went idle. Only the
+              # timestamp is read. tac stops at the first match from the end.
+              rts=$(tac "$lf" 2>/dev/null | jq -r 'select(.type=="assistant" or .type=="user") | .timestamp // empty' 2>/dev/null | head -n 1)
+              re=$(date -d "$rts" +%s 2>/dev/null)
+              [ -n "$clpane" ] && [ -n "$re" ] && echo "@@active $clpane $(( $(date +%s) - re ))"
               # Context size = the last assistant turn's prompt (input + cached +
               # cache-creation tokens), from a bounded tail. Numbers only.
               cctx=$(tail -n 200 "$lf" 2>/dev/null | jq -r 'select(.type=="assistant") | ((.message.usage.input_tokens // 0)+(.message.usage.cache_read_input_tokens // 0)+(.message.usage.cache_creation_input_tokens // 0))' 2>/dev/null | grep -E '^[0-9]+$' | tail -n 1)
@@ -98,7 +104,12 @@ public enum InventoryProbe {
             crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | head -1)
             if [ -n "$cpane" ] && [ -n "$crf" ]; then
               cage=$(( $(date +%s) - $(stat -c %Y "$crf" 2>/dev/null) ))
-              echo "@@active $cpane $cage"
+              # Last active = the last real turn event, not the file mtime (Codex
+              # keeps appending thread_settings_applied while idle). Falls back
+              # to mtime if none is found. Only timestamps are read.
+              rts=$(tac "$crf" 2>/dev/null | jq -r 'select((.type=="event_msg" and (.payload.type=="task_started" or .payload.type=="task_complete" or .payload.type=="turn_aborted" or .payload.type=="agent_message" or .payload.type=="item_completed")) or .type=="response_item") | .timestamp // empty' 2>/dev/null | head -n 1)
+              re=$(date -d "$rts" +%s 2>/dev/null)
+              if [ -n "$re" ]; then echo "@@active $cpane $(( $(date +%s) - re ))"; else echo "@@active $cpane $cage"; fi
               recent=$(tail -n 500 "$crf" 2>/dev/null | jq -rc 'if .type=="event_msg" and (.payload.type=="task_started" or .payload.type=="task_complete" or .payload.type=="turn_aborted") then "T "+.payload.type elif .type=="event_msg" and .payload.type=="token_count" then "U \\(.payload.info.last_token_usage.input_tokens // 0) \\(.payload.info.model_context_window // 0) \\(.payload.rate_limits.primary.used_percent // "-")" else empty end' 2>/dev/null)
               case "$(printf '%s\\n' "$recent" | grep '^T ' | tail -n 1)" in
                 *task_started) echo "@@logstate $cpane working $cage" ;;
