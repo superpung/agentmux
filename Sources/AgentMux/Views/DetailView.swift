@@ -176,13 +176,21 @@ private struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if let error = model.configError {
+            if model.hosts.isEmpty {
+                Image(systemName: "server.rack")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("No hosts yet").font(.headline)
+                Text("Add an SSH host in Settings to discover its containers.")
+                    .font(.caption).foregroundStyle(.secondary)
+                SettingsLink { Text("Open Settings…") }
+                    .padding(.top, 2)
+            } else if let error = model.configError {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
-                Text("No target configuration").font(.headline)
-                Text(model.configPath ?? "").font(.caption).textSelection(.enabled)
-                Text(error).font(.caption).foregroundStyle(.secondary)
+                Text("Could not save settings").font(.headline)
+                Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             } else {
                 Image(systemName: "terminal")
                     .font(.largeTitle)

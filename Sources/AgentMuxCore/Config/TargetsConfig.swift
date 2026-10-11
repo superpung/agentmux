@@ -40,24 +40,27 @@ public enum ConfigError: Error, Equatable {
     case missingContainer(target: String)
 }
 
+/// A host AgentMux connects to over ssh. Managed in the app's Settings; the
+/// ssh destination is an alias from `~/.ssh/config` or `user@host` (no secrets).
 public struct HostConfig: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var displayName: String
     public var sshDestination: String
-    /// Default access for containers discovered on this host.
-    public var defaultAccess: TargetConfig.Access?
-    /// Default exec user for discovered containers (nil = container default).
-    public var defaultExecUser: String?
-    /// Whether to offer container auto-discovery for this host (default true).
-    public var discoverContainers: Bool?
 
-    public var effectiveDefaultAccess: TargetConfig.Access { defaultAccess ?? .observe }
-    public var discovers: Bool { discoverContainers ?? true }
+    public init(id: String, displayName: String, sshDestination: String) {
+        self.id = id
+        self.displayName = displayName
+        self.sshDestination = sshDestination
+    }
+
+    // Older config files carried per-host discovery/access defaults; they are
+    // ignored now (the app is interactive and discovers every host).
+    private enum CodingKeys: String, CodingKey { case id, displayName, sshDestination }
 }
 
 public extension TargetConfig {
-    /// A target for a container discovered on `host`, using the host defaults
-    /// and the default tmux socket.
+    /// A target for a container discovered on `host`, on the default tmux socket
+    /// and the container's default user. Monitored containers are interactive.
     static func discovered(host: HostConfig, container: String) -> TargetConfig {
         TargetConfig(
             id: "\(host.id)/\(container)",
@@ -65,10 +68,10 @@ public extension TargetConfig {
             hostId: host.id,
             kind: .docker,
             container: container,
-            execUser: host.defaultExecUser,
+            execUser: nil,
             tmuxPath: nil,
             tmuxSocket: .init(mode: .default, value: nil),
-            access: host.effectiveDefaultAccess,
+            access: .interact,
             agentProfiles: nil
         )
     }

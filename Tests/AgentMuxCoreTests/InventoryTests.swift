@@ -262,30 +262,68 @@ arg -p
         #expect(throws: ConfigError.missingContainer(target: "a")) { try target.executionContext() }
     }
 
-    @Test func discoveredTargetUsesHostDefaults() throws {
-        let host = HostConfig(
-            id: "lab", displayName: "Lab", sshDestination: "lab-host",
-            defaultAccess: .interact, defaultExecUser: "dev", discoverContainers: true
-        )
+    @Test func discoveredTargetIsInteractive() throws {
+        let host = HostConfig(id: "lab", displayName: "Lab", sshDestination: "lab-host")
         let target = TargetConfig.discovered(host: host, container: "app01")
         #expect(target.id == "lab/app01")
         #expect(target.hostId == "lab")
         #expect(target.kind == .docker)
         #expect(target.container == "app01")
         #expect(target.access == .interact)
+        #expect(target.access.allowsAttach)
         let context = try target.executionContext()
         #expect(context.container?.container.value == "app01")
-        #expect(context.container?.user == (try ExecUser("dev")))
+        #expect(context.container?.user == nil)
+    }
+}
+
+@Suite struct AppSettingsTests {
+    @Test func roundTripsThroughJSON() throws {
+        let settings = AppSettings(
+            hosts: [HostConfig(id: "lab", displayName: "Lab", sshDestination: "lab-host")],
+            monitoredContainers: ["lab/app01", "lab/app02"]
+        )
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("agentmux-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try settings.save(to: url)
+        let loaded = try AppSettings.load(from: url)
+        #expect(loaded == settings)
     }
 
-    @Test func hostDefaultsFallBack() {
-        let host = HostConfig(
-            id: "lab", displayName: "Lab", sshDestination: "lab-host",
-            defaultAccess: nil, defaultExecUser: nil, discoverContainers: nil
+    @Test func normalizeDropsOrphansAndDuplicates() {
+        var settings = AppSettings(
+            hosts: [
+                HostConfig(id: "lab", displayName: "Lab", sshDestination: "lab-host"),
+                HostConfig(id: "lab", displayName: "Dupe", sshDestination: "205"),
+            ],
+            monitoredContainers: ["lab/a", "lab/a", "gone/b"]
         )
-        #expect(host.effectiveDefaultAccess == .observe)
-        #expect(host.discovers)
-        #expect(TargetConfig.discovered(host: host, container: "c1").access == .observe)
+        settings.normalize()
+        #expect(settings.hosts.map(\.id) == ["lab"])
+        #expect(settings.monitoredContainers == ["lab/a"])
+    }
+
+    @Test func importsLegacyDockerTargets() throws {
+        let text = """
+        {
+          schemaVersion: 1,
+          hosts: [{ id: "lab", displayName: "Lab", sshDestination: "lab-host", usualCommand: "" }],
+          targets: [
+            { id: "a", hostId: "lab", kind: "docker", container: "app01", execUser: "", tmuxPath: "",
+              tmuxSocket: { mode: "default" }, access: "interact", agentProfiles: [], notes: "" },
+            { id: "a-test", hostId: "lab", kind: "docker", container: "app01", execUser: "", tmuxPath: "",
+              tmuxSocket: { mode: "name", value: "agentmux-test" }, access: "test", agentProfiles: [], notes: "" },
+          ],
+        }
+        """
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("agentmux-\(UUID().uuidString).json5")
+        try Data(text.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let settings = try AppSettings.importLegacy(from: url)
+        #expect(settings.hosts.map(\.id) == ["lab"])
+        #expect(settings.hosts.first?.sshDestination == "lab-host")
+        // Same container twice collapses to one monitored entry.
+        #expect(settings.monitoredContainers == ["lab/app01"])
     }
 }
 

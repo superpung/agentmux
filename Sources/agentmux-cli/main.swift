@@ -1,18 +1,20 @@
 import AgentMuxCore
 import Foundation
 
-// Development tool for the remote path.
+// Development tool for the remote path. A "target" is "<hostId>/<container>",
+// or a bare "<hostId>" with --container NAME (any container, need not be
+// monitored). Hosts come from the app's settings.json.
 //
-//   agentmux-cli probe [target-id ...]           read-only inventory
-//   agentmux-cli clients <target-id>             read-only client list with AgentMux tags
-//   agentmux-cli attach-test <target-id> <tmux-target> [--seconds N] [--type TEXT] [--leak] [--then-select PANE]
-//                                                attach like the app does (test targets only)
-//   agentmux-cli release-orphans <target-id>     release every AgentMux-tagged client (test targets only)
-//   agentmux-cli containers <target-id> [--all]  list containers on the target's host (read-only)
-//   agentmux-cli mirror-test <target-id> <session-id> <pane-id> [--type TEXT] [--paste TEXT]
+//   agentmux-cli probe [target ...]              read-only inventory (no args = all monitored)
+//   agentmux-cli clients <target>                read-only client list with AgentMux tags
+//   agentmux-cli attach-test <target> <tmux-target> [--seconds N] [--type TEXT] [--leak] [--then-select PANE]
+//                                                attach like the app does (uses a test-access target)
+//   agentmux-cli release-orphans <target>        release every AgentMux-tagged client
+//   agentmux-cli containers <target> [--all]     list containers on the target's host (read-only)
+//   agentmux-cli mirror-test <target> <session-id> <pane-id> [--type TEXT] [--paste TEXT]
 //                                                mirror a pane over control mode, optionally typing
 //
-// Global option: --config path (default config/targets.local.json5)
+// Global options: --settings path, --container NAME
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -20,28 +22,57 @@ func fail(_ message: String, code: Int32 = 1) -> Never {
 }
 
 var arguments = Array(CommandLine.arguments.dropFirst())
-var configPath = "config/targets.local.json5"
-if let index = arguments.firstIndex(of: "--config"), index + 1 < arguments.count {
-    configPath = arguments[index + 1]
+var settingsPath: String?
+if let index = arguments.firstIndex(of: "--settings"), index + 1 < arguments.count {
+    settingsPath = arguments[index + 1]
     arguments.removeSubrange(index ... index + 1)
 }
 guard let command = arguments.first else {
-    fail("usage: agentmux-cli probe|clients|attach-test|release-orphans ...", code: 2)
+    fail("usage: agentmux-cli probe|clients|attach-test|release-orphans|containers|mirror-test ...", code: 2)
 }
 let rest = Array(arguments.dropFirst())
 
-let config: TargetsConfig
-do {
-    config = try TargetsConfig.load(from: URL(fileURLWithPath: configPath))
-} catch {
-    fail("cannot load \(configPath): \(error)")
+let settings: AppSettings = settingsPath
+    .map { AppSettings.loadOrImport(url: URL(fileURLWithPath: $0)) }
+    ?? AppSettings.loadOrImport()
+
+/// All monitored targets, as the app would run them.
+func allTargets() -> [(HostConfig, TargetConfig)] {
+    settings.monitoredContainers.compactMap { key in
+        guard let slash = key.firstIndex(of: "/") else { return nil }
+        let hostID = String(key[..<slash])
+        let container = String(key[key.index(after: slash)...])
+        guard let host = settings.hosts.first(where: { $0.id == hostID }) else { return nil }
+        return (host, TargetConfig.discovered(host: host, container: container))
+    }
 }
 
-func target(_ id: String?) -> (HostConfig, TargetConfig) {
-    guard let id, let target = config.targets.first(where: { $0.id == id }), let host = config.host(for: target) else {
-        fail("unknown target \(id ?? "<none>")")
+/// Resolves "<hostId>/<container>" or "<hostId>" (+ --container NAME) to a
+/// target. `access` lets dev commands request test rights.
+func target(_ spec: String?, access: TargetConfig.Access = .interact) -> (HostConfig, TargetConfig) {
+    guard let spec else { fail("missing target (<hostId>/<container>)") }
+    let hostID: String
+    var container: String?
+    if let slash = spec.firstIndex(of: "/") {
+        hostID = String(spec[..<slash])
+        container = String(spec[spec.index(after: slash)...])
+    } else {
+        hostID = spec
+        container = option("--container", in: rest)
     }
+    guard let host = settings.hosts.first(where: { $0.id == hostID }) else { fail("unknown host \(hostID)") }
+    guard let container, !container.isEmpty else { fail("specify a container: \(hostID)/<container> or --container NAME") }
+    var target = TargetConfig.discovered(host: host, container: container)
+    target.access = access
     return (host, target)
+}
+
+/// Resolves a host from "<hostId>" or "<hostId>/<anything>".
+func host(_ spec: String?) -> HostConfig {
+    guard let spec else { fail("missing host id") }
+    let hostID = spec.firstIndex(of: "/").map { String(spec[..<$0]) } ?? spec
+    guard let host = settings.hosts.first(where: { $0.id == hostID }) else { fail("unknown host \(hostID)") }
+    return host
 }
 
 /// Remote text is untrusted: show control characters escaped.
@@ -56,11 +87,12 @@ func option(_ name: String, in list: [String]) -> String? {
 
 switch command {
 case "probe":
-    for target in config.targets where rest.isEmpty || rest.contains(target.id) {
-        guard let host = config.host(for: target) else { continue }
+    let selected = rest.filter { !$0.hasPrefix("-") }
+    let targets = selected.isEmpty ? allTargets() : selected.map { target($0) }
+    for (host, target) in targets {
         let started = Date()
         let result = await TargetProbe.run(host: host, target: target)
-        print("== \(target.id) (\(host.id), \(target.access.rawValue)) in \(String(format: "%.1fs", Date().timeIntervalSince(started)))")
+        print("== \(target.id) (\(host.id)) in \(String(format: "%.1fs", Date().timeIntervalSince(started)))")
         printProbe(result)
     }
 
@@ -82,7 +114,7 @@ case "clients":
     }
 
 case "attach-test":
-    let (host, target) = target(rest.first)
+    let (host, target) = target(rest.first, access: .test)
     guard rest.count >= 2 else { fail("attach-test <target-id> <tmux-target> [--seconds N] [--type TEXT] [--leak]", code: 2) }
     let seconds = option("--seconds", in: rest).flatMap(Double.init) ?? 5
     let text = option("--type", in: rest)
@@ -151,7 +183,7 @@ case "mirror-test":
     try await Task.sleep(for: .seconds(2))
 
 case "containers":
-    let (host, _) = target(rest.first)
+    let host = host(rest.first)
     switch await DockerDiscovery.list(host: host, includeStopped: rest.contains("--all")) {
     case let .success(list):
         print("== \(list.count) containers on \(host.sshDestination) ==")
@@ -160,8 +192,7 @@ case "containers":
     }
 
 case "release-orphans":
-    let (host, target) = target(rest.first)
-    guard target.access == .test else { fail("release-orphans is limited to test targets") }
+    let (host, target) = target(rest.first, access: .test)
     print(await ClientRelease.release(host: host, context: try target.executionContext(), options: SSHOptions(), tags: []))
 
 default:

@@ -53,8 +53,8 @@ final class TargetState: Identifiable {
 @Observable
 final class AppModel {
     private(set) var targets: [TargetState] = []
+    /// Non-nil only when saving settings failed.
     private(set) var configError: String?
-    private(set) var configPath: String?
     var selection: PaneRef?
     /// Sidebar scope: one target (nil = all) and one working directory (nil = all).
     var deviceFilter: String? {
@@ -65,20 +65,19 @@ final class AppModel {
     var showSearch = false
     private(set) var terminals: [PaneRef: PaneTerminal] = [:]
 
-    private(set) var hosts: [HostConfig] = []
-    private var explicitTargets: [TargetConfig] = []
+    /// The single source of truth, managed in Settings and saved to disk.
+    private(set) var settings = AppSettings()
     /// Containers found per host (for the Settings list). Not all are monitored.
     private(set) var discovered: [String: [DiscoveredContainer]] = [:]
     private(set) var isDiscovering = false
-    /// Monitored discovered containers, as "<hostId>/<container>" keys, persisted.
-    private(set) var enabledContainers: Set<String> = []
 
     private var targetStates: [String: TargetState] = [:]
     private var isPolling = false
     private var pollers: [String: Task<Void, Never>] = [:]
     private var releasedOrphans: Set<String> = []
 
-    private static let enabledContainersKey = "enabledContainers"
+    var hosts: [HostConfig] { settings.hosts }
+
     /// AGENTMUX_OPEN=<target-id>/<pane-id>: select and open that pane once it
     /// is discovered (used by scripted smoke tests).
     @ObservationIgnored private var pendingOpen = AppModel.paneFromEnvironment("AGENTMUX_OPEN")
@@ -92,69 +91,88 @@ final class AppModel {
     }
 
     init() {
-        loadConfig()
+        loadSettings()
     }
 
-    // MARK: Config
+    // MARK: Settings
 
-    /// AGENTMUX_CONFIG, else ~/Library/Application Support/AgentMux/targets.json5.
-    static func configURL() -> URL {
-        if let path = ProcessInfo.processInfo.environment["AGENTMUX_CONFIG"] {
-            return URL(fileURLWithPath: path)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/AgentMux/targets.json5")
-    }
+    private var settingsURL: URL { AppSettings.defaultURL() }
 
-    func loadConfig() {
-        let url = Self.configURL()
-        configPath = url.path
-        enabledContainers = Self.loadEnabledContainers()
-        do {
-            let config = try TargetsConfig.load(from: url)
-            hosts = config.hosts
-            explicitTargets = config.targets
-            configError = nil
-        } catch {
-            hosts = []
-            explicitTargets = []
-            configError = "\(error)"
-        }
+    func loadSettings() {
+        settings = AppSettings.loadOrImport()
         reconcileTargets()
     }
 
-    /// The hosts that offer container auto-discovery.
-    var discoverableHosts: [HostConfig] { hosts.filter(\.discovers) }
+    private func persistSettings() {
+        settings.normalize()
+        do {
+            try settings.save(to: settingsURL)
+            configError = nil
+        } catch {
+            configError = "\(error)"
+        }
+    }
+
+    // MARK: Hosts
+
+    /// Adds a host (ssh destination is an alias or user@host). The id is derived
+    /// from the display name and made unique. Rediscovers afterwards.
+    func addHost(displayName: String, sshDestination: String) {
+        let name = displayName.trimmingCharacters(in: .whitespaces)
+        let ssh = sshDestination.trimmingCharacters(in: .whitespaces)
+        guard !ssh.isEmpty else { return }
+        let base = Self.slug(name.isEmpty ? ssh : name)
+        var id = base
+        var n = 2
+        let existing = Set(settings.hosts.map(\.id))
+        while id.isEmpty || existing.contains(id) { id = "\(base.isEmpty ? "host" : base)-\(n)"; n += 1 }
+        settings.hosts.append(HostConfig(id: id, displayName: name.isEmpty ? ssh : name, sshDestination: ssh))
+        persistSettings()
+        reconcileTargets()
+        Task { await discover(hostID: id) }
+    }
+
+    func updateHost(id: String, displayName: String, sshDestination: String) {
+        guard let index = settings.hosts.firstIndex(where: { $0.id == id }) else { return }
+        let name = displayName.trimmingCharacters(in: .whitespaces)
+        let ssh = sshDestination.trimmingCharacters(in: .whitespaces)
+        guard !ssh.isEmpty else { return }
+        settings.hosts[index].displayName = name.isEmpty ? ssh : name
+        settings.hosts[index].sshDestination = ssh
+        persistSettings()
+        reconcileTargets()
+        Task { await discover(hostID: id) }
+    }
+
+    func removeHost(id: String) {
+        settings.hosts.removeAll { $0.id == id }
+        settings.monitoredContainers.removeAll { $0.hasPrefix("\(id)/") }
+        discovered[id] = nil
+        persistSettings()
+        reconcileTargets()
+    }
+
+    private static func slug(_ text: String) -> String {
+        let allowed = text.lowercased().map { ($0.isLetter || $0.isNumber) ? $0 : "-" }
+        return String(allowed).split(separator: "-").joined(separator: "-")
+    }
 
     // MARK: Target set
 
-    /// The targets to monitor: the explicitly configured ones, plus the
-    /// discovered containers the user has enabled in Settings.
+    /// The targets to monitor: every discovered container the user enabled in
+    /// Settings whose host still exists.
     private func desiredTargets() -> [(HostConfig, TargetConfig)] {
         var result: [(HostConfig, TargetConfig)] = []
         var seen = Set<String>()
-        for target in explicitTargets {
-            guard let host = hosts.first(where: { $0.id == target.hostId }) else { continue }
-            if seen.insert(target.id).inserted { result.append((host, target)) }
-        }
-        for host in hosts where host.discovers {
-            for container in discovered[host.id] ?? [] {
-                // Skip containers already covered by an explicit target, so the
-                // same container is never monitored twice under two ids.
-                if isExplicitlyConfigured(host: host, container: container.name) { continue }
-                let key = "\(host.id)/\(container.name)"
-                guard enabledContainers.contains(key), seen.insert(key).inserted else { continue }
-                result.append((host, .discovered(host: host, container: container.name)))
-            }
+        for key in settings.monitoredContainers {
+            guard let slash = key.firstIndex(of: "/") else { continue }
+            let hostID = String(key[..<slash])
+            let container = String(key[key.index(after: slash)...])
+            guard !container.isEmpty, let host = hosts.first(where: { $0.id == hostID }),
+                  seen.insert(key).inserted else { continue }
+            result.append((host, .discovered(host: host, container: container)))
         }
         return result
-    }
-
-    /// Whether an explicitly configured target already covers this container on
-    /// this host. Such a container is monitored via its own config entry and is
-    /// not offered as a toggle in Settings.
-    func isExplicitlyConfigured(host: HostConfig, container: String) -> Bool {
-        explicitTargets.contains { $0.hostId == host.id && $0.container == container }
     }
 
     /// Brings the live `targets` in line with `desiredTargets()`, keeping the
@@ -185,42 +203,47 @@ final class AppModel {
 
     // MARK: Container selection
 
-    private static func loadEnabledContainers() -> Set<String> {
-        let stored = UserDefaults.standard.stringArray(forKey: enabledContainersKey) ?? []
-        return Set(stored)
-    }
-
-    private func persistEnabledContainers() {
-        UserDefaults.standard.set(Array(enabledContainers).sorted(), forKey: Self.enabledContainersKey)
-    }
+    var monitoredCount: Int { settings.monitoredContainers.count }
 
     func isContainerEnabled(host: HostConfig, container: DiscoveredContainer) -> Bool {
-        enabledContainers.contains("\(host.id)/\(container.name)")
+        settings.monitoredContainers.contains("\(host.id)/\(container.name)")
     }
 
     /// Enables or disables a discovered container and reconciles the target set.
     func setContainer(_ container: DiscoveredContainer, on host: HostConfig, enabled: Bool) {
         let key = "\(host.id)/\(container.name)"
-        if enabled { enabledContainers.insert(key) } else { enabledContainers.remove(key) }
-        persistEnabledContainers()
+        settings.monitoredContainers.removeAll { $0 == key }
+        if enabled { settings.monitoredContainers.append(key) }
+        persistSettings()
         reconcileTargets()
     }
 
     // MARK: Discovery
 
-    /// Lists containers on every discoverable host (read-only) and refreshes
-    /// the Settings list. New selections take effect via `reconcileTargets()`.
+    /// Lists containers on every host (read-only) and refreshes the Settings
+    /// list. New selections take effect via `reconcileTargets()`.
     func discoverAll() async {
         guard !isDiscovering else { return }
         isDiscovering = true
         defer { isDiscovering = false }
-        for host in discoverableHosts {
-            let result = await DockerDiscovery.list(host: host)
-            if case let .success(containers) = result {
-                discovered[host.id] = containers.sorted { $0.name < $1.name }
-            }
+        for host in hosts {
+            await discover(host: host)
         }
         reconcileTargets()
+    }
+
+    /// Discovers one host by id (after it is added or edited).
+    func discover(hostID: String) async {
+        guard let host = hosts.first(where: { $0.id == hostID }) else { return }
+        await discover(host: host)
+        reconcileTargets()
+    }
+
+    private func discover(host: HostConfig) async {
+        let result = await DockerDiscovery.list(host: host)
+        if case let .success(containers) = result {
+            discovered[host.id] = containers.sorted { $0.name < $1.name }
+        }
     }
 
     // MARK: Polling
