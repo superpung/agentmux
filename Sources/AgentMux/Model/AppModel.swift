@@ -182,9 +182,10 @@ final class AppModel {
         let desired = desiredTargets()
         let desiredIDs = Set(desired.map { $0.1.id })
 
-        for id in targetStates.keys where !desiredIDs.contains(id) {
+        // Snapshot keys before mutating the dictionaries we iterate.
+        for id in Array(targetStates.keys) where !desiredIDs.contains(id) {
             pollers.removeValue(forKey: id)?.cancel()
-            for ref in terminals.keys where ref.targetID == id { closeTerminal(ref) }
+            for ref in Array(terminals.keys) where ref.targetID == id { closeTerminal(ref) }
             if selection?.targetID == id { selection = nil }
             releasedOrphans.remove(id)
             targetStates.removeValue(forKey: id)
