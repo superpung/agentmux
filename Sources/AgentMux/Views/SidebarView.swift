@@ -1,8 +1,10 @@
 import AgentMuxCore
 import SwiftUI
 
-/// How the sidebar groups agents into sections.
+/// How the sidebar orders / groups agents.
 enum AgentGrouping: String, CaseIterable, Identifiable {
+    /// A flat list, most-recently-active first (the default).
+    case recent
     case project
     case container
     case status
@@ -11,6 +13,7 @@ enum AgentGrouping: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .recent: return "Recent"
         case .project: return "Project"
         case .container: return "Container"
         case .status: return "Status"
@@ -19,6 +22,7 @@ enum AgentGrouping: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .recent: return "clock"
         case .project: return "folder"
         case .container: return "shippingbox"
         case .status: return "circle.dashed"
@@ -30,9 +34,11 @@ struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: PaneRef?
     @State private var query = ""
-    @AppStorage("agentGrouping") private var groupingRaw = AgentGrouping.project.rawValue
+    // "sidebarGrouping" (not the older "agentGrouping") so the new Recent
+    // default applies even to people who had picked a grouping before.
+    @AppStorage("sidebarGrouping") private var groupingRaw = AgentGrouping.recent.rawValue
 
-    private var grouping: AgentGrouping { AgentGrouping(rawValue: groupingRaw) ?? .project }
+    private var grouping: AgentGrouping { AgentGrouping(rawValue: groupingRaw) ?? .recent }
 
     var body: some View {
         List(selection: $selection) {
@@ -40,11 +46,13 @@ struct SidebarView: View {
                 emptyRow
             }
             ForEach(agentGroups) { group in
-                Section(group.label) {
+                Section {
                     ForEach(group.agents) { agent in
                         AgentRow(entry: agent, showDevice: showDevice)
                             .tag(agent.ref)
                     }
+                } header: {
+                    if !group.label.isEmpty { Text(group.label) }
                 }
             }
             if !filteredPanes.isEmpty {
@@ -110,6 +118,10 @@ struct SidebarView: View {
 
     private var agentGroups: [AgentGroup] {
         switch grouping {
+        case .recent:
+            // One flat section, most-recently-active first; unknown ages last.
+            let sorted = matchedAgents.sorted { ($0.lastActiveSeconds ?? .max) < ($1.lastActiveSeconds ?? .max) }
+            return sorted.isEmpty ? [] : [AgentGroup(id: "recent", label: "", agents: sorted)]
         case .project:
             // Keep tmux order within a project so rows don't jump as state changes.
             return grouped(by: { "\($0.space.targetID)\n\($0.space.path)" }, label: { SpaceLabel.label($0.space.path) })
@@ -166,6 +178,20 @@ struct SidebarView: View {
     }
 }
 
+/// Compact relative durations like "now", "45s", "12m", "3h", "2d".
+enum RelativeTime {
+    static func short(_ seconds: Int?) -> String? {
+        guard let seconds, seconds >= 0 else { return nil }
+        switch seconds {
+        case ..<5: return "now"
+        case ..<60: return "\(seconds)s"
+        case ..<3600: return "\(seconds / 60)m"
+        case ..<86400: return "\(seconds / 3600)h"
+        default: return "\(seconds / 86400)d"
+        }
+    }
+}
+
 // MARK: - Rows
 
 private struct AgentRow: View {
@@ -191,6 +217,12 @@ private struct AgentRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 0)
+            if let active = RelativeTime.short(entry.lastActiveSeconds) {
+                Text(active)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
             AgentStatusGlyph(activity: entry.activity)
         }
         .padding(.vertical, 2)

@@ -75,36 +75,36 @@ public enum InventoryProbe {
             cenc=$(readlink "/proc/$pid/cwd" 2>/dev/null | sed 's#/#-#g')
             lf="$ccfg/projects/$cenc/$res.jsonl"
             if [ -n "$res" ] && [ -f "$lf" ]; then
+              lage=$(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))
               ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
-              echo "log $ev $(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))"
-              # Context size = the last assistant turn's prompt (input + cached +
-              # cache-creation tokens). Numbers only, no message content.
+              echo "log $ev $lage"
               clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
-              cctx=$(command -v tac >/dev/null 2>&1 && tac "$lf" 2>/dev/null | jq -r 'select(.type=="assistant") | ((.message.usage.input_tokens // 0)+(.message.usage.cache_read_input_tokens // 0)+(.message.usage.cache_creation_input_tokens // 0))' 2>/dev/null | grep -m 1 -E '^[0-9]+$')
+              [ -n "$clpane" ] && echo "@@active $clpane $lage"
+              # Context size = the last assistant turn's prompt (input + cached +
+              # cache-creation tokens), from a bounded tail. Numbers only.
+              cctx=$(tail -n 200 "$lf" 2>/dev/null | jq -r 'select(.type=="assistant") | ((.message.usage.input_tokens // 0)+(.message.usage.cache_read_input_tokens // 0)+(.message.usage.cache_creation_input_tokens // 0))' 2>/dev/null | grep -E '^[0-9]+$' | tail -n 1)
               [ -n "$clpane" ] && [ -n "$cctx" ] && [ "$cctx" -gt 0 ] && echo "@@usage $clpane $cctx - -"
             fi
           fi
           # Codex session log — structural only. The process keeps its rollout
-          # JSONL open, so its fd gives the exact active file; the verdict is the
-          # last task_started/task_complete (only those tokens are read, never
-          # message content). Emitted per pane like the screen verdict.
-          if [ "$(cat /proc/$pid/comm 2>/dev/null)" = codex ] && command -v jq >/dev/null 2>&1 && command -v tac >/dev/null 2>&1; then
+          # JSONL open, so its fd gives the exact active file. One bounded tail +
+          # one jq pass extracts both the last turn boundary (task_started =
+          # working; task_complete / turn_aborted = idle) and the last
+          # token_count usage. A boundary older than the window yields no verdict
+          # and falls back to the screen rule; reading only the last 500 lines
+          # keeps the probe fast on multi-MB rollouts.
+          if [ "$(cat /proc/$pid/comm 2>/dev/null)" = codex ] && command -v jq >/dev/null 2>&1; then
             cpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
             crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | head -1)
             if [ -n "$cpane" ] && [ -n "$crf" ]; then
-              # Scan from the end for the last turn boundary (task_started =
-              # working; task_complete / turn_aborted = idle). A fixed tail
-              # window is unreliable: a long turn can have hundreds of events
-              # after its task_started. grep -m1 stops jq at the first match.
-              cev=$(tac "$crf" 2>/dev/null | jq -r 'select(.type=="event_msg") | .payload.type' 2>/dev/null | grep -m 1 -E '^(task_started|task_complete|turn_aborted)$')
               cage=$(( $(date +%s) - $(stat -c %Y "$crf" 2>/dev/null) ))
-              case "$cev" in
-                task_started) echo "@@logstate $cpane working $cage" ;;
-                task_complete|turn_aborted) echo "@@logstate $cpane idle $cage" ;;
+              echo "@@active $cpane $cage"
+              recent=$(tail -n 500 "$crf" 2>/dev/null | jq -rc 'if .type=="event_msg" and (.payload.type=="task_started" or .payload.type=="task_complete" or .payload.type=="turn_aborted") then "T "+.payload.type elif .type=="event_msg" and .payload.type=="token_count" then "U \\(.payload.info.last_token_usage.input_tokens // 0) \\(.payload.info.model_context_window // 0) \\(.payload.rate_limits.primary.used_percent // "-")" else empty end' 2>/dev/null)
+              case "$(printf '%s\\n' "$recent" | grep '^T ' | tail -n 1)" in
+                *task_started) echo "@@logstate $cpane working $cage" ;;
+                *task_complete|*turn_aborted) echo "@@logstate $cpane idle $cage" ;;
               esac
-              # Context size, window and weekly rate-limit % from the last
-              # token_count event. Numbers only, no message content.
-              uvals=$(tac "$crf" 2>/dev/null | jq -r 'select(.type=="event_msg" and .payload.type=="token_count") | "\\(.payload.info.last_token_usage.input_tokens // 0) \\(.payload.info.model_context_window // 0) \\(.payload.rate_limits.primary.used_percent // "-")"' 2>/dev/null | head -n 1)
+              uvals=$(printf '%s\\n' "$recent" | grep '^U ' | tail -n 1 | cut -d' ' -f2-)
               [ -n "$uvals" ] && echo "@@usage $cpane $uvals"
             fi
           fi
@@ -183,6 +183,11 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@logstate ") {
                 let fields = rest.split(separator: " ")
                 if fields.count >= 2, isID(fields[0], "%") { snapshot.logStates[String(fields[0])] = String(fields[1]) }
+            } else if let rest = line.dropPrefix("@@active ") {
+                let f = rest.split(separator: " ")
+                if f.count >= 2, isID(f[0], "%"), let seconds = Int(f[1]) {
+                    snapshot.lastActiveSeconds[String(f[0])] = seconds
+                }
             } else if let rest = line.dropPrefix("@@usage ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 4, isID(f[0], "%") {

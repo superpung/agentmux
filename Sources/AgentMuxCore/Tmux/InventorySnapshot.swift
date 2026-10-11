@@ -137,6 +137,9 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var logStates: [String: String] = [:]
     /// Token usage per agent pane, read from the session log (numbers only).
     public var usage: [String: AgentUsage] = [:]
+    /// Seconds since each agent pane's session log was last written — a proxy
+    /// for when the agent was last active.
+    public var lastActiveSeconds: [String: Int] = [:]
     public var processTableAvailable = true
     /// Set when the target was reached but tmux was not usable.
     public var failure: RemoteFailure?

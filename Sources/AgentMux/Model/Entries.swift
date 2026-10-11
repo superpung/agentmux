@@ -34,6 +34,8 @@ struct AgentEntry: Identifiable, Hashable {
     var spaceLabel: String
     var device: DeviceInfo
     var location: String
+    /// Seconds since the agent last wrote its session log (nil if unknown).
+    var lastActiveSeconds: Int?
     var id: PaneRef { ref }
 }
 
@@ -114,7 +116,8 @@ extension AppModel {
                     space: SpaceKey(targetID: state.id, path: pane.currentPath),
                     spaceLabel: SpaceLabel.label(pane.currentPath),
                     device: device,
-                    location: location(of: pane.id, in: snapshot)
+                    location: location(of: pane.id, in: snapshot),
+                    lastActiveSeconds: snapshot.lastActiveSeconds[pane.id]
                 )
             }
         }
