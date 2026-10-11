@@ -156,52 +156,62 @@ private struct StatusBar: View {
     }
 }
 
-/// Compact context / rate-limit readout with a slim context meter.
+/// Mostly-graphical usage readout: a context meter and (Codex) a rate-limit
+/// meter, each a bar + percent. Claude's log records neither the window nor a
+/// rate limit, so it shows the absolute context size instead.
 private struct UsageView: View {
     let usage: InventorySnapshot.AgentUsage
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 14) {
             if let fraction = usage.contextFraction {
-                Capsule().fill(.quaternary)
-                    .frame(width: 44, height: 4)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(meterColor(fraction))
-                            .frame(width: 44 * min(1, fraction), height: 4)
-                    }
+                Meter(label: "ctx", fraction: fraction,
+                      tooltip: "Context: \(short(usage.contextTokens)) / \(short(usage.contextWindow)) tokens")
+            } else if let context = usage.contextTokens {
+                Text("ctx \(Self.short(context))")
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    .help("Context: \(context) tokens (the model's window is not in the log)")
             }
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+            if let rate = usage.rateLimitPercent {
+                Meter(label: "limit", fraction: rate / 100, tooltip: "Rate limit used: \(rate)%")
+            }
         }
     }
 
-    private var text: String {
-        var parts: [String] = []
-        if let context = usage.contextTokens {
-            if let window = usage.contextWindow, let fraction = usage.contextFraction {
-                parts.append("ctx \(Self.short(context))/\(Self.short(window)) · \(Int((fraction * 100).rounded()))%")
-            } else {
-                parts.append("ctx \(Self.short(context))")
-            }
+    private func short(_ n: Int?) -> String { n.map(Self.short) ?? "?" }
+
+    static func short(_ n: Int) -> String {
+        n >= 1000 ? "\(n / 1000)k" : "\(n)"
+    }
+}
+
+/// A labelled bar with a trailing percentage.
+private struct Meter: View {
+    let label: String
+    let fraction: Double
+    let tooltip: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(label).font(.caption2).foregroundStyle(.tertiary)
+            Capsule().fill(.quaternary)
+                .frame(width: 48, height: 5)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(color)
+                        .frame(width: 48 * max(0, min(1, fraction)), height: 5)
+                }
+            Text("\(Int((fraction * 100).rounded()))%")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
-        if let rate = usage.rateLimitPercent {
-            parts.append("limit \(Int(rate.rounded()))%")
-        }
-        return parts.joined(separator: " · ")
+        .help(tooltip)
     }
 
-    private func meterColor(_ fraction: Double) -> Color {
+    private var color: Color {
         switch fraction {
         case ..<0.75: return .green
         case ..<0.9: return .orange
         default: return .red
         }
-    }
-
-    static func short(_ n: Int) -> String {
-        n >= 1000 ? "\(n / 1000)k" : "\(n)"
     }
 }
 

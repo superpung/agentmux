@@ -127,6 +127,13 @@ public final class PaneMirror: @unchecked Sendable {
         // latest`. It is not forced, so it self-heals to the user's clients
         // when we leave — no restore needed.
         client.send("refresh-client -C \(size.columns)x\(size.rows)") { _ in }
+        // Some TUIs (Codex) repaint their bottom input composer asynchronously
+        // after the resize's SIGWINCH, so the layout-change capture misses it.
+        // Re-capture once the repaint has settled, if no newer resize arrived.
+        client.queue.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, !ended, generation == sizeGeneration else { return }
+            resync()
+        }
     }
 
     public func close() {
