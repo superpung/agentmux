@@ -34,6 +34,8 @@ struct AgentEntry: Identifiable, Hashable {
     var spaceLabel: String
     var device: DeviceInfo
     var location: String
+    /// The agent's tmux session name (for grouping).
+    var session: String
     /// Seconds since the agent last wrote its session log (nil if unknown).
     var lastActiveSeconds: Int?
     var id: PaneRef { ref }
@@ -117,6 +119,7 @@ extension AppModel {
                     spaceLabel: SpaceLabel.label(pane.currentPath),
                     device: device,
                     location: location(of: pane.id, in: snapshot),
+                    session: sessionName(of: pane.id, in: snapshot),
                     lastActiveSeconds: snapshot.lastActiveSeconds[pane.id]
                 )
             }
@@ -186,6 +189,11 @@ extension AppModel {
     private func windowName(of paneID: String, in snapshot: InventorySnapshot) -> String? {
         guard let row = snapshot.memberships.first(where: { $0.paneID == paneID }) else { return nil }
         return snapshot.windows.first { $0.id == row.windowID }?.name
+    }
+
+    private func sessionName(of paneID: String, in snapshot: InventorySnapshot) -> String {
+        guard let row = snapshot.memberships.first(where: { $0.paneID == paneID }) else { return "" }
+        return snapshot.sessions.first { $0.id == row.sessionID }?.name ?? row.sessionID
     }
 
     static func strongest(_ activities: [AgentActivity]) -> AgentActivity? {

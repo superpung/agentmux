@@ -1,31 +1,49 @@
 import AgentMuxCore
 import SwiftUI
 
-/// How the sidebar orders / groups agents.
-enum AgentGrouping: String, CaseIterable, Identifiable {
-    /// A flat list, most-recently-active first (the default).
-    case recent
-    case project
+/// A dimension the sidebar can group agents by.
+enum GroupBy: String, CaseIterable, Identifiable {
     case container
+    case project
+    case session
     case status
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .recent: return "Recent"
-        case .project: return "Project"
         case .container: return "Container"
+        case .project: return "Project"
+        case .session: return "Session"
         case .status: return "Status"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .recent: return "clock"
-        case .project: return "folder"
         case .container: return "shippingbox"
+        case .project: return "folder"
+        case .session: return "rectangle.split.3x1"
         case .status: return "circle.dashed"
+        }
+    }
+
+    /// A stable identity for an agent's group on this dimension.
+    func key(_ e: AgentEntry) -> String {
+        switch self {
+        case .container: return e.device.id
+        case .project: return "\(e.space.targetID)\n\(e.space.path)"
+        case .session: return "\(e.space.targetID)\n\(e.session)"
+        case .status: return SidebarView.statusBucket(e.activity).id
+        }
+    }
+
+    func label(_ e: AgentEntry) -> String {
+        switch self {
+        case .container: return e.device.name
+        case .project: return SpaceLabel.label(e.space.path)
+        case .session: return e.session.isEmpty ? "—" : e.session
+        case .status: return SidebarView.statusBucket(e.activity).label
         }
     }
 }
@@ -34,22 +52,32 @@ struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: PaneRef?
     @State private var query = ""
-    // "sidebarGrouping" (not the older "agentGrouping") so the new Recent
-    // default applies even to people who had picked a grouping before.
-    @AppStorage("sidebarGrouping") private var groupingRaw = AgentGrouping.recent.rawValue
+    @AppStorage("sidebarGroupBy") private var groupingRaw = GroupBy.project.rawValue
+    @AppStorage("sidebarSubgroupBy") private var subgroupingRaw = ""
 
-    private var grouping: AgentGrouping { AgentGrouping(rawValue: groupingRaw) ?? .recent }
+    private var grouping: GroupBy { GroupBy(rawValue: groupingRaw) ?? .project }
+    /// The optional second level; ignored when it equals the primary dimension.
+    private var subgrouping: GroupBy? {
+        guard let sub = GroupBy(rawValue: subgroupingRaw), sub != grouping else { return nil }
+        return sub
+    }
 
     var body: some View {
         List(selection: $selection) {
-            if agentGroups.isEmpty, filteredPanes.isEmpty {
+            if groups.isEmpty, filteredPanes.isEmpty {
                 emptyRow
             }
-            ForEach(agentGroups) { group in
+            ForEach(groups) { group in
                 Section {
-                    ForEach(group.agents) { agent in
-                        AgentRow(entry: agent, showDevice: showDevice)
-                            .tag(agent.ref)
+                    ForEach(group.leaves) { leaf in
+                        if subgrouping != nil, !leaf.label.isEmpty {
+                            subHeader(leaf.label)
+                        }
+                        ForEach(leaf.agents) { agent in
+                            AgentRow(entry: agent, showDevice: showDevice)
+                                .tag(agent.ref)
+                                .listRowInsets(rowInsets)
+                        }
                     }
                 } header: {
                     if !group.label.isEmpty { Text(group.label) }
@@ -67,18 +95,7 @@ struct SidebarView: View {
         .searchable(text: $query, placement: .sidebar, prompt: "Search agents")
         .navigationTitle("AgentMux")
         .toolbar {
-            ToolbarItem {
-                Menu {
-                    Picker("Group by", selection: $groupingRaw) {
-                        ForEach(AgentGrouping.allCases) { option in
-                            Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
-                        }
-                    }
-                } label: {
-                    Label("Group by", systemImage: "rectangle.3.group")
-                }
-                .help("Group agents by project, container or status")
-            }
+            ToolbarItem { groupingMenu }
             ToolbarItem {
                 Button {
                     model.refreshAll()
@@ -91,18 +108,57 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom) { StatusFooter() }
     }
 
-    // MARK: Filtered data
-
-    /// When grouping by container, the container is the section header, so the
-    /// per-row device badge would be redundant.
-    private var showDevice: Bool {
-        grouping != .container && model.showsAgentDeviceBadge
+    private var groupingMenu: some View {
+        Menu {
+            Picker("Group by", selection: $groupingRaw) {
+                ForEach(GroupBy.allCases) { option in
+                    Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
+                }
+            }
+            Picker("Then by", selection: $subgroupingRaw) {
+                Text("None").tag("")
+                ForEach(GroupBy.allCases.filter { $0 != grouping }) { option in
+                    Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
+                }
+            }
+        } label: {
+            Label("Group by", systemImage: "rectangle.3.group")
+        }
+        .help("Group agents, and optionally add a second level")
     }
 
-    private struct AgentGroup: Identifiable {
+    // MARK: Grouped data
+
+    /// A smallest group of agents, time-sorted. Its label is empty when there
+    /// is no subgrouping (it fills its parent section directly).
+    private struct Leaf: Identifiable {
         var id: String
         var label: String
         var agents: [AgentEntry]
+    }
+
+    private struct Group: Identifiable {
+        var id: String
+        var label: String
+        var leaves: [Leaf]
+    }
+
+    /// The container is already a section/subheader, so its per-row badge is
+    /// redundant then.
+    private var showDevice: Bool {
+        grouping != .container && subgrouping != .container && model.showsAgentDeviceBadge
+    }
+
+    private var rowInsets: EdgeInsets? {
+        subgrouping == nil ? nil : EdgeInsets(top: 2, leading: 26, bottom: 2, trailing: 10)
+    }
+
+    private func subHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(.secondary)
+            .listRowInsets(EdgeInsets(top: 7, leading: 14, bottom: 1, trailing: 10))
     }
 
     private func matches(_ haystack: String) -> Bool {
@@ -113,52 +169,58 @@ struct SidebarView: View {
     }
 
     private var matchedAgents: [AgentEntry] {
-        model.agentEntries.filter { matches("\($0.title) \($0.kind.label) \($0.space.path) \($0.device.name)") }
+        model.agentEntries.filter { matches("\($0.title) \($0.kind.label) \($0.space.path) \($0.session) \($0.device.name)") }
     }
 
-    private var agentGroups: [AgentGroup] {
-        switch grouping {
-        case .recent:
-            // One flat section, most-recently-active first; unknown ages last.
-            let sorted = matchedAgents.sorted { ($0.lastActiveSeconds ?? .max) < ($1.lastActiveSeconds ?? .max) }
-            return sorted.isEmpty ? [] : [AgentGroup(id: "recent", label: "", agents: sorted)]
-        case .project:
-            // Keep tmux order within a project so rows don't jump as state changes.
-            return grouped(by: { "\($0.space.targetID)\n\($0.space.path)" }, label: { SpaceLabel.label($0.space.path) })
-        case .container:
-            return grouped(by: { $0.device.id }, label: { $0.device.name })
-        case .status:
-            return statusGroups()
+    private var groups: [Group] {
+        partition(matchedAgents, by: grouping).map { primary in
+            let leaves: [Leaf]
+            if let sub = subgrouping {
+                leaves = partition(primary.agents, by: sub).map { secondary in
+                    Leaf(id: secondary.key, label: secondary.label, agents: byTime(secondary.agents))
+                }
+            } else {
+                leaves = [Leaf(id: "·", label: "", agents: byTime(primary.agents))]
+            }
+            return Group(id: primary.key, label: primary.label, leaves: leaves)
         }
     }
 
-    /// Groups the matched agents by `key`, preserving first-seen (tmux) order
-    /// both of the groups and of the rows within each group.
-    private func grouped(by key: (AgentEntry) -> String, label: (AgentEntry) -> String) -> [AgentGroup] {
+    /// Groups agents on one dimension. Group order is semantic for status and
+    /// first-seen (stable) otherwise, so whole sections don't reshuffle; agents
+    /// within a leaf are time-sorted separately.
+    private func partition(_ agents: [AgentEntry], by dim: GroupBy) -> [(key: String, label: String, agents: [AgentEntry])] {
         var order: [String] = []
         var labels: [String: String] = [:]
-        var rows: [String: [AgentEntry]] = [:]
-        for agent in matchedAgents {
-            let k = key(agent)
-            if rows[k] == nil { order.append(k); labels[k] = label(agent) }
-            rows[k, default: []].append(agent)
+        var map: [String: [AgentEntry]] = [:]
+        for agent in agents {
+            let k = dim.key(agent)
+            if map[k] == nil { order.append(k); labels[k] = dim.label(agent) }
+            map[k, default: []].append(agent)
         }
-        return order.map { AgentGroup(id: $0, label: labels[$0] ?? $0, agents: rows[$0] ?? []) }
+        if dim == .status {
+            order.sort { Self.statusRank($0) < Self.statusRank($1) }
+        }
+        return order.map { (key: $0, label: labels[$0] ?? $0, agents: map[$0] ?? []) }
     }
 
-    /// Buckets agents by activity, in attention → working → idle → other order.
-    private func statusGroups() -> [AgentGroup] {
-        let buckets: [(id: String, label: String, test: (AgentActivity) -> Bool)] = [
-            ("attention", "Needs attention", { $0.needsAttention }),
-            ("working", "Working", { $0 == .working }),
-            ("idle", "Idle", { $0 == .idle }),
-            ("exited", "Exited", { $0 == .exited }),
-            ("other", "Unknown", { $0 == .unknown }),
-        ]
-        return buckets.compactMap { bucket in
-            let agents = matchedAgents.filter { bucket.test($0.activity) }
-            return agents.isEmpty ? nil : AgentGroup(id: bucket.id, label: bucket.label, agents: agents)
+    /// Most-recently-active first; unknown ages last.
+    private func byTime(_ agents: [AgentEntry]) -> [AgentEntry] {
+        agents.sorted { ($0.lastActiveSeconds ?? .max) < ($1.lastActiveSeconds ?? .max) }
+    }
+
+    static func statusBucket(_ activity: AgentActivity) -> (id: String, label: String) {
+        if activity.needsAttention { return ("attention", "Needs attention") }
+        switch activity {
+        case .working: return ("working", "Working")
+        case .idle: return ("idle", "Idle")
+        case .exited: return ("exited", "Exited")
+        default: return ("unknown", "Unknown")
         }
+    }
+
+    static func statusRank(_ bucketID: String) -> Int {
+        ["attention": 0, "working": 1, "idle": 2, "exited": 3, "unknown": 4][bucketID] ?? 5
     }
 
     private var filteredPanes: [PaneEntry] {
