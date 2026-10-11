@@ -48,13 +48,48 @@ enum GroupBy: String, CaseIterable, Identifiable {
     }
 }
 
+/// Which agents the sidebar shows.
+enum AgentFilter: String, CaseIterable, Identifiable {
+    case all
+    case active
+    case attention
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: return "All agents"
+        case .active: return "Active"
+        case .attention: return "Needs attention"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all: return "circle.grid.2x2"
+        case .active: return "bolt"
+        case .attention: return "exclamationmark.circle"
+        }
+    }
+
+    func includes(_ activity: AgentActivity) -> Bool {
+        switch self {
+        case .all: return true
+        case .active: return activity == .working || activity.needsAttention
+        case .attention: return activity.needsAttention
+        }
+    }
+}
+
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: PaneRef?
     @State private var query = ""
     @AppStorage("sidebarGroupBy") private var groupingRaw = GroupBy.project.rawValue
+    @AppStorage("sidebarFilter") private var filterRaw = AgentFilter.all.rawValue
 
     private var grouping: GroupBy { GroupBy(rawValue: groupingRaw) ?? .project }
+    private var filter: AgentFilter { AgentFilter(rawValue: filterRaw) ?? .all }
 
     var body: some View {
         List(selection: $selection) {
@@ -83,6 +118,7 @@ struct SidebarView: View {
         .searchable(text: $query, placement: .sidebar, prompt: "Search agents")
         .navigationTitle("AgentMux")
         .toolbar {
+            ToolbarItem { filterMenu }
             ToolbarItem { groupingMenu }
             ToolbarItem {
                 Button {
@@ -109,6 +145,19 @@ struct SidebarView: View {
         .help("Group agents by container, project, session or status")
     }
 
+    private var filterMenu: some View {
+        Menu {
+            Picker("Show", selection: $filterRaw) {
+                ForEach(AgentFilter.allCases) { option in
+                    Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
+                }
+            }
+        } label: {
+            Label("Filter", systemImage: filter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+        }
+        .help("Show all agents, only active ones, or only those needing attention")
+    }
+
     // MARK: Grouped data
 
     private struct Group: Identifiable {
@@ -131,7 +180,10 @@ struct SidebarView: View {
     }
 
     private var matchedAgents: [AgentEntry] {
-        model.agentEntries.filter { matches("\($0.title) \($0.kind.label) \($0.space.path) \($0.session) \($0.device.name)") }
+        model.agentEntries.filter { agent in
+            filter.includes(agent.activity)
+                && matches("\(agent.title) \(agent.kind.label) \(agent.space.path) \(agent.session) \(agent.device.name)")
+        }
     }
 
     private var groups: [Group] {
@@ -190,8 +242,14 @@ struct SidebarView: View {
             text = failure.kind.rawValue
         } else if model.targets.contains(where: { $0.snapshot == nil }) {
             text = "Connecting…"
+        } else if !query.isEmpty {
+            text = "No matches"
+        } else if filter == .attention {
+            text = "No agents need attention"
+        } else if filter == .active {
+            text = "No active agents"
         } else {
-            text = query.isEmpty ? "No agents found" : "No matches"
+            text = "No agents found"
         }
         return Text(text).foregroundStyle(.secondary)
     }

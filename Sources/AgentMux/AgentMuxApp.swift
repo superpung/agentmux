@@ -24,6 +24,10 @@ struct AgentMuxApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { model.refreshAll() }
                     .keyboardShortcut("r", modifiers: .command)
+                Button("Next Agent") { model.selectAdjacentAgent(1) }
+                    .keyboardShortcut("]", modifiers: .command)
+                Button("Previous Agent") { model.selectAdjacentAgent(-1) }
+                    .keyboardShortcut("[", modifiers: .command)
                 Divider()
             }
         }

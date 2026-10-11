@@ -429,6 +429,18 @@ final class AppModel {
         if notificationsEnabled { notifier.requestAuthorizationIfNeeded() }
     }
 
+    /// Moves the selection to the next (`delta` = 1) or previous agent in the
+    /// current scope, wrapping around, and opens it like a click would.
+    func selectAdjacentAgent(_ delta: Int) {
+        let refs = agentEntries.map(\.ref)
+        guard !refs.isEmpty else { return }
+        if let current = selection, let index = refs.firstIndex(of: current) {
+            select(refs[(index + delta + refs.count) % refs.count])
+        } else {
+            select(delta >= 0 ? refs[0] : refs[refs.count - 1])
+        }
+    }
+
     private func agentTitle(_ state: TargetState, paneID: String) -> String {
         guard let snapshot = state.snapshot, let pane = snapshot.pane(paneID) else { return paneID }
         let kind = state.detections[paneID]?.kind ?? .none
