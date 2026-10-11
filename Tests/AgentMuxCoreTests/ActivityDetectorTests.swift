@@ -33,11 +33,19 @@ import Testing
         #expect(result.activity == .idle)
     }
 
-    @Test func claudeWorkingFromInterruptHint() {
+    @Test func claudeWorkingFromRealSpinner() {
+        // Real capture (2026-10-11): spinner + elapsed, input box also present.
         let working = [
-            "✻ Thinking… (5s · esc to interrupt)",
-            "  ⏵⏵ auto mode on (shift+tab to cycle)",
+            "✽ Topsy-turvying… (23m 36s · ↓ 7.6k tokens)",
+            "─────────────────────────────── tcad-dev-v2 ─",
+            "❯ ",
+            "  ⏵⏵ auto mode on · 2 shells · ← for agents",
         ]
+        #expect(ActivityDetector.detect(kind: .claudeCode, screen: working).activity == .working)
+    }
+
+    @Test func runningToolElapsedIsWorking() {
+        let working = ["  cd /data; .venv/bin/… (8m 1s)", "❯ "]
         #expect(ActivityDetector.detect(kind: .claudeCode, screen: working).activity == .working)
     }
 

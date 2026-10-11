@@ -43,7 +43,14 @@ public enum ActivityDetector {
         let text = screen.joined(separator: "\n")
         let lower = text.lowercased()
 
-        // Both Codex and Claude Code show this only while a turn is running.
+        // Working — checked first, because the input box is on screen even while
+        // a turn runs. Claude Code (verified) shows a spinner line
+        // `✽ <Verb>ing… (23m 36s · …)` and running tool lines `… (8m 1s)`: a
+        // Unicode ellipsis followed by a parenthesised elapsed time. Both CLIs
+        // may also print an "esc to interrupt" hint.
+        if text.range(of: #"…\s*\(\d+\s*[hms]"#, options: .regularExpression) != nil {
+            return ActivityObservation(.working, .high, "screen shows a running spinner/elapsed time")
+        }
         if lower.contains("esc to interrupt") {
             return ActivityObservation(.working, .high, "screen shows 'esc to interrupt'")
         }
@@ -55,9 +62,9 @@ public enum ActivityDetector {
                 return ActivityObservation(.idle, .high, "Codex status shows 'Ready'")
             }
         case .claudeCode:
-            // The input box prompt is ready and no turn is running.
+            // Not working and the input box prompt is on screen.
             if screen.contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("❯") }) {
-                return ActivityObservation(.idle, .medium, "Claude input box ready")
+                return ActivityObservation(.idle, .medium, "Claude input box ready, no running turn")
             }
         case .none, .unknown:
             break
