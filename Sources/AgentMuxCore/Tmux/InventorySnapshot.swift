@@ -96,6 +96,10 @@ public struct InventorySnapshot: Sendable, Equatable {
     /// Server-computed screen activity verdict per agent pane ("working" /
     /// "idle" / "unknown"). The screen content never leaves the container.
     public var screenStates: [String: String] = [:]
+    /// Server-computed session-log verdict per Codex pane ("working" / "idle"),
+    /// from the rollout's last task_started/task_complete. Only the verdict
+    /// leaves the container — never the conversation.
+    public var logStates: [String: String] = [:]
     public var processTableAvailable = true
     /// Set when the target was reached but tmux was not usable.
     public var failure: RemoteFailure?

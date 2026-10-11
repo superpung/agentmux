@@ -47,11 +47,19 @@ public enum ActivityDetector {
         kind: AgentKind,
         logEvent: String?,
         logAgeSeconds _: Int? = nil,
-        screenState: String?
+        screenState: String?,
+        logState: String? = nil
     ) -> ActivityObservation {
-        // The session log is robust to CLI version changes: "turn_duration" is
-        // written when a turn ends; an assistant/user last event means the turn
-        // is still in progress.
+        // Codex: the rollout's last task_* event, already reduced to a verdict
+        // on the server (task_started = working, task_complete = idle).
+        switch logState {
+        case "working": return ActivityObservation(.working, .high, "log: task in progress")
+        case "idle": return ActivityObservation(.idle, .high, "log: task complete")
+        default: break
+        }
+        // Claude: the session log is robust to CLI version changes.
+        // "turn_duration" is written when a turn ends; an assistant/user last
+        // event means the turn is still in progress.
         if let logEvent {
             if logEvent.hasSuffix("/turn_duration") {
                 return ActivityObservation(.idle, .high, "log: turn ended (\(logEvent))")

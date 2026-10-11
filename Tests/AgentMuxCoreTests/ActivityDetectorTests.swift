@@ -78,6 +78,14 @@ import Testing
         #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: "idle").activity == .working)
     }
 
+    @Test func codexLogStateWinsOverScreen() {
+        // task_started/task_complete reduced on the server to a verdict.
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "idle", logState: "working").activity == .working)
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "working", logState: "idle").activity == .idle)
+        // No log verdict falls back to the screen.
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "working", logState: nil).activity == .working)
+    }
+
     @Test func screenStateFallbackWhenNoLog() {
         #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "working").activity == .working)
         #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "idle").activity == .idle)

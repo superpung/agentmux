@@ -79,6 +79,26 @@ public enum InventoryProbe {
               echo "log $ev $(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))"
             fi
           fi
+          # Codex session log — structural only. The process keeps its rollout
+          # JSONL open, so its fd gives the exact active file; the verdict is the
+          # last task_started/task_complete (only those tokens are read, never
+          # message content). Emitted per pane like the screen verdict.
+          if [ "$(cat /proc/$pid/comm 2>/dev/null)" = codex ] && command -v jq >/dev/null 2>&1 && command -v tac >/dev/null 2>&1; then
+            cpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+            crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | head -1)
+            if [ -n "$cpane" ] && [ -n "$crf" ]; then
+              # Scan from the end for the last turn boundary (task_started =
+              # working; task_complete / turn_aborted = idle). A fixed tail
+              # window is unreliable: a long turn can have hundreds of events
+              # after its task_started. grep -m1 stops jq at the first match.
+              cev=$(tac "$crf" 2>/dev/null | jq -r 'select(.type=="event_msg") | .payload.type' 2>/dev/null | grep -m 1 -E '^(task_started|task_complete|turn_aborted)$')
+              cage=$(( $(date +%s) - $(stat -c %Y "$crf" 2>/dev/null) ))
+              case "$cev" in
+                task_started) echo "@@logstate $cpane working $cage" ;;
+                task_complete|turn_aborted) echo "@@logstate $cpane idle $cage" ;;
+              esac
+            fi
+          fi
         done
         echo "@@section screens"
         # Background activity needs only a status, not the conversation. The
@@ -151,6 +171,9 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@screenstate ") {
                 let fields = rest.split(separator: " ")
                 if fields.count == 2, isID(fields[0], "%") { snapshot.screenStates[String(fields[0])] = String(fields[1]) }
+            } else if let rest = line.dropPrefix("@@logstate ") {
+                let fields = rest.split(separator: " ")
+                if fields.count >= 2, isID(fields[0], "%") { snapshot.logStates[String(fields[0])] = String(fields[1]) }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
                 if let pid = currentAgent {

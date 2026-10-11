@@ -103,7 +103,8 @@ extension AppModel {
                     kind: detection.kind,
                     logEvent: evidence?.logEvent,
                     logAgeSeconds: evidence?.logAgeSeconds,
-                    screenState: snapshot.screenStates[pane.id]
+                    screenState: snapshot.screenStates[pane.id],
+                    logState: snapshot.logStates[pane.id]
                 ).activity
                 return AgentEntry(
                     ref: ref,
