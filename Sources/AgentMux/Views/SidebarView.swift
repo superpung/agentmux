@@ -204,32 +204,39 @@ struct SidebarView: View {
     }
 
     private var groups: [Group] {
-        var order: [String] = []
         var labels: [String: String] = [:]
         var map: [String: [AgentEntry]] = [:]
         for agent in matchedAgents {
             let k = grouping.key(agent)
-            if map[k] == nil { order.append(k); labels[k] = grouping.label(agent) }
+            if map[k] == nil { labels[k] = grouping.label(agent) }
             map[k, default: []].append(agent)
         }
-        // Group order: semantic for status, stable (first-seen) otherwise, so
-        // whole sections don't reshuffle as agents come and go.
+        var result = map.map { Group(id: $0.key, label: labels[$0.key] ?? $0.key, agents: sorted($0.value)) }
         if grouping == .status {
-            order.sort { Self.statusRank($0) < Self.statusRank($1) }
+            result.sort { Self.statusRank($0.id) < Self.statusRank($1.id) }
+        } else {
+            // Order groups by their top agent, so the group holding the most
+            // relevant agent (pinned / needs-attention / working / most-recent)
+            // comes first — a brand-new agent floats its group to the top.
+            result.sort { lhs, rhs in
+                guard let a = lhs.agents.first, let b = rhs.agents.first else { return lhs.agents.count > rhs.agents.count }
+                let ka = rank(a), kb = rank(b)
+                return ka == kb ? lhs.label < rhs.label : ka < kb
+            }
         }
-        return order.map { Group(id: $0, label: labels[$0] ?? $0, agents: sorted(map[$0] ?? [])) }
+        return result
     }
 
     /// Within a group: pinned first, then needs-attention, then working, then
     /// the rest — each tier most-recently-active first (unknown ages last).
     private func sorted(_ agents: [AgentEntry]) -> [AgentEntry] {
-        agents.sorted { a, b in
-            let pa = model.isPinned(a.identityKey) ? 0 : 1, pb = model.isPinned(b.identityKey) ? 0 : 1
-            if pa != pb { return pa < pb }
-            let ra = Self.activityRank(a.activity), rb = Self.activityRank(b.activity)
-            if ra != rb { return ra < rb }
-            return (a.lastActiveSeconds ?? .max) < (b.lastActiveSeconds ?? .max)
-        }
+        agents.sorted { rank($0) < rank($1) }
+    }
+
+    /// Sort key: pinned, then activity (attention / working / other), then
+    /// most-recently-active.
+    private func rank(_ agent: AgentEntry) -> (Int, Int, Int) {
+        (model.isPinned(agent.identityKey) ? 0 : 1, Self.activityRank(agent.activity), agent.lastActiveSeconds ?? .max)
     }
 
     static func activityRank(_ activity: AgentActivity) -> Int {
