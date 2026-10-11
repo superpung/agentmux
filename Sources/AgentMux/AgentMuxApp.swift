@@ -32,6 +32,15 @@ struct AgentMuxApp: App {
             }
         }
 
+        WindowGroup(for: PaneRef.self) { $ref in
+            if let ref {
+                PoppedTerminalWindow(ref: ref)
+                    .environment(model)
+                    .frame(minWidth: 480, minHeight: 320)
+            }
+        }
+        .defaultSize(width: 900, height: 600)
+
         Settings {
             SettingsView()
                 .environment(model)

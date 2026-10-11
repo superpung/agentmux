@@ -4,7 +4,7 @@ import Observation
 
 /// Identifies a pane on one tmux server generation. `%3` on another socket,
 /// another container or a restarted server is a different pane.
-struct PaneRef: Hashable, Sendable {
+struct PaneRef: Hashable, Sendable, Codable {
     var targetID: String
     var serverPID: Int
     var serverStart: Int
@@ -68,6 +68,9 @@ final class AppModel {
     var showDevicePanel = false
     var showSearch = false
     private(set) var terminals: [PaneRef: PaneTerminal] = [:]
+    /// Mirrors shown in their own window; the main detail renders a placeholder
+    /// for these so a single surface is never in two view hierarchies.
+    private(set) var poppedOut: Set<PaneRef> = []
 
     /// The single source of truth, managed in Settings and saved to disk.
     private(set) var settings = AppSettings()
@@ -499,19 +502,34 @@ final class AppModel {
             recentlyViewed.insert(ref, at: 0)
             evictStaleTerminals()
         }
-        for terminal in terminals.values {
+        for terminal in terminals.values where !poppedOut.contains(terminal.ref) {
             terminal.setActive(terminal.ref == ref)
         }
     }
 
-    /// Closes mirrors beyond the cap, oldest first, never the selected one.
+    /// Closes mirrors beyond the cap, oldest first, never the selected one or
+    /// one shown in its own window.
     private func evictStaleTerminals() {
         while terminals.count > Self.maxOpenTerminals,
-              let victim = recentlyViewed.last(where: { $0 != selection && terminals[$0] != nil })
+              let victim = recentlyViewed.last(where: { $0 != selection && !poppedOut.contains($0) && terminals[$0] != nil })
         {
             recentlyViewed.removeAll { $0 == victim }
             closeTerminal(victim)
         }
+    }
+
+    /// Moves the selected agent's mirror into its own window. The mirror itself
+    /// is unchanged; only which window renders its surface moves.
+    func popOut(_ ref: PaneRef) {
+        guard state(ref.targetID)?.target.access.allowsAttach == true else { return }
+        if terminals[ref] == nil { openTerminal(ref) }
+        poppedOut.insert(ref)
+        terminals[ref]?.setActive(true)
+    }
+
+    /// The window closed: the mirror returns to the main detail pane.
+    func returnFromWindow(_ ref: PaneRef) {
+        poppedOut.remove(ref)
     }
 
     func terminal(for ref: PaneRef) -> PaneTerminal? {
@@ -535,6 +553,7 @@ final class AppModel {
 
     /// Ends this view's mirror. The pane and its programs keep running.
     func closeTerminal(_ ref: PaneRef) {
+        poppedOut.remove(ref)
         terminals.removeValue(forKey: ref)?.close()
     }
 

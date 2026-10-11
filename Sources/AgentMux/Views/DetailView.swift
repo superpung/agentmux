@@ -4,19 +4,26 @@ import SwiftUI
 
 struct DetailView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ZStack {
             GhosttyRuntime.terminalBackgroundColor
             // Every open terminal stays mounted so its screen survives
-            // switching; only the selected one is visible and live.
+            // switching; only the selected one is visible and live. A mirror
+            // shown in its own window is not rendered here, so its single
+            // surface never lives in two hierarchies.
             ForEach(Array(model.terminals.values), id: \.ref) { terminal in
-                MirroredSurfaceView(terminal: terminal)
-                    .opacity(terminal.ref == model.selection ? 1 : 0)
-                    .allowsHitTesting(terminal.ref == model.selection)
+                if !model.poppedOut.contains(terminal.ref) {
+                    MirroredSurfaceView(terminal: terminal)
+                        .opacity(terminal.ref == model.selection ? 1 : 0)
+                        .allowsHitTesting(terminal.ref == model.selection)
+                }
             }
             if let ref = model.selection {
-                if model.terminal(for: ref) == nil {
+                if model.poppedOut.contains(ref) {
+                    PoppedInfoView()
+                } else if model.terminal(for: ref) == nil {
                     PanePlaceholderView(ref: ref)
                 }
             } else {
@@ -57,6 +64,15 @@ struct DetailView: View {
         }
         if let ref = model.selection, let terminal = model.terminal(for: ref) {
             ToolbarItemGroup {
+                if !model.poppedOut.contains(ref) {
+                    Button {
+                        model.popOut(ref)
+                        openWindow(value: ref)
+                    } label: {
+                        Label("Open in New Window", systemImage: "macwindow.on.rectangle")
+                    }
+                    .help("Show this agent in its own window")
+                }
                 Button {
                     terminal.resync()
                 } label: {
@@ -212,6 +228,42 @@ private struct Meter: View {
         case ..<0.9: return .orange
         default: return .red
         }
+    }
+}
+
+/// Shown in its own window; renders the same single mirror surface, which the
+/// main detail pane releases while this window is open.
+struct PoppedTerminalWindow: View {
+    @Environment(AppModel.self) private var model
+    let ref: PaneRef
+
+    var body: some View {
+        ZStack {
+            GhosttyRuntime.terminalBackgroundColor
+            if let terminal = model.terminal(for: ref) {
+                MirroredSurfaceView(terminal: terminal)
+            } else {
+                Text("This agent is no longer available.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(model.agentEntry(ref)?.title ?? "Agent")
+        .onAppear { model.terminal(for: ref)?.setActive(true) }
+        .onDisappear { model.returnFromWindow(ref) }
+    }
+}
+
+private struct PoppedInfoView: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "macwindow.on.rectangle")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("Open in a separate window").font(.headline)
+            Text("Close that window to bring this agent back here.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
