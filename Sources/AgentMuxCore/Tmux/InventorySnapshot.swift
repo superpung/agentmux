@@ -101,6 +101,19 @@ public struct InventorySnapshot: Sendable, Equatable {
             guard let contextTokens, let contextWindow, contextWindow > 0 else { return nil }
             return Double(contextTokens) / Double(contextWindow)
         }
+
+        /// Claude's session log omits the context window; Claude Code uses
+        /// 200k, or 1M for extended-context models, and exposes the exact value
+        /// only to its status line. We infer it safely: a context over 200k
+        /// must be a 1M window, and ≤200k is treated as 200k. This can overstate
+        /// the fraction for a 1M model at low usage, but never understates a
+        /// near-full context. Codex records its own window, so this is a no-op.
+        public func withInferredWindow() -> Self {
+            guard contextWindow == nil, let contextTokens else { return self }
+            var copy = self
+            copy.contextWindow = contextTokens > 200_000 ? 1_000_000 : 200_000
+            return copy
+        }
     }
 
     public var container: Container?

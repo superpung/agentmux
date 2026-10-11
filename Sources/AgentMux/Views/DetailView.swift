@@ -132,7 +132,7 @@ private struct StatusBar: View {
         } else {
             problem = nil
         }
-        let usage = state.snapshot?.usage[ref.paneID]
+        let usage = state.snapshot?.usage[ref.paneID]?.withInferredWindow()
         guard problem != nil || usage != nil else { return nil }
         return Content(problem: problem, usage: usage, tooltip: tooltip(ref, state))
     }

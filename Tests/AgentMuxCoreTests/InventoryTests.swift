@@ -184,6 +184,22 @@ arg -p
         #expect(s.usage["%7"]?.contextWindow == nil)
     }
 
+    @Test func inferredWindowForClaude() {
+        // Over 200k must be a 1M window.
+        let big = InventorySnapshot.AgentUsage(contextTokens: 668_716, contextWindow: nil).withInferredWindow()
+        #expect(big.contextWindow == 1_000_000)
+        #expect((big.contextFraction ?? 0) > 0.66 && (big.contextFraction ?? 0) < 0.67)
+        // At or below 200k, treat as a 200k window (never under-reports fullness).
+        let small = InventorySnapshot.AgentUsage(contextTokens: 150_000, contextWindow: nil).withInferredWindow()
+        #expect(small.contextWindow == 200_000)
+        #expect(small.contextFraction == 0.75)
+        // Codex already has a window → unchanged.
+        let codex = InventorySnapshot.AgentUsage(contextTokens: 110_000, contextWindow: 258_400).withInferredWindow()
+        #expect(codex.contextWindow == 258_400)
+        // No tokens → unchanged.
+        #expect(InventorySnapshot.AgentUsage().withInferredWindow().contextWindow == nil)
+    }
+
     @Test func malformedRowsAreIgnored() throws {
         let odd = fixture.replacingOccurrences(of: "@@section panes\n", with: "@@section panes\nnot a row\n%x 1 0 1 1\n")
         #expect(try InventoryProbe.parse(odd, nonce: nonce).panes.count == 5)
