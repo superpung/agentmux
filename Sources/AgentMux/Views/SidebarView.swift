@@ -1,20 +1,48 @@
 import AgentMuxCore
 import SwiftUI
 
+/// How the sidebar groups agents into sections.
+enum AgentGrouping: String, CaseIterable, Identifiable {
+    case project
+    case container
+    case status
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .project: return "Project"
+        case .container: return "Container"
+        case .status: return "Status"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .project: return "folder"
+        case .container: return "shippingbox"
+        case .status: return "circle.dashed"
+        }
+    }
+}
+
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: PaneRef?
     @State private var query = ""
+    @AppStorage("agentGrouping") private var groupingRaw = AgentGrouping.project.rawValue
+
+    private var grouping: AgentGrouping { AgentGrouping(rawValue: groupingRaw) ?? .project }
 
     var body: some View {
         List(selection: $selection) {
-            if agentSpaces.isEmpty, filteredPanes.isEmpty {
+            if agentGroups.isEmpty, filteredPanes.isEmpty {
                 emptyRow
             }
-            ForEach(agentSpaces, id: \.space) { group in
+            ForEach(agentGroups) { group in
                 Section(group.label) {
                     ForEach(group.agents) { agent in
-                        AgentRow(entry: agent, showDevice: model.showsAgentDeviceBadge)
+                        AgentRow(entry: agent, showDevice: showDevice)
                             .tag(agent.ref)
                     }
                 }
@@ -32,6 +60,18 @@ struct SidebarView: View {
         .navigationTitle("AgentMux")
         .toolbar {
             ToolbarItem {
+                Menu {
+                    Picker("Group by", selection: $groupingRaw) {
+                        ForEach(AgentGrouping.allCases) { option in
+                            Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
+                        }
+                    }
+                } label: {
+                    Label("Group by", systemImage: "rectangle.3.group")
+                }
+                .help("Group agents by project, container or status")
+            }
+            ToolbarItem {
                 Button {
                     model.refreshAll()
                 } label: {
@@ -45,8 +85,14 @@ struct SidebarView: View {
 
     // MARK: Filtered data
 
-    private struct SpaceGroup: Hashable {
-        var space: SpaceKey
+    /// When grouping by container, the container is the section header, so the
+    /// per-row device badge would be redundant.
+    private var showDevice: Bool {
+        grouping != .container && model.showsAgentDeviceBadge
+    }
+
+    private struct AgentGroup: Identifiable {
+        var id: String
         var label: String
         var agents: [AgentEntry]
     }
@@ -58,14 +104,49 @@ struct SidebarView: View {
         return terms.allSatisfy { lower.contains($0) }
     }
 
-    private var agentSpaces: [SpaceGroup] {
-        var order: [SpaceKey] = []
-        var grouped: [SpaceKey: [AgentEntry]] = [:]
-        for agent in model.agentEntries where matches("\(agent.title) \(agent.kind.label) \(agent.space.path) \(agent.device.name)") {
-            if grouped[agent.space] == nil { order.append(agent.space) }
-            grouped[agent.space, default: []].append(agent)
+    private var matchedAgents: [AgentEntry] {
+        model.agentEntries.filter { matches("\($0.title) \($0.kind.label) \($0.space.path) \($0.device.name)") }
+    }
+
+    private var agentGroups: [AgentGroup] {
+        switch grouping {
+        case .project:
+            // Keep tmux order within a project so rows don't jump as state changes.
+            return grouped(by: { "\($0.space.targetID)\n\($0.space.path)" }, label: { SpaceLabel.label($0.space.path) })
+        case .container:
+            return grouped(by: { $0.device.id }, label: { $0.device.name })
+        case .status:
+            return statusGroups()
         }
-        return order.map { SpaceGroup(space: $0, label: SpaceLabel.label($0.path), agents: grouped[$0] ?? []) }
+    }
+
+    /// Groups the matched agents by `key`, preserving first-seen (tmux) order
+    /// both of the groups and of the rows within each group.
+    private func grouped(by key: (AgentEntry) -> String, label: (AgentEntry) -> String) -> [AgentGroup] {
+        var order: [String] = []
+        var labels: [String: String] = [:]
+        var rows: [String: [AgentEntry]] = [:]
+        for agent in matchedAgents {
+            let k = key(agent)
+            if rows[k] == nil { order.append(k); labels[k] = label(agent) }
+            rows[k, default: []].append(agent)
+        }
+        return order.map { AgentGroup(id: $0, label: labels[$0] ?? $0, agents: rows[$0] ?? []) }
+    }
+
+    /// Buckets agents by activity, in attention → working → idle → other order.
+    private func statusGroups() -> [AgentGroup] {
+        let buckets: [(id: String, label: String, test: (AgentActivity) -> Bool)] = [
+            ("attention", "Needs attention", { $0.needsAttention }),
+            ("working", "Working", { $0 == .working }),
+            ("idle", "Idle", { $0 == .idle }),
+            ("exited", "Exited", { $0 == .exited }),
+            ("other", "Unknown", { $0 == .unknown }),
+        ]
+        return buckets.compactMap { bucket in
+            let agents = matchedAgents.filter { bucket.test($0.activity) }
+            return agents.isEmpty ? nil : AgentGroup(id: bucket.id, label: bucket.label, agents: agents)
+        }
     }
 
     private var filteredPanes: [PaneEntry] {
