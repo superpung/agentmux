@@ -65,10 +65,11 @@ struct DetailView: View {
                 .help("Rebuild this view from the pane's current screen")
                 Button {
                     model.closeTerminal(ref)
+                    model.selection = nil
                 } label: {
-                    Label("Disconnect", systemImage: "bolt.horizontal.circle")
+                    Label("Close", systemImage: "xmark.circle")
                 }
-                .help("Ends this view's tmux client. The pane keeps running.")
+                .help("Closes this view and ends its tmux client. The agent and its window keep running on the server.")
             }
         }
     }
