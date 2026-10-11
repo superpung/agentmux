@@ -39,6 +39,12 @@ struct AgentEntry: Identifiable, Hashable {
     /// Seconds since the agent last wrote its session log (nil if unknown).
     var lastActiveSeconds: Int?
     var id: PaneRef { ref }
+
+    /// A stable identity for user labels (pin / rename), surviving pane-id
+    /// changes: the container, session, project and agent kind.
+    var identityKey: String {
+        "\(space.targetID)|\(session)|\(space.path)|\(kind)"
+    }
 }
 
 /// Any other pane: shells, file managers, experiments.

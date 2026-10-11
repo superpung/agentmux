@@ -87,6 +87,7 @@ struct SidebarView: View {
     @State private var query = ""
     @AppStorage("sidebarGroupBy") private var groupingRaw = GroupBy.project.rawValue
     @AppStorage("sidebarFilter") private var filterRaw = AgentFilter.all.rawValue
+    @State private var renaming: AgentEntry?
 
     private var grouping: GroupBy { GroupBy(rawValue: groupingRaw) ?? .project }
     private var filter: AgentFilter { AgentFilter(rawValue: filterRaw) ?? .all }
@@ -101,6 +102,7 @@ struct SidebarView: View {
                     ForEach(group.agents) { agent in
                         AgentRow(entry: agent, showDevice: showDevice)
                             .tag(agent.ref)
+                            .contextMenu { rowMenu(agent) }
                     }
                 } header: {
                     if !group.label.isEmpty { Text(group.label) }
@@ -130,6 +132,21 @@ struct SidebarView: View {
             }
         }
         .safeAreaInset(edge: .bottom) { StatusFooter() }
+        .sheet(item: $renaming) { agent in
+            RenameSheet(current: model.customName(agent.identityKey) ?? "", placeholder: agent.title) { name in
+                model.setCustomName(agent.identityKey, name)
+            }
+        }
+    }
+
+    @ViewBuilder private func rowMenu(_ agent: AgentEntry) -> some View {
+        Button(model.isPinned(agent.identityKey) ? "Unpin" : "Pin") {
+            model.togglePin(agent.identityKey)
+        }
+        Button("Rename…") { renaming = agent }
+        if model.customName(agent.identityKey) != nil {
+            Button("Reset Name") { model.setCustomName(agent.identityKey, "") }
+        }
     }
 
     private var groupingMenu: some View {
@@ -203,10 +220,12 @@ struct SidebarView: View {
         return order.map { Group(id: $0, label: labels[$0] ?? $0, agents: sorted(map[$0] ?? [])) }
     }
 
-    /// Within a group: needs-attention first, then working, then the rest —
-    /// each tier most-recently-active first (unknown ages last).
+    /// Within a group: pinned first, then needs-attention, then working, then
+    /// the rest — each tier most-recently-active first (unknown ages last).
     private func sorted(_ agents: [AgentEntry]) -> [AgentEntry] {
         agents.sorted { a, b in
+            let pa = model.isPinned(a.identityKey) ? 0 : 1, pb = model.isPinned(b.identityKey) ? 0 : 1
+            if pa != pb { return pa < pb }
             let ra = Self.activityRank(a.activity), rb = Self.activityRank(b.activity)
             if ra != rb { return ra < rb }
             return (a.lastActiveSeconds ?? .max) < (b.lastActiveSeconds ?? .max)
@@ -269,9 +288,40 @@ enum RelativeTime {
     }
 }
 
+private struct RenameSheet: View {
+    let current: String
+    let placeholder: String
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename Agent").font(.headline)
+            TextField("Name", text: $name, prompt: Text(placeholder))
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { save() }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { save() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+        .onAppear { name = current }
+    }
+
+    private func save() {
+        onSave(name)
+        dismiss()
+    }
+}
+
 // MARK: - Rows
 
 private struct AgentRow: View {
+    @Environment(AppModel.self) private var model
     let entry: AgentEntry
     let showDevice: Bool
 
@@ -280,8 +330,15 @@ private struct AgentRow: View {
             agentIcon
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
-                Text(entry.title)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    if model.isPinned(entry.identityKey) {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(model.customName(entry.identityKey) ?? entry.title)
+                        .lineLimit(1)
+                }
                 HStack(spacing: 4) {
                     Text(entry.kind.label)
                     if showDevice {

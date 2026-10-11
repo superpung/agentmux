@@ -86,6 +86,25 @@ final class AppModel {
         UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
     }
 
+    /// User labels keyed by `AgentEntry.identityKey`, persisted.
+    private(set) var pinnedAgents: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "pinnedAgents") ?? [])
+    private(set) var customNames: [String: String] = (UserDefaults.standard.dictionary(forKey: "customNames") as? [String: String]) ?? [:]
+
+    func isPinned(_ key: String) -> Bool { pinnedAgents.contains(key) }
+
+    func togglePin(_ key: String) {
+        if pinnedAgents.contains(key) { pinnedAgents.remove(key) } else { pinnedAgents.insert(key) }
+        UserDefaults.standard.set(Array(pinnedAgents), forKey: "pinnedAgents")
+    }
+
+    func customName(_ key: String) -> String? { customNames[key] }
+
+    func setCustomName(_ key: String, _ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { customNames[key] = nil } else { customNames[key] = trimmed }
+        UserDefaults.standard.set(customNames, forKey: "customNames")
+    }
+
     var hosts: [HostConfig] { settings.hosts }
 
     /// AGENTMUX_OPEN=<target-id>/<pane-id>: select and open that pane once it
