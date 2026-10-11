@@ -98,7 +98,13 @@ extension AppModel {
                 let title = AgentTitle.from(paneTitle: pane.title, kind: detection.kind)
                     ?? window.flatMap { $0 == detection.kind.label ? nil : $0 }
                     ?? SpaceLabel.label(pane.currentPath)
-                let activity = ActivityDetector.detect(kind: detection.kind, screen: snapshot.screens[pane.id] ?? []).activity
+                let evidence = detection.pid.flatMap { snapshot.agents[$0] }
+                let activity = ActivityDetector.resolve(
+                    kind: detection.kind,
+                    logEvent: evidence?.logEvent,
+                    logAgeSeconds: evidence?.logAgeSeconds,
+                    screenState: snapshot.screenStates[pane.id]
+                ).activity
                 return AgentEntry(
                     ref: ref,
                     title: title,

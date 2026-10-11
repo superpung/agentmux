@@ -93,8 +93,8 @@ exe /root/.local/share/claude/versions/2.1.293
 arg claude
 arg -p
 @@section screens
-@@screen %26 bGluZSBvbmUK4p2vIHJlYWR5
-@@screen %bad notbase64!!!
+@@screenstate %26 working
+@@screenstate %bad notanid
 @@end n0nce
 """
 
@@ -149,10 +149,10 @@ arg -p
         #expect(try InventoryProbe.parse(noTmux, nonce: nonce).failure?.kind == .tmuxNotFound)
     }
 
-    @Test func parsesBase64Screens() throws {
+    @Test func parsesScreenStates() throws {
         let snapshot = try InventoryProbe.parse(fixture, nonce: nonce)
-        #expect(snapshot.screens["%26"] == ["line one", "❯ ready"])
-        #expect(snapshot.screens["%bad"] == nil) // invalid base64 is skipped
+        #expect(snapshot.screenStates["%26"] == "working")
+        #expect(snapshot.screenStates["%bad"] == nil) // not a valid pane id
     }
 
     @Test func malformedRowsAreIgnored() throws {

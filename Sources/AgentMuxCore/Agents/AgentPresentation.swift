@@ -38,7 +38,38 @@ public struct ActivityObservation: Sendable, Equatable {
 /// everything else is `unknown`. Approval / waiting-input detection needs
 /// real fixtures of those states and is deliberately not guessed here.
 public enum ActivityDetector {
-    public static func detect(kind: AgentKind, screen: [String]) -> ActivityObservation {
+    /// Resolves activity from status-only inputs. The background probe never
+    /// sends screen content: for Claude it reads the session log's last event
+    /// type/subtype (`logEvent`), and for any agent it reduces the screen to a
+    /// `working`/`idle`/`unknown` verdict on the server (`screenState`), which
+    /// mirrors `screenVerdict` below. The log wins when present.
+    public static func resolve(
+        kind: AgentKind,
+        logEvent: String?,
+        logAgeSeconds _: Int? = nil,
+        screenState: String?
+    ) -> ActivityObservation {
+        // The session log is robust to CLI version changes: "turn_duration" is
+        // written when a turn ends; an assistant/user last event means the turn
+        // is still in progress.
+        if let logEvent {
+            if logEvent.hasSuffix("/turn_duration") {
+                return ActivityObservation(.idle, .high, "log: turn ended (\(logEvent))")
+            }
+            if logEvent.hasPrefix("assistant") || logEvent.hasPrefix("user") {
+                return ActivityObservation(.working, .high, "log: turn in progress (\(logEvent))")
+            }
+        }
+        switch screenState {
+        case "working": return ActivityObservation(.working, .high, "screen verdict: working")
+        case "idle": return ActivityObservation(.idle, kind == .codex ? .high : .medium, "screen verdict: idle")
+        default: return ActivityObservation(.unknown, .low, "no log or screen signal")
+        }
+    }
+
+    /// The screen rule, kept as the reference the server's shell mirrors and
+    /// for unit tests. Conservative: only `working` and `idle` are claimed.
+    public static func screenVerdict(kind: AgentKind, screen: [String]) -> ActivityObservation {
         guard !screen.isEmpty else { return .noScreen }
         let text = screen.joined(separator: "\n")
         let lower = text.lowercased()
@@ -54,20 +85,11 @@ public enum ActivityDetector {
         if lower.contains("esc to interrupt") {
             return ActivityObservation(.working, .high, "screen shows 'esc to interrupt'")
         }
-
-        switch kind {
-        case .codex:
-            // Status line e.g. "gpt-5.6 … · Ready · Context 60% left · weekly …".
-            if text.contains("· Ready ·") || lower.contains(" ready · context") {
-                return ActivityObservation(.idle, .high, "Codex status shows 'Ready'")
-            }
-        case .claudeCode:
-            // Not working and the input box prompt is on screen.
-            if screen.contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("❯") }) {
-                return ActivityObservation(.idle, .medium, "Claude input box ready, no running turn")
-            }
-        case .none, .unknown:
-            break
+        if text.contains("· Ready ·") || lower.contains(" ready · context") {
+            return ActivityObservation(.idle, .high, "Codex status shows 'Ready'")
+        }
+        if kind == .claudeCode, screen.contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("❯") }) {
+            return ActivityObservation(.idle, .medium, "Claude input box ready, no running turn")
         }
         return ActivityObservation(.unknown, .low, "no matching rule")
     }

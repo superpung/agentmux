@@ -195,7 +195,8 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                         line += "  -> \(detection.kind.rawValue)"
                         if let version = detection.version { line += " \(version)" }
                         if let directory = detection.configDirectory { line += " [\(directory)]" }
-                        let activity = ActivityDetector.detect(kind: detection.kind, screen: snapshot.screens[pane.id] ?? [])
+                        let ev = detection.pid.flatMap { snapshot.agents[$0] }
+                        let activity = ActivityDetector.resolve(kind: detection.kind, logEvent: ev?.logEvent, logAgeSeconds: ev?.logAgeSeconds, screenState: snapshot.screenStates[pane.id])
                         line += " {\(activity.activity.rawValue)/\(activity.confidence.rawValue)}"
                         line += " (\(detection.confidence.rawValue): \(detection.evidence.joined(separator: ", ")))"
                         if !detection.children.isEmpty {

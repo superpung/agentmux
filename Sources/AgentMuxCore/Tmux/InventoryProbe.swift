@@ -64,12 +64,34 @@ public enum InventoryProbe {
           tr '\\0\\n' '\\n ' < "/proc/$pid/cmdline" 2>/dev/null | head -n 2 | cut -c1-160 | sed 's/^/arg /'
           tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -E '^(CODEX_HOME|CLAUDE_CONFIG_DIR|TMUX_PANE)=' | cut -c1-300 | sed 's/^/env /'
           echo "start $(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f20)"
+          # Claude session log state — structural only (event type/subtype +
+          # mtime age), never message content. Located by the --resume id
+          # (the pane's own session file; the newest file in the dir is wrong
+          # when agents share a project dir).
+          if [ "$(cat /proc/$pid/comm 2>/dev/null)" = claude ] && command -v jq >/dev/null 2>&1; then
+            res=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE -- '--resume [0-9a-f-]{36}' | head -1 | awk '{print $2}')
+            ccfg=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1)
+            ccfg=${ccfg:-$HOME/.claude}
+            cenc=$(readlink "/proc/$pid/cwd" 2>/dev/null | sed 's#/#-#g')
+            lf="$ccfg/projects/$cenc/$res.jsonl"
+            if [ -n "$res" ] && [ -f "$lf" ]; then
+              ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
+              echo "log $ev $(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))"
+            fi
+          fi
         done
         echo "@@section screens"
+        # Background activity needs only a status, not the conversation. The
+        # screen is read here on the server and reduced to working/idle/unknown;
+        # no screen content leaves the container. (The full screen is sent only
+        # when the user opens a terminal to view it.)
         printf '%s\\n' "$procs" | awk '$6 ~ /^(codex|claude|node|bun|deno)$/ { print $1 }' | sort -u | head -n \(maxAgentCandidates) | while read -r pane; do
           [ -n "$pane" ] || continue
-          # base64 so pane content cannot collide with the line protocol.
-          echo "@@screen $pane $(tm capture-pane -p -t "$pane" 2>/dev/null | tail -n 24 | base64 | tr -d '\\n')"
+          scr=$(tm capture-pane -p -t "$pane" 2>/dev/null | tail -n 24)
+          if printf '%s' "$scr" | grep -qiE '…[[:space:]]*\\([0-9]+[[:space:]]*[hms]|esc to interrupt'; then st=working
+          elif printf '%s' "$scr" | grep -qE '· Ready ·|^[[:space:]]*(❯|›)'; then st=idle
+          else st=unknown; fi
+          echo "@@screenstate $pane $st"
         done
         echo "@@end \(nonce)"
 
@@ -126,8 +148,9 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@section ") {
                 section = rest
                 currentAgent = nil
-            } else if let rest = line.dropPrefix("@@screen ") {
-                if let (pane, lines) = parseScreen(rest) { snapshot.screens[pane] = lines }
+            } else if let rest = line.dropPrefix("@@screenstate ") {
+                let fields = rest.split(separator: " ")
+                if fields.count == 2, isID(fields[0], "%") { snapshot.screenStates[String(fields[0])] = String(fields[1]) }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
                 if let pid = currentAgent {
@@ -238,17 +261,6 @@ public enum InventoryProbe {
         )
     }
 
-    /// `<paneID> <base64 screen>` -> (pane, lines).
-    private static func parseScreen(_ text: String) -> (String, [String])? {
-        guard let space = text.firstIndex(of: " ") else { return nil }
-        let pane = String(text[..<space])
-        guard isID(Substring(pane), "%") else { return nil }
-        let encoded = String(text[text.index(after: space)...])
-        guard let data = Data(base64Encoded: encoded) else { return nil }
-        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        return (pane, lines)
-    }
-
     private static func parseAgentLine(_ line: String, into evidence: inout InventorySnapshot.AgentEvidence) {
         if let rest = line.dropPrefix("exe ") {
             evidence.executable = rest
@@ -262,6 +274,10 @@ public enum InventoryProbe {
             }
         } else if let rest = line.dropPrefix("start ") {
             evidence.startTicks = Int(rest)
+        } else if let rest = line.dropPrefix("log ") {
+            let fields = rest.split(separator: " ")
+            if let event = fields.first { evidence.logEvent = String(event) }
+            if fields.count > 1 { evidence.logAgeSeconds = Int(fields[1]) }
         }
     }
 

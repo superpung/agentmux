@@ -23,13 +23,13 @@ import Testing
     ]
 
     @Test func codexReadyIsIdle() {
-        let result = ActivityDetector.detect(kind: .codex, screen: codexIdle)
+        let result = ActivityDetector.screenVerdict(kind: .codex, screen: codexIdle)
         #expect(result.activity == .idle)
         #expect(result.confidence == .high)
     }
 
     @Test func claudeInputBoxIsIdle() {
-        let result = ActivityDetector.detect(kind: .claudeCode, screen: claudeIdle)
+        let result = ActivityDetector.screenVerdict(kind: .claudeCode, screen: claudeIdle)
         #expect(result.activity == .idle)
     }
 
@@ -41,12 +41,12 @@ import Testing
             "❯ ",
             "  ⏵⏵ auto mode on · 2 shells · ← for agents",
         ]
-        #expect(ActivityDetector.detect(kind: .claudeCode, screen: working).activity == .working)
+        #expect(ActivityDetector.screenVerdict(kind: .claudeCode, screen: working).activity == .working)
     }
 
     @Test func runningToolElapsedIsWorking() {
         let working = ["  cd /data; .venv/bin/… (8m 1s)", "❯ "]
-        #expect(ActivityDetector.detect(kind: .claudeCode, screen: working).activity == .working)
+        #expect(ActivityDetector.screenVerdict(kind: .claudeCode, screen: working).activity == .working)
     }
 
     @Test func codexWorkingFromInterruptHint() {
@@ -54,18 +54,35 @@ import Testing
             "• Running tool…",
             "  Esc to interrupt · gpt-5.6 high · Context 60% left",
         ]
-        #expect(ActivityDetector.detect(kind: .codex, screen: working).activity == .working)
+        #expect(ActivityDetector.screenVerdict(kind: .codex, screen: working).activity == .working)
     }
 
     @Test func idleScreensAreNotMistakenForWorking() {
         // "shift+tab to cycle" and "Ready" must not trip the interrupt rule.
-        #expect(ActivityDetector.detect(kind: .claudeCode, screen: claudeIdle).activity != .working)
-        #expect(ActivityDetector.detect(kind: .codex, screen: codexIdle).activity != .working)
+        #expect(ActivityDetector.screenVerdict(kind: .claudeCode, screen: claudeIdle).activity != .working)
+        #expect(ActivityDetector.screenVerdict(kind: .codex, screen: codexIdle).activity != .working)
     }
 
     @Test func emptyAndUnrecognizedAreUnknown() {
-        #expect(ActivityDetector.detect(kind: .codex, screen: []).activity == .unknown)
-        #expect(ActivityDetector.detect(kind: .claudeCode, screen: ["$ ls", "file.txt"]).activity == .unknown)
+        #expect(ActivityDetector.screenVerdict(kind: .codex, screen: []).activity == .unknown)
+        #expect(ActivityDetector.screenVerdict(kind: .claudeCode, screen: ["$ ls", "file.txt"]).activity == .unknown)
+    }
+
+    @Test func logTurnDurationIsIdle() {
+        let r = ActivityDetector.resolve(kind: .claudeCode, logEvent: "system/turn_duration", screenState: "working")
+        #expect(r.activity == .idle) // log wins over screen
+    }
+
+    @Test func logMidTurnIsWorking() {
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "assistant/", screenState: nil).activity == .working)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: "idle").activity == .working)
+    }
+
+    @Test func screenStateFallbackWhenNoLog() {
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "working").activity == .working)
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "idle").activity == .idle)
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: nil).activity == .unknown)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: nil, screenState: "unknown").activity == .unknown)
     }
 
     @Test func activityNeedsAttentionMapping() {

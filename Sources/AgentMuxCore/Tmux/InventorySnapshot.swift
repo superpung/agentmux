@@ -73,6 +73,12 @@ public struct InventorySnapshot: Sendable, Equatable {
         public var environment: [String: String]
         /// Start time in clock ticks since boot, for process identity.
         public var startTicks: Int?
+        /// Claude session log's last event as "type/subtype" (structural only,
+        /// no content), e.g. "system/turn_duration" or "assistant/". nil when
+        /// no log was read.
+        public var logEvent: String?
+        /// Seconds since the session log was last written.
+        public var logAgeSeconds: Int?
     }
 
     public var container: Container?
@@ -87,8 +93,9 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var panes: [Pane] = []
     public var processes: [ProcessNode] = []
     public var agents: [Int: AgentEvidence] = [:]
-    /// Visible-screen tail (last lines) per agent-candidate pane, for activity rules.
-    public var screens: [String: [String]] = [:]
+    /// Server-computed screen activity verdict per agent pane ("working" /
+    /// "idle" / "unknown"). The screen content never leaves the container.
+    public var screenStates: [String: String] = [:]
     public var processTableAvailable = true
     /// Set when the target was reached but tmux was not usable.
     public var failure: RemoteFailure?
