@@ -103,6 +103,11 @@ public struct TargetConfig: Codable, Sendable, Equatable, Identifiable {
 
         public var mode: Mode
         public var value: String?
+
+        public init(mode: Mode, value: String? = nil) {
+            self.mode = mode
+            self.value = value
+        }
     }
 
     public struct AgentProfile: Codable, Sendable, Equatable {

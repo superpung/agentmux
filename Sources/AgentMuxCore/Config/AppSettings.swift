@@ -18,6 +18,15 @@ public struct AppSettings: Codable, Sendable, Equatable {
         self.monitoredContainers = monitoredContainers
     }
 
+    /// Splits a monitored key "<hostId>/<container>" into its parts. The host id
+    /// has no slash; the container is the remainder.
+    public static func splitKey(_ key: String) -> (hostID: String, container: String)? {
+        guard let slash = key.firstIndex(of: "/") else { return nil }
+        let container = String(key[key.index(after: slash)...])
+        guard !container.isEmpty else { return nil }
+        return (String(key[..<slash]), container)
+    }
+
     /// AGENTMUX_SETTINGS, else ~/Library/Application Support/AgentMux/settings.json.
     public static func defaultURL() -> URL {
         if let path = ProcessInfo.processInfo.environment["AGENTMUX_SETTINGS"] {
@@ -91,8 +100,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         let hostIDs = Set(hosts.map(\.id))
         var seenKeys = Set<String>()
         monitoredContainers = monitoredContainers.filter { key in
-            guard let hostID = key.split(separator: "/", maxSplits: 1).first.map(String.init),
-                  hostIDs.contains(hostID) else { return false }
+            guard let parts = Self.splitKey(key), hostIDs.contains(parts.hostID) else { return false }
             return seenKeys.insert(key).inserted
         }
     }

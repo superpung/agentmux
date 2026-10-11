@@ -176,7 +176,15 @@ private struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if model.hosts.isEmpty {
+            if let error = model.configError {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("Settings problem").font(.headline)
+                Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                SettingsLink { Text("Open Settings…") }
+                    .padding(.top, 2)
+            } else if model.hosts.isEmpty {
                 Image(systemName: "server.rack")
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
@@ -185,12 +193,6 @@ private struct EmptyStateView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 SettingsLink { Text("Open Settings…") }
                     .padding(.top, 2)
-            } else if let error = model.configError {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                Text("Could not save settings").font(.headline)
-                Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             } else {
                 Image(systemName: "terminal")
                     .font(.largeTitle)

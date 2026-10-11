@@ -39,11 +39,9 @@ let settings: AppSettings = settingsPath
 /// All monitored targets, as the app would run them.
 func allTargets() -> [(HostConfig, TargetConfig)] {
     settings.monitoredContainers.compactMap { key in
-        guard let slash = key.firstIndex(of: "/") else { return nil }
-        let hostID = String(key[..<slash])
-        let container = String(key[key.index(after: slash)...])
-        guard let host = settings.hosts.first(where: { $0.id == hostID }) else { return nil }
-        return (host, TargetConfig.discovered(host: host, container: container))
+        guard let parts = AppSettings.splitKey(key),
+              let host = settings.hosts.first(where: { $0.id == parts.hostID }) else { return nil }
+        return (host, TargetConfig.discovered(host: host, container: parts.container))
     }
 }
 
@@ -75,6 +73,28 @@ func host(_ spec: String?) -> HostConfig {
     return host
 }
 
+/// Dev-only target on an isolated `agentmux-test` named socket, never the real
+/// default tmux. attach-test / release-orphans operate only here, so they
+/// cannot touch the user's actual sessions in a monitored container.
+func testTarget(_ spec: String?) -> (HostConfig, TargetConfig) {
+    var (host, target) = target(spec, access: .test)
+    target.tmuxSocket = .init(mode: .name, value: "agentmux-test")
+    return (host, target)
+}
+
+/// Positional arguments: drops flags and the value after `--container`.
+func positional(_ args: [String]) -> [String] {
+    var result: [String] = []
+    var i = 0
+    while i < args.count {
+        let a = args[i]
+        if a == "--container" { i += 2; continue }
+        if a.hasPrefix("-") { i += 1; continue }
+        result.append(a); i += 1
+    }
+    return result
+}
+
 /// Remote text is untrusted: show control characters escaped.
 func display(_ text: String) -> String {
     text.unicodeScalars.map { $0.properties.generalCategory == .control ? "\\u{\(String($0.value, radix: 16))}" : String($0) }.joined()
@@ -87,7 +107,7 @@ func option(_ name: String, in list: [String]) -> String? {
 
 switch command {
 case "probe":
-    let selected = rest.filter { !$0.hasPrefix("-") }
+    let selected = positional(rest)
     let targets = selected.isEmpty ? allTargets() : selected.map { target($0) }
     for (host, target) in targets {
         let started = Date()
@@ -114,7 +134,7 @@ case "clients":
     }
 
 case "attach-test":
-    let (host, target) = target(rest.first, access: .test)
+    let (host, target) = testTarget(rest.first)
     guard rest.count >= 2 else { fail("attach-test <target-id> <tmux-target> [--seconds N] [--type TEXT] [--leak]", code: 2) }
     let seconds = option("--seconds", in: rest).flatMap(Double.init) ?? 5
     let text = option("--type", in: rest)
@@ -192,7 +212,7 @@ case "containers":
     }
 
 case "release-orphans":
-    let (host, target) = target(rest.first, access: .test)
+    let (host, target) = testTarget(rest.first)
     print(await ClientRelease.release(host: host, context: try target.executionContext(), options: SSHOptions(), tags: []))
 
 default:

@@ -99,7 +99,21 @@ final class AppModel {
     private var settingsURL: URL { AppSettings.defaultURL() }
 
     func loadSettings() {
-        settings = AppSettings.loadOrImport()
+        let url = settingsURL
+        if FileManager.default.fileExists(atPath: url.path) {
+            // A corrupt file must not be silently replaced with empty settings
+            // (and must not be overwritten here) — surface the error instead.
+            do {
+                settings = try AppSettings.load(from: url)
+                configError = nil
+            } catch {
+                settings = AppSettings()
+                configError = "Could not read \(url.lastPathComponent): \(error)"
+            }
+        } else {
+            settings = AppSettings.loadOrImport(url: url)
+            configError = nil
+        }
         reconcileTargets()
     }
 
@@ -165,12 +179,10 @@ final class AppModel {
         var result: [(HostConfig, TargetConfig)] = []
         var seen = Set<String>()
         for key in settings.monitoredContainers {
-            guard let slash = key.firstIndex(of: "/") else { continue }
-            let hostID = String(key[..<slash])
-            let container = String(key[key.index(after: slash)...])
-            guard !container.isEmpty, let host = hosts.first(where: { $0.id == hostID }),
+            guard let parts = AppSettings.splitKey(key),
+                  let host = hosts.first(where: { $0.id == parts.hostID }),
                   seen.insert(key).inserted else { continue }
-            result.append((host, .discovered(host: host, container: container)))
+            result.append((host, .discovered(host: host, container: parts.container)))
         }
         return result
     }
@@ -222,7 +234,9 @@ final class AppModel {
     // MARK: Discovery
 
     /// Lists containers on every host (read-only) and refreshes the Settings
-    /// list. New selections take effect via `reconcileTargets()`.
+    /// list. Discovery only fills the container list; the monitored target set
+    /// comes from `settings` and is reconciled when the selection changes, so no
+    /// reconcile is needed here.
     func discoverAll() async {
         guard !isDiscovering else { return }
         isDiscovering = true
@@ -230,14 +244,14 @@ final class AppModel {
         for host in hosts {
             await discover(host: host)
         }
-        reconcileTargets()
     }
 
     /// Discovers one host by id (after it is added or edited).
     func discover(hostID: String) async {
-        guard let host = hosts.first(where: { $0.id == hostID }) else { return }
+        guard !isDiscovering, let host = hosts.first(where: { $0.id == hostID }) else { return }
+        isDiscovering = true
+        defer { isDiscovering = false }
         await discover(host: host)
-        reconcileTargets()
     }
 
     private func discover(host: HostConfig) async {
