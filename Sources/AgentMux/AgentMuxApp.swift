@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
 @main
 struct AgentMuxApp: App {
@@ -13,6 +14,7 @@ struct AgentMuxApp: App {
                 .onAppear {
                     appDelegate.model = model
                     model.startPolling()
+                    model.requestNotificationAuthorization()
                     Task { await model.discoverAll() }
                 }
         }
@@ -33,13 +35,26 @@ struct AgentMuxApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     @MainActor var model: AppModel?
 
     func applicationDidFinishLaunching(_: Notification) {
         // Needed when launched as a bare executable rather than from a bundle.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = self
+        }
+    }
+
+    /// Show the banner even when AgentMux is frontmost (the finished agent is
+    /// never the one being viewed — that case is filtered before posting).
+    func userNotificationCenter(
+        _: UNUserNotificationCenter,
+        willPresent _: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {

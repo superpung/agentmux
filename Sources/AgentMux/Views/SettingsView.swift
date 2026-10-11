@@ -7,12 +7,30 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         TabView {
+            GeneralSettings()
+                .tabItem { Label("General", systemImage: "gearshape") }
             HostsSettings()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
             ContainersSettings()
                 .tabItem { Label("Containers", systemImage: "shippingbox") }
         }
         .frame(width: 540, height: 480)
+    }
+}
+
+private struct GeneralSettings: View {
+    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Notify when an agent finishes or needs you", isOn: $notificationsEnabled)
+            } footer: {
+                Text("A banner appears when a monitored agent finishes its turn or starts waiting for input, unless you are already viewing it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

@@ -19,6 +19,8 @@ final class TargetState: Identifiable {
     let target: TargetConfig
     var snapshot: InventorySnapshot?
     var detections: [String: AgentDetection] = [:]
+    /// Resolved activity per agent pane, recomputed each refresh.
+    var activities: [String: AgentActivity] = [:]
     var lastSuccess: Date?
     var lastFailure: RemoteFailure?
     var lastAttempt: Date?
@@ -77,6 +79,12 @@ final class AppModel {
     private var isPolling = false
     private var pollers: [String: Task<Void, Never>] = [:]
     private var releasedOrphans: Set<String> = []
+    @ObservationIgnored private let notifier = Notifier()
+
+    /// Whether OS notifications fire (shared with the Settings toggle).
+    var notificationsEnabled: Bool {
+        UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
+    }
 
     var hosts: [HostConfig] { settings.hosts }
 
@@ -330,6 +338,9 @@ final class AppModel {
             let previousServer = state.snapshot?.server
             state.snapshot = snapshot
             state.detections = AgentDetector.detect(snapshot)
+            let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
+            notifyActivityTransitions(state, old: state.activities, new: newActivities)
+            state.activities = newActivities
             state.lastSuccess = Date()
             state.lastFailure = nil
             state.interval = TargetState.baseInterval
@@ -376,6 +387,52 @@ final class AppModel {
                 terminal.markStale(reason: "tmux server changed")
             }
         }
+    }
+
+    // MARK: Activity & notifications
+
+    /// Resolves each agent pane's activity from the snapshot's log/screen
+    /// signals. Shared by the sidebar and by notification transitions.
+    static func resolveActivities(snapshot: InventorySnapshot, detections: [String: AgentDetection]) -> [String: AgentActivity] {
+        var result: [String: AgentActivity] = [:]
+        for (paneID, detection) in detections where detection.kind == .codex || detection.kind == .claudeCode {
+            let evidence = detection.pid.flatMap { snapshot.agents[$0] }
+            result[paneID] = ActivityDetector.resolve(
+                kind: detection.kind,
+                logEvent: evidence?.logEvent,
+                logAgeSeconds: evidence?.logAgeSeconds,
+                screenState: snapshot.screenStates[paneID],
+                logState: snapshot.logStates[paneID]
+            ).activity
+        }
+        return result
+    }
+
+    /// Fires a notification when a known agent finishes (working → idle) or
+    /// starts needing input, unless the user is already viewing it. Nothing
+    /// fires on a target's first refresh (no prior state to compare).
+    private func notifyActivityTransitions(_ state: TargetState, old: [String: AgentActivity], new: [String: AgentActivity]) {
+        guard notificationsEnabled, !old.isEmpty else { return }
+        for (paneID, now) in new {
+            guard let before = old[paneID], before != now else { continue }
+            if let ref = state.ref(for: paneID), ref == selection { continue }
+            let title = agentTitle(state, paneID: paneID)
+            if before == .working, now == .idle {
+                notifier.notify(.finished, agent: title, detail: state.device.name)
+            } else if !before.needsAttention, now.needsAttention {
+                notifier.notify(.needsAttention, agent: title, detail: state.device.name)
+            }
+        }
+    }
+
+    func requestNotificationAuthorization() {
+        if notificationsEnabled { notifier.requestAuthorizationIfNeeded() }
+    }
+
+    private func agentTitle(_ state: TargetState, paneID: String) -> String {
+        guard let snapshot = state.snapshot, let pane = snapshot.pane(paneID) else { return paneID }
+        let kind = state.detections[paneID]?.kind ?? .none
+        return AgentTitle.from(paneTitle: pane.title, kind: kind) ?? SpaceLabel.label(pane.currentPath)
     }
 
     // MARK: Derived data
