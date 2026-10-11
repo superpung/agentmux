@@ -81,6 +81,28 @@ public struct InventorySnapshot: Sendable, Equatable {
         public var logAgeSeconds: Int?
     }
 
+    /// Token usage read from an agent's session log (structural numbers only).
+    public struct AgentUsage: Sendable, Equatable {
+        /// Tokens in the current context (the last request's prompt size).
+        public var contextTokens: Int?
+        /// The model's context window, when the log records it (Codex).
+        public var contextWindow: Int?
+        /// Rate-limit used percent, when the log records it (Codex weekly).
+        public var rateLimitPercent: Double?
+
+        public init(contextTokens: Int? = nil, contextWindow: Int? = nil, rateLimitPercent: Double? = nil) {
+            self.contextTokens = contextTokens
+            self.contextWindow = contextWindow
+            self.rateLimitPercent = rateLimitPercent
+        }
+
+        /// Fraction of the context window in use, when both are known.
+        public var contextFraction: Double? {
+            guard let contextTokens, let contextWindow, contextWindow > 0 else { return nil }
+            return Double(contextTokens) / Double(contextWindow)
+        }
+    }
+
     public var container: Container?
     public var uid: Int?
     /// `ID` from /etc/os-release, e.g. `ubuntu`.
@@ -100,6 +122,8 @@ public struct InventorySnapshot: Sendable, Equatable {
     /// from the rollout's last task_started/task_complete. Only the verdict
     /// leaves the container — never the conversation.
     public var logStates: [String: String] = [:]
+    /// Token usage per agent pane, read from the session log (numbers only).
+    public var usage: [String: AgentUsage] = [:]
     public var processTableAvailable = true
     /// Set when the target was reached but tmux was not usable.
     public var failure: RemoteFailure?

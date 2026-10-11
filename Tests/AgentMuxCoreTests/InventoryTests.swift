@@ -155,6 +155,35 @@ arg -p
         #expect(snapshot.screenStates["%bad"] == nil) // not a valid pane id
     }
 
+    @Test func parsesLogStateAndUsage() throws {
+        let out = """
+        @@begin 1 n0nce
+        @@uid 0
+        @@tmux tmux 3.4
+        @@server 1 2 /tmp/tmux-0/default
+        @@section agents
+        @@logstate %2 working 5
+        @@usage %2 110247 258400 44.0
+        @@usage %6 266971 - -
+        @@usage %7 0 0 -
+        @@end n0nce
+        """
+        let s = try InventoryProbe.parse(out, nonce: nonce)
+        #expect(s.logStates["%2"] == "working")
+        #expect(s.usage["%2"]?.contextTokens == 110247)
+        #expect(s.usage["%2"]?.contextWindow == 258400)
+        #expect(s.usage["%2"]?.rateLimitPercent == 44.0)
+        #expect(abs((s.usage["%2"]?.contextFraction ?? 0) - 110247.0 / 258400.0) < 0.0001)
+        // Claude: tokens only, no window / rate → no fraction.
+        #expect(s.usage["%6"]?.contextTokens == 266971)
+        #expect(s.usage["%6"]?.contextWindow == nil)
+        #expect(s.usage["%6"]?.rateLimitPercent == nil)
+        #expect(s.usage["%6"]?.contextFraction == nil)
+        // Zeros are treated as "unknown".
+        #expect(s.usage["%7"]?.contextTokens == nil)
+        #expect(s.usage["%7"]?.contextWindow == nil)
+    }
+
     @Test func malformedRowsAreIgnored() throws {
         let odd = fixture.replacingOccurrences(of: "@@section panes\n", with: "@@section panes\nnot a row\n%x 1 0 1 1\n")
         #expect(try InventoryProbe.parse(odd, nonce: nonce).panes.count == 5)

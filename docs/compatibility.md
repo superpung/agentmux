@@ -88,3 +88,10 @@ Authorized by the user to read **structural fields only** (event types), never c
 - **Map pane → rollout by the writer's open fd.** The process appending to the rollout keeps it open, so `/proc/<pid>/fd` gives the exact file, and that process's `TMUX_PANE` gives the pane. This is exact when it applies.
 - **The fd is not always held.** A `codex app-server` daemon holds its session's rollout fd (maps cleanly). A `codex resume <id>` session logs to `logs_2.sqlite` and holds **no** rollout fd. Its resume UUID does not appear in the rollout (a resume starts a new rollout id), and `session_meta.cwd` is the *original* cwd, which can differ from the process cwd (e.g. a renamed dir) — so neither resume-id nor cwd gives a reliable mapping. These panes get **no** log verdict and fall back to the screen verdict, which was verified correct (both an app-server and a resumed Codex, concurrently working, were reported working).
 - **Scan from the end, not a fixed tail.** A long turn emits hundreds of `item_completed` / `token_count` / `response_item` events after its `task_started`, so a `tail -n N` window misses the boundary. The probe uses `tac | jq 'select(.type=="event_msg").payload.type' | grep -m1` to find the last boundary marker cheaply (grep stops jq at the first match from the end).
+
+### Token usage (numbers only)
+
+The same logs carry per-turn token usage, read as structural numbers (no message content) and shown in the detail status bar:
+
+- **Codex** `event_msg/token_count` → `payload.info.last_token_usage.input_tokens` (current context size), `payload.info.model_context_window` (window), and `payload.rate_limits.primary.used_percent` (weekly limit). So Codex can show `ctx used / window (%)` and the rate-limit percent.
+- **Claude** `assistant.message.usage` → `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` ≈ the current context size. The transcript does not record the window, so Claude shows the absolute context tokens, not a percentage.

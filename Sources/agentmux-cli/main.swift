@@ -257,8 +257,14 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                         if let version = detection.version { line += " \(version)" }
                         if let directory = detection.configDirectory { line += " [\(directory)]" }
                         let ev = detection.pid.flatMap { snapshot.agents[$0] }
-                        let activity = ActivityDetector.resolve(kind: detection.kind, logEvent: ev?.logEvent, logAgeSeconds: ev?.logAgeSeconds, screenState: snapshot.screenStates[pane.id])
+                        let activity = ActivityDetector.resolve(kind: detection.kind, logEvent: ev?.logEvent, logAgeSeconds: ev?.logAgeSeconds, screenState: snapshot.screenStates[pane.id], logState: snapshot.logStates[pane.id])
                         line += " {\(activity.activity.rawValue)/\(activity.confidence.rawValue)}"
+                        if let u = snapshot.usage[pane.id] {
+                            var parts: [String] = []
+                            if let c = u.contextTokens { parts.append("ctx \(c)\(u.contextWindow.map { "/\($0)" } ?? "")") }
+                            if let r = u.rateLimitPercent { parts.append("limit \(r)%") }
+                            if !parts.isEmpty { line += " usage[\(parts.joined(separator: " "))]" }
+                        }
                         line += " (\(detection.confidence.rawValue): \(detection.evidence.joined(separator: ", ")))"
                         if !detection.children.isEmpty {
                             line += " children: \(detection.children.map { "\($0.kind.rawValue)#\($0.pid)" }.joined(separator: " "))"

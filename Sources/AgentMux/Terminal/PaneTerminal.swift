@@ -84,6 +84,15 @@ final class PaneTerminal {
         }
     }
 
+    /// The mirror is no longer usable (the server generation changed or the
+    /// client ended), as opposed to merely connecting or live.
+    var isTrouble: Bool {
+        switch phase {
+        case .connecting, .live: false
+        case .ended, .stale: true
+        }
+    }
+
     /// Only the terminal on screen may send input; hidden ones drop it even
     /// if they still hold keyboard focus.
     func setActive(_ active: Bool) {

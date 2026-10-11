@@ -77,6 +77,11 @@ public enum InventoryProbe {
             if [ -n "$res" ] && [ -f "$lf" ]; then
               ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
               echo "log $ev $(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))"
+              # Context size = the last assistant turn's prompt (input + cached +
+              # cache-creation tokens). Numbers only, no message content.
+              clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+              cctx=$(command -v tac >/dev/null 2>&1 && tac "$lf" 2>/dev/null | jq -r 'select(.type=="assistant") | ((.message.usage.input_tokens // 0)+(.message.usage.cache_read_input_tokens // 0)+(.message.usage.cache_creation_input_tokens // 0))' 2>/dev/null | grep -m 1 -E '^[0-9]+$')
+              [ -n "$clpane" ] && [ -n "$cctx" ] && [ "$cctx" -gt 0 ] && echo "@@usage $clpane $cctx - -"
             fi
           fi
           # Codex session log — structural only. The process keeps its rollout
@@ -97,6 +102,10 @@ public enum InventoryProbe {
                 task_started) echo "@@logstate $cpane working $cage" ;;
                 task_complete|turn_aborted) echo "@@logstate $cpane idle $cage" ;;
               esac
+              # Context size, window and weekly rate-limit % from the last
+              # token_count event. Numbers only, no message content.
+              uvals=$(tac "$crf" 2>/dev/null | jq -r 'select(.type=="event_msg" and .payload.type=="token_count") | "\\(.payload.info.last_token_usage.input_tokens // 0) \\(.payload.info.model_context_window // 0) \\(.payload.rate_limits.primary.used_percent // "-")"' 2>/dev/null | head -n 1)
+              [ -n "$uvals" ] && echo "@@usage $cpane $uvals"
             fi
           fi
         done
@@ -174,6 +183,15 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@logstate ") {
                 let fields = rest.split(separator: " ")
                 if fields.count >= 2, isID(fields[0], "%") { snapshot.logStates[String(fields[0])] = String(fields[1]) }
+            } else if let rest = line.dropPrefix("@@usage ") {
+                let f = rest.split(separator: " ")
+                if f.count >= 4, isID(f[0], "%") {
+                    snapshot.usage[String(f[0])] = InventorySnapshot.AgentUsage(
+                        contextTokens: Int(f[1]).flatMap { $0 > 0 ? $0 : nil },
+                        contextWindow: Int(f[2]).flatMap { $0 > 0 ? $0 : nil },
+                        rateLimitPercent: Double(f[3])
+                    )
+                }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
                 if let pid = currentAgent {

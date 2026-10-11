@@ -90,32 +90,22 @@ private struct MirroredSurfaceView: View {
     }
 }
 
-/// Connection, freshness and detection evidence for the selected pane.
+/// Minimal footer for the selected pane: token usage when known, and a problem
+/// indicator only when something is wrong. Detection details and freshness are
+/// kept in the tooltip rather than on screen.
 private struct StatusBar: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        if let ref = model.selection, let state = model.state(ref.targetID), let content = content(ref, state) {
             HStack(spacing: 10) {
-                if let ref = model.selection, let state = model.state(ref.targetID) {
-                    Circle()
-                        .fill(state.lastFailure != nil ? .red : state.isOnline ? .green : .orange)
-                        .frame(width: 7, height: 7)
-                    Text(connectionText(state, now: context.date))
-                    if let detection = state.detections[ref.paneID], detection.kind != .none {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(evidenceText(detection))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(detection.evidence.joined(separator: "\n"))
-                    }
-                    Spacer(minLength: 8)
-                    if let terminal = model.terminal(for: ref) {
-                        if let geometry = terminal.geometry {
-                            Text("\(geometry.columns)×\(geometry.rows)")
-                        }
-                        Text(terminal.phaseText).foregroundStyle(.secondary)
-                    }
+                if let problem = content.problem {
+                    Circle().fill(problem.color).frame(width: 7, height: 7)
+                    Text(problem.text)
+                }
+                Spacer(minLength: 8)
+                if let usage = content.usage {
+                    UsageView(usage: usage)
                 }
             }
             .font(.caption)
@@ -123,27 +113,95 @@ private struct StatusBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.bar)
+            .help(content.tooltip)
         }
     }
 
-    private func connectionText(_ state: TargetState, now: Date) -> String {
-        let verified = state.lastSuccess.map { "updated \(Self.ago($0, now: now))" } ?? "connecting"
-        if let failure = state.lastFailure {
-            return "\(failure.kind.rawValue) · last \(verified)"
+    private struct Problem { var color: Color; var text: String }
+    private struct Content { var problem: Problem?; var usage: InventorySnapshot.AgentUsage?; var tooltip: String }
+
+    /// Returns nil when there is nothing worth showing (healthy, no usage).
+    private func content(_ ref: PaneRef, _ state: TargetState) -> Content? {
+        let problem: Problem?
+        if state.lastFailure != nil, state.snapshot == nil {
+            problem = Problem(color: .red, text: "offline · \(state.lastFailure!.kind.rawValue)")
+        } else if state.lastFailure != nil {
+            problem = Problem(color: .orange, text: "stale")
+        } else if let terminal = model.terminal(for: ref), terminal.isTrouble {
+            problem = Problem(color: .orange, text: terminal.phaseText)
+        } else {
+            problem = nil
         }
-        return "online · \(verified)"
+        let usage = state.snapshot?.usage[ref.paneID]
+        guard problem != nil || usage != nil else { return nil }
+        return Content(problem: problem, usage: usage, tooltip: tooltip(ref, state))
     }
 
-    private func evidenceText(_ detection: AgentDetection) -> String {
-        var parts = ["\(detection.kind.label) \(detection.version ?? "")".trimmingCharacters(in: .whitespaces)]
-        if let directory = detection.configDirectory { parts.append(directory) }
-        parts.append("\(detection.confidence.rawValue) confidence")
+    /// The detail that used to crowd the bar, now hover-only.
+    private func tooltip(_ ref: PaneRef, _ state: TargetState) -> String {
+        var lines: [String] = []
+        if let detection = state.detections[ref.paneID], detection.kind != .none {
+            var parts = ["\(detection.kind.label) \(detection.version ?? "")".trimmingCharacters(in: .whitespaces)]
+            if let directory = detection.configDirectory { parts.append(directory) }
+            parts.append("\(detection.confidence.rawValue) confidence")
+            lines.append(parts.joined(separator: " · "))
+        }
+        if let success = state.lastSuccess {
+            lines.append("updated \(Int(max(0, Date().timeIntervalSince(success))))s ago")
+        }
+        if let terminal = model.terminal(for: ref), let geometry = terminal.geometry {
+            lines.append("\(geometry.columns)×\(geometry.rows) · \(terminal.phaseText)")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+/// Compact context / rate-limit readout with a slim context meter.
+private struct UsageView: View {
+    let usage: InventorySnapshot.AgentUsage
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let fraction = usage.contextFraction {
+                Capsule().fill(.quaternary)
+                    .frame(width: 44, height: 4)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(meterColor(fraction))
+                            .frame(width: 44 * min(1, fraction), height: 4)
+                    }
+            }
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+
+    private var text: String {
+        var parts: [String] = []
+        if let context = usage.contextTokens {
+            if let window = usage.contextWindow, let fraction = usage.contextFraction {
+                parts.append("ctx \(Self.short(context))/\(Self.short(window)) · \(Int((fraction * 100).rounded()))%")
+            } else {
+                parts.append("ctx \(Self.short(context))")
+            }
+        }
+        if let rate = usage.rateLimitPercent {
+            parts.append("limit \(Int(rate.rounded()))%")
+        }
         return parts.joined(separator: " · ")
     }
 
-    static func ago(_ date: Date, now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
-        return seconds < 60 ? "\(seconds)s ago" : "\(seconds / 60)m ago"
+    private func meterColor(_ fraction: Double) -> Color {
+        switch fraction {
+        case ..<0.75: return .green
+        case ..<0.9: return .orange
+        default: return .red
+        }
+    }
+
+    static func short(_ n: Int) -> String {
+        n >= 1000 ? "\(n / 1000)k" : "\(n)"
     }
 }
 

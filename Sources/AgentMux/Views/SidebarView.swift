@@ -233,21 +233,19 @@ private struct StatusFooter: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 7, height: 7)
-                Text(statusText(now: context.date))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(.bar)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(dotColor)
+                .frame(width: 7, height: 7)
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(.bar)
     }
 
     private var dotColor: Color {
@@ -256,16 +254,15 @@ private struct StatusFooter: View {
         return .orange
     }
 
-    private func statusText(now: Date) -> String {
+    /// Minimal: the agent count when healthy, or the error when not.
+    private var statusText: String {
         if let failure = model.targets.compactMap(\.lastFailure).first,
            model.targets.allSatisfy({ $0.snapshot == nil })
         {
             return failure.kind.rawValue
         }
-        let newest = model.targets.compactMap(\.lastSuccess).max()
-        guard let newest else { return "Connecting…" }
-        let seconds = max(0, Int(now.timeIntervalSince(newest)))
-        let ago = seconds < 60 ? "\(seconds)s ago" : "\(seconds / 60)m ago"
-        return "\(model.scopeAgentCount) agents · updated \(ago)"
+        if model.targets.contains(where: { $0.snapshot == nil }) { return "Connecting…" }
+        let count = model.scopeAgentCount
+        return "\(count) agent\(count == 1 ? "" : "s")"
     }
 }
