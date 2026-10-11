@@ -50,6 +50,11 @@ struct DetailView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        if let ref = model.selection, let agent = model.agentEntry(ref), agent.activity != .unknown {
+            ToolbarItem(placement: .navigation) {
+                ActivityPill(activity: agent.activity)
+            }
+        }
         if let ref = model.selection, let terminal = model.terminal(for: ref) {
             ToolbarItemGroup {
                 Button {

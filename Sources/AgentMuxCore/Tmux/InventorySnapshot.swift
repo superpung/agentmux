@@ -87,6 +87,8 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var panes: [Pane] = []
     public var processes: [ProcessNode] = []
     public var agents: [Int: AgentEvidence] = [:]
+    /// Visible-screen tail (last lines) per agent-candidate pane, for activity rules.
+    public var screens: [String: [String]] = [:]
     public var processTableAvailable = true
     /// Set when the target was reached but tmux was not usable.
     public var failure: RemoteFailure?

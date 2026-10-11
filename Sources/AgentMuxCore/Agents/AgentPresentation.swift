@@ -16,6 +16,56 @@ public enum AgentActivity: String, Sendable, Equatable {
     }
 }
 
+/// An activity inference with the evidence behind it.
+public struct ActivityObservation: Sendable, Equatable {
+    public var activity: AgentActivity
+    public var confidence: Confidence
+    public var evidence: String
+
+    public init(_ activity: AgentActivity, _ confidence: Confidence, _ evidence: String) {
+        self.activity = activity
+        self.confidence = confidence
+        self.evidence = evidence
+    }
+
+    public static let noScreen = ActivityObservation(.unknown, .low, "no screen captured")
+}
+
+/// Infers what an agent is doing from a bounded tail of its terminal screen.
+///
+/// Conservative by design (the spec forbids false "done"/approval alerts):
+/// only `working` and `idle` are claimed, from reliable provider markers;
+/// everything else is `unknown`. Approval / waiting-input detection needs
+/// real fixtures of those states and is deliberately not guessed here.
+public enum ActivityDetector {
+    public static func detect(kind: AgentKind, screen: [String]) -> ActivityObservation {
+        guard !screen.isEmpty else { return .noScreen }
+        let text = screen.joined(separator: "\n")
+        let lower = text.lowercased()
+
+        // Both Codex and Claude Code show this only while a turn is running.
+        if lower.contains("esc to interrupt") {
+            return ActivityObservation(.working, .high, "screen shows 'esc to interrupt'")
+        }
+
+        switch kind {
+        case .codex:
+            // Status line e.g. "gpt-5.6 … · Ready · Context 60% left · weekly …".
+            if text.contains("· Ready ·") || lower.contains(" ready · context") {
+                return ActivityObservation(.idle, .high, "Codex status shows 'Ready'")
+            }
+        case .claudeCode:
+            // The input box prompt is ready and no turn is running.
+            if screen.contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("❯") }) {
+                return ActivityObservation(.idle, .medium, "Claude input box ready")
+            }
+        case .none, .unknown:
+            break
+        }
+        return ActivityObservation(.unknown, .low, "no matching rule")
+    }
+}
+
 /// Short task titles from the terminal title an agent sets (OSC 2).
 public enum AgentTitle {
     /// Claude Code sets `✳ <session>`; Codex sets `<session> | <project>`.

@@ -92,6 +92,9 @@ start 789
 exe /root/.local/share/claude/versions/2.1.293
 arg claude
 arg -p
+@@section screens
+@@screen %26 bGluZSBvbmUK4p2vIHJlYWR5
+@@screen %bad notbase64!!!
 @@end n0nce
 """
 
@@ -144,6 +147,12 @@ arg -p
         #expect(try InventoryProbe.parse(noServer, nonce: nonce).failure?.kind == .noTmuxServer)
         let noTmux = "@@begin 1 n0nce\n@@uid 0\n@@error tmux-not-found\n@@end n0nce\n"
         #expect(try InventoryProbe.parse(noTmux, nonce: nonce).failure?.kind == .tmuxNotFound)
+    }
+
+    @Test func parsesBase64Screens() throws {
+        let snapshot = try InventoryProbe.parse(fixture, nonce: nonce)
+        #expect(snapshot.screens["%26"] == ["line one", "❯ ready"])
+        #expect(snapshot.screens["%bad"] == nil) // invalid base64 is skipped
     }
 
     @Test func malformedRowsAreIgnored() throws {

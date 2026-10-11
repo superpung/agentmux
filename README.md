@@ -44,7 +44,7 @@ docs/                  requirements, decision records, observed compatibility
 
 ## Status
 
-- Read-only inventory of configured targets over one ssh connection per refresh, with agent detection from process evidence (type, version, config directory, confidence) and task titles from the agents' terminal titles. Activity (working / waiting) is not detected yet.
+- Read-only inventory of configured targets over one ssh connection per refresh, with agent detection from process evidence (type, version, config directory, confidence), task titles from the agents' terminal titles, and activity (working / idle) from conservative screen rules (ADR notes in docs/compatibility.md). Approval / waiting-input states are not claimed yet.
 - Native macOS window: `NavigationSplitView`, a sidebar `List` grouped by working directory with native selection and search, a standard titlebar, toolbar and status bars.
 - Selecting an agent or pane on an `interact` / `test` target opens a live mirror over tmux control mode on a per-view grouped session: the agent's window is softly resized to fill the view at a readable font (kitty-style, self-healing, no restore), input and paste go to that pane only, and the user's current window / window list are untouched (ADR 0003, ADR 0004). At most 4 mirrors stay open at once.
 - Not done yet: activity detection, notifications, connection multiplexing, diagnostics export, OSC 52 clipboard policy.

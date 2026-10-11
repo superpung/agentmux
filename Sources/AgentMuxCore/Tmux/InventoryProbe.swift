@@ -65,6 +65,12 @@ public enum InventoryProbe {
           tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -E '^(CODEX_HOME|CLAUDE_CONFIG_DIR|TMUX_PANE)=' | cut -c1-300 | sed 's/^/env /'
           echo "start $(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f20)"
         done
+        echo "@@section screens"
+        printf '%s\\n' "$procs" | awk '$6 ~ /^(codex|claude|node|bun|deno)$/ { print $1 }' | sort -u | head -n \(maxAgentCandidates) | while read -r pane; do
+          [ -n "$pane" ] || continue
+          # base64 so pane content cannot collide with the line protocol.
+          echo "@@screen $pane $(tm capture-pane -p -t "$pane" 2>/dev/null | tail -n 24 | base64 | tr -d '\\n')"
+        done
         echo "@@end \(nonce)"
 
         """
@@ -120,6 +126,8 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@section ") {
                 section = rest
                 currentAgent = nil
+            } else if let rest = line.dropPrefix("@@screen ") {
+                if let (pane, lines) = parseScreen(rest) { snapshot.screens[pane] = lines }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
                 if let pid = currentAgent {
@@ -228,6 +236,17 @@ public enum InventoryProbe {
             paneID: String(f[0]), depth: depth, pid: pid, ppid: ppid,
             state: String(f[4]), command: String(f[5])
         )
+    }
+
+    /// `<paneID> <base64 screen>` -> (pane, lines).
+    private static func parseScreen(_ text: String) -> (String, [String])? {
+        guard let space = text.firstIndex(of: " ") else { return nil }
+        let pane = String(text[..<space])
+        guard isID(Substring(pane), "%") else { return nil }
+        let encoded = String(text[text.index(after: space)...])
+        guard let data = Data(base64Encoded: encoded) else { return nil }
+        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        return (pane, lines)
     }
 
     private static func parseAgentLine(_ line: String, into evidence: inout InventorySnapshot.AgentEvidence) {

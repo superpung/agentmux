@@ -65,3 +65,12 @@ Only results that were actually measured are recorded here. Concrete host addres
 | Grouped session isolation (verified on real server) | user's current window (@27) and window list (0-5,7) unchanged while viewing; opt stays `latest` |
 | `destroy-unattached on` cleanup | grouped session auto-destroys when the control client leaves or the app dies (pipes close -> ssh exits); 0 leftover after quit |
 | `select-window -t %pane` | resolves to the pane's window |
+
+## Activity detection (screen rules, 2026-10-11)
+
+Observed from real agent panes (captured read-only with `capture-pane -p`):
+
+- **Codex** idle/ready: the status line reads `… · Ready · Context N% left · weekly …` and the input box is `› <placeholder>`. Working shows `Esc to interrupt`.
+- **Claude Code** idle/ready: a finished turn shows `✻ <verb> for Xs · done <time>`, the input box `❯` between two rules, and the footer `⏵⏵ auto mode on (shift+tab to cycle)`. Working shows `✻ <verb>ing… (Xs · esc to interrupt)`.
+
+Rules (`ActivityDetector`) are conservative: only `working` (both show `esc to interrupt`) and `idle` (Codex `Ready`, Claude input box) are claimed; everything else is `unknown`. Approval and mid-turn waiting-input states are deliberately NOT guessed — the spec forbids false "done"/approval alerts, and real fixtures of those states have not been captured yet. Screens are collected as a base64 tail (last 24 lines) of each agent pane in the inventory probe (one round-trip).
