@@ -21,6 +21,11 @@ final class PaneTerminal {
 
     let ref: PaneRef
     let state = TerminalViewState(controller: GhosttyRuntime.controller)
+    /// Called (throttled) when the mirrored pane emits output, so the model can
+    /// refresh this agent's state promptly while the user is watching it.
+    @ObservationIgnored var onActivity: (@MainActor @Sendable () -> Void)?
+    /// Last time an activity notification fired; confined to the mirror queue.
+    @ObservationIgnored nonisolated(unsafe) private var lastActivityNotify = Date.distantPast
     private(set) var phase: Phase = .connecting
     /// The remote pane's size, which the app drives to match the local view.
     private(set) var geometry: PaneMirror.Geometry?
@@ -61,7 +66,10 @@ final class PaneTerminal {
         state.configuration = options
 
         try mirror.start(
-            onTerminalBytes: { data in session.receive(data) },
+            onTerminalBytes: { [weak self] data in
+                session.receive(data)
+                self?.noteActivity()
+            },
             onGeometry: { [weak self] geometry in
                 Task { @MainActor in self?.geometry = geometry }
             },
@@ -73,6 +81,15 @@ final class PaneTerminal {
         gate.markLive()
         phase = .live
         scheduleSmokeIfRequested()
+    }
+
+    /// Runs on the mirror's serial queue when pane output arrives. Throttled so
+    /// a burst of output triggers at most one refresh every 1.5 s.
+    nonisolated private func noteActivity() {
+        let now = Date()
+        guard now.timeIntervalSince(lastActivityNotify) > 1.5 else { return }
+        lastActivityNotify = now
+        Task { @MainActor [weak self] in self?.onActivity?() }
     }
 
     var phaseText: String {

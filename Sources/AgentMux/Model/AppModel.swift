@@ -30,6 +30,8 @@ final class TargetState: Identifiable {
 
     static let baseInterval: Duration = .seconds(10)
     static let maxInterval: Duration = .seconds(120)
+    /// Interval for a target the user is actively viewing (a mirror is open).
+    static let activeInterval: Duration = .seconds(2)
 
     nonisolated var id: String { target.id }
 
@@ -289,13 +291,33 @@ final class AppModel {
     private func poll(_ state: TargetState) async {
         while !Task.isCancelled {
             await refreshOnce(state)
-            // Wait for the interval, or less if a manual refresh comes in.
-            let deadline = ContinuousClock.now + state.interval
+            // Wait for the interval, or less if a manual refresh / activity
+            // nudge comes in.
+            let deadline = ContinuousClock.now + effectiveInterval(state)
             while !Task.isCancelled, ContinuousClock.now < deadline, !state.refreshRequested {
                 try? await Task.sleep(for: .milliseconds(250))
             }
             state.refreshRequested = false
         }
+    }
+
+    /// The target of the agent the user is currently viewing is polled much
+    /// faster, so its idle/working state tracks closely. Everything else stays
+    /// on the background interval to keep remote load low; output from any open
+    /// mirror still nudges its own target (see `nudge`).
+    private func effectiveInterval(_ state: TargetState) -> Duration {
+        if state.lastFailure == nil, selection?.targetID == state.id {
+            return min(TargetState.activeInterval, state.interval)
+        }
+        return state.interval
+    }
+
+    /// An open mirror saw output (the agent is doing something): refresh its
+    /// target now so the sidebar flips to working without waiting a full cycle.
+    /// Throttled on the terminal side; a no-op while the target is failing.
+    func nudge(_ targetID: String) {
+        guard let state = state(targetID), state.lastFailure == nil else { return }
+        state.refreshRequested = true
     }
 
     private func refreshOnce(_ state: TargetState) async {
@@ -415,7 +437,9 @@ final class AppModel {
               let sessionID = state.snapshot?.memberships.first(where: { $0.paneID == ref.paneID })?.sessionID
         else { return }
         do {
-            terminals[ref] = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
+            let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
+            terminal.onActivity = { [weak self] in self?.nudge(ref.targetID) }
+            terminals[ref] = terminal
         } catch {
             state.lastFailure = RemoteFailure(.remoteCommandFailed, detail: "\(error)")
         }
