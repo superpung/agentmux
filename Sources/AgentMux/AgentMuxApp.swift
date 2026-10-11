@@ -13,6 +13,7 @@ struct AgentMuxApp: App {
                 .onAppear {
                     appDelegate.model = model
                     model.startPolling()
+                    Task { await model.discoverAll() }
                 }
         }
         .defaultSize(width: 1100, height: 720)
@@ -23,6 +24,11 @@ struct AgentMuxApp: App {
                     .keyboardShortcut("r", modifiers: .command)
                 Divider()
             }
+        }
+
+        Settings {
+            SettingsView()
+                .environment(model)
         }
     }
 }

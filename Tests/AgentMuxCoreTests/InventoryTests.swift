@@ -261,6 +261,55 @@ arg -p
         target.container = nil
         #expect(throws: ConfigError.missingContainer(target: "a")) { try target.executionContext() }
     }
+
+    @Test func discoveredTargetUsesHostDefaults() throws {
+        let host = HostConfig(
+            id: "lab", displayName: "Lab", sshDestination: "lab-host",
+            defaultAccess: .interact, defaultExecUser: "dev", discoverContainers: true
+        )
+        let target = TargetConfig.discovered(host: host, container: "app01")
+        #expect(target.id == "lab/app01")
+        #expect(target.hostId == "lab")
+        #expect(target.kind == .docker)
+        #expect(target.container == "app01")
+        #expect(target.access == .interact)
+        let context = try target.executionContext()
+        #expect(context.container?.container.value == "app01")
+        #expect(context.container?.user == (try ExecUser("dev")))
+    }
+
+    @Test func hostDefaultsFallBack() {
+        let host = HostConfig(
+            id: "lab", displayName: "Lab", sshDestination: "lab-host",
+            defaultAccess: nil, defaultExecUser: nil, discoverContainers: nil
+        )
+        #expect(host.effectiveDefaultAccess == .observe)
+        #expect(host.discovers)
+        #expect(TargetConfig.discovered(host: host, container: "c1").access == .observe)
+    }
+}
+
+@Suite struct DockerDiscoveryTests {
+    @Test func parsesTabSeparatedRows() {
+        let text = """
+        abc123\tapp01\tubuntu:22.04\trunning\tUp 3 hours
+        def456\tp01\talpine\texited\tExited (0) 2 days ago
+        """
+        let containers = DockerDiscovery.parse(text)
+        #expect(containers.count == 2)
+        #expect(containers[0].fullID == "abc123")
+        #expect(containers[0].name == "app01")
+        #expect(containers[0].image == "ubuntu:22.04")
+        #expect(containers[0].running)
+        #expect(containers[0].status == "Up 3 hours")
+        #expect(!containers[1].running)
+        #expect(containers[1].status == "Exited (0) 2 days ago")
+    }
+
+    @Test func skipsMalformedRows() {
+        #expect(DockerDiscovery.parse("").isEmpty)
+        #expect(DockerDiscovery.parse("abc\tonly\tthree\tfields").isEmpty)
+    }
 }
 
 @Suite struct AgentTitleTests {

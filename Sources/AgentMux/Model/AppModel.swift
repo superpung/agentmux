@@ -65,8 +65,20 @@ final class AppModel {
     var showSearch = false
     private(set) var terminals: [PaneRef: PaneTerminal] = [:]
 
+    private(set) var hosts: [HostConfig] = []
+    private var explicitTargets: [TargetConfig] = []
+    /// Containers found per host (for the Settings list). Not all are monitored.
+    private(set) var discovered: [String: [DiscoveredContainer]] = [:]
+    private(set) var isDiscovering = false
+    /// Monitored discovered containers, as "<hostId>/<container>" keys, persisted.
+    private(set) var enabledContainers: Set<String> = []
+
+    private var targetStates: [String: TargetState] = [:]
+    private var isPolling = false
     private var pollers: [String: Task<Void, Never>] = [:]
     private var releasedOrphans: Set<String> = []
+
+    private static let enabledContainersKey = "enabledContainers"
     /// AGENTMUX_OPEN=<target-id>/<pane-id>: select and open that pane once it
     /// is discovered (used by scripted smoke tests).
     @ObservationIgnored private var pendingOpen = AppModel.paneFromEnvironment("AGENTMUX_OPEN")
@@ -97,21 +109,124 @@ final class AppModel {
     func loadConfig() {
         let url = Self.configURL()
         configPath = url.path
+        enabledContainers = Self.loadEnabledContainers()
         do {
             let config = try TargetsConfig.load(from: url)
-            targets = config.targets.compactMap { target in
-                config.host(for: target).map { TargetState(host: $0, target: target) }
-            }
+            hosts = config.hosts
+            explicitTargets = config.targets
             configError = nil
         } catch {
-            targets = []
+            hosts = []
+            explicitTargets = []
             configError = "\(error)"
         }
+        reconcileTargets()
+    }
+
+    /// The hosts that offer container auto-discovery.
+    var discoverableHosts: [HostConfig] { hosts.filter(\.discovers) }
+
+    // MARK: Target set
+
+    /// The targets to monitor: the explicitly configured ones, plus the
+    /// discovered containers the user has enabled in Settings.
+    private func desiredTargets() -> [(HostConfig, TargetConfig)] {
+        var result: [(HostConfig, TargetConfig)] = []
+        var seen = Set<String>()
+        for target in explicitTargets {
+            guard let host = hosts.first(where: { $0.id == target.hostId }) else { continue }
+            if seen.insert(target.id).inserted { result.append((host, target)) }
+        }
+        for host in hosts where host.discovers {
+            for container in discovered[host.id] ?? [] {
+                // Skip containers already covered by an explicit target, so the
+                // same container is never monitored twice under two ids.
+                if isExplicitlyConfigured(host: host, container: container.name) { continue }
+                let key = "\(host.id)/\(container.name)"
+                guard enabledContainers.contains(key), seen.insert(key).inserted else { continue }
+                result.append((host, .discovered(host: host, container: container.name)))
+            }
+        }
+        return result
+    }
+
+    /// Whether an explicitly configured target already covers this container on
+    /// this host. Such a container is monitored via its own config entry and is
+    /// not offered as a toggle in Settings.
+    func isExplicitlyConfigured(host: HostConfig, container: String) -> Bool {
+        explicitTargets.contains { $0.hostId == host.id && $0.container == container }
+    }
+
+    /// Brings the live `targets` in line with `desiredTargets()`, keeping the
+    /// states that persist, adding new ones (and their pollers, if polling),
+    /// and tearing down the ones that left (poller, mirrors, selection).
+    private func reconcileTargets() {
+        let desired = desiredTargets()
+        let desiredIDs = Set(desired.map { $0.1.id })
+
+        for id in targetStates.keys where !desiredIDs.contains(id) {
+            pollers.removeValue(forKey: id)?.cancel()
+            for ref in terminals.keys where ref.targetID == id { closeTerminal(ref) }
+            if selection?.targetID == id { selection = nil }
+            releasedOrphans.remove(id)
+            targetStates.removeValue(forKey: id)
+        }
+
+        for (host, target) in desired where targetStates[target.id] == nil {
+            let state = TargetState(host: host, target: target)
+            targetStates[target.id] = state
+            if isPolling {
+                pollers[target.id] = Task { [weak self] in await self?.poll(state) }
+            }
+        }
+
+        targets = desired.compactMap { targetStates[$0.1.id] }
+    }
+
+    // MARK: Container selection
+
+    private static func loadEnabledContainers() -> Set<String> {
+        let stored = UserDefaults.standard.stringArray(forKey: enabledContainersKey) ?? []
+        return Set(stored)
+    }
+
+    private func persistEnabledContainers() {
+        UserDefaults.standard.set(Array(enabledContainers).sorted(), forKey: Self.enabledContainersKey)
+    }
+
+    func isContainerEnabled(host: HostConfig, container: DiscoveredContainer) -> Bool {
+        enabledContainers.contains("\(host.id)/\(container.name)")
+    }
+
+    /// Enables or disables a discovered container and reconciles the target set.
+    func setContainer(_ container: DiscoveredContainer, on host: HostConfig, enabled: Bool) {
+        let key = "\(host.id)/\(container.name)"
+        if enabled { enabledContainers.insert(key) } else { enabledContainers.remove(key) }
+        persistEnabledContainers()
+        reconcileTargets()
+    }
+
+    // MARK: Discovery
+
+    /// Lists containers on every discoverable host (read-only) and refreshes
+    /// the Settings list. New selections take effect via `reconcileTargets()`.
+    func discoverAll() async {
+        guard !isDiscovering else { return }
+        isDiscovering = true
+        defer { isDiscovering = false }
+        for host in discoverableHosts {
+            let result = await DockerDiscovery.list(host: host)
+            if case let .success(containers) = result {
+                discovered[host.id] = containers.sorted { $0.name < $1.name }
+            }
+        }
+        reconcileTargets()
     }
 
     // MARK: Polling
 
     func startPolling() {
+        isPolling = true
         for state in targets where pollers[state.id] == nil {
             pollers[state.id] = Task { [weak self] in
                 await self?.poll(state)
@@ -120,6 +235,7 @@ final class AppModel {
     }
 
     func stopPolling() {
+        isPolling = false
         pollers.values.forEach { $0.cancel() }
         pollers.removeAll()
     }
@@ -205,7 +321,7 @@ final class AppModel {
     // MARK: Derived data
 
     func state(_ targetID: String) -> TargetState? {
-        targets.first { $0.id == targetID }
+        targetStates[targetID]
     }
 
     /// `session:window.pane` using the first membership.

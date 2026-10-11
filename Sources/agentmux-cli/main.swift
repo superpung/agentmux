@@ -8,6 +8,7 @@ import Foundation
 //   agentmux-cli attach-test <target-id> <tmux-target> [--seconds N] [--type TEXT] [--leak] [--then-select PANE]
 //                                                attach like the app does (test targets only)
 //   agentmux-cli release-orphans <target-id>     release every AgentMux-tagged client (test targets only)
+//   agentmux-cli containers <target-id> [--all]  list containers on the target's host (read-only)
 //   agentmux-cli mirror-test <target-id> <session-id> <pane-id> [--type TEXT] [--paste TEXT]
 //                                                mirror a pane over control mode, optionally typing
 //
@@ -148,6 +149,15 @@ case "mirror-test":
     print("live output \(received.value) bytes")
     mirror.close()
     try await Task.sleep(for: .seconds(2))
+
+case "containers":
+    let (host, _) = target(rest.first)
+    switch await DockerDiscovery.list(host: host, includeStopped: rest.contains("--all")) {
+    case let .success(list):
+        print("== \(list.count) containers on \(host.sshDestination) ==")
+        for c in list { print("  \(c.running ? "●" : "○") \(c.name)  [\(c.fullID.prefix(12))]  \(c.image)  \(c.status)") }
+    case let .failure(failure): fail("FAILED \(failure.kind.rawValue): \(failure.detail)")
+    }
 
 case "release-orphans":
     let (host, target) = target(rest.first)

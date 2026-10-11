@@ -44,6 +44,34 @@ public struct HostConfig: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var displayName: String
     public var sshDestination: String
+    /// Default access for containers discovered on this host.
+    public var defaultAccess: TargetConfig.Access?
+    /// Default exec user for discovered containers (nil = container default).
+    public var defaultExecUser: String?
+    /// Whether to offer container auto-discovery for this host (default true).
+    public var discoverContainers: Bool?
+
+    public var effectiveDefaultAccess: TargetConfig.Access { defaultAccess ?? .observe }
+    public var discovers: Bool { discoverContainers ?? true }
+}
+
+public extension TargetConfig {
+    /// A target for a container discovered on `host`, using the host defaults
+    /// and the default tmux socket.
+    static func discovered(host: HostConfig, container: String) -> TargetConfig {
+        TargetConfig(
+            id: "\(host.id)/\(container)",
+            displayName: nil,
+            hostId: host.id,
+            kind: .docker,
+            container: container,
+            execUser: host.defaultExecUser,
+            tmuxPath: nil,
+            tmuxSocket: .init(mode: .default, value: nil),
+            access: host.effectiveDefaultAccess,
+            agentProfiles: nil
+        )
+    }
 }
 
 public struct TargetConfig: Codable, Sendable, Equatable, Identifiable {
