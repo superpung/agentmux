@@ -94,4 +94,11 @@ Authorized by the user to read **structural fields only** (event types), never c
 The same logs carry per-turn token usage, read as structural numbers (no message content) and shown in the detail status bar:
 
 - **Codex** `event_msg/token_count` → `payload.info.last_token_usage.input_tokens` (current context size), `payload.info.model_context_window` (window), and `payload.rate_limits.primary.used_percent` (weekly limit). So Codex can show `ctx used / window (%)` and the rate-limit percent.
-- **Claude** `assistant.message.usage` → `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` ≈ the current context size. The transcript does not record the window, so Claude shows the absolute context tokens, not a percentage.
+- **Claude** `assistant.message.usage` → `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` (output excluded) ≈ the current context size. The transcript does not record the window.
+
+**How the ecosystem gets Claude usage (surveyed 2026-10-11).** The current context % and rate limits exist *precomputed* only in Claude Code's **status line** stdin JSON: `context_window.context_window_size` (200k, or 1M for extended-context models), `context_window.used_percentage`, `rate_limits.{five_hour,seven_day}.used_percentage` + `resets_at`. Reaching that stdin means configuring our command as the user's status line, which edits `~/.claude/settings.json` — off-limits. So the file-based tools do one of two things, and no tool reads context % or rate limits from a plain file:
+
+- **ccusage** reads the local transcripts for historical **cost / token totals** (daily / session / 5-hour blocks), not the current context fill.
+- **claude-hud, claude-powerline, ccstatusline, Claude-Code-Usage-Monitor, claude-pulse, …** show the live context % from the status-line JSON, and when it's absent fall back to transcript tokens ÷ an assumed 200k/1M window — exactly our method.
+
+Our formula (`input + cache_creation + cache_read`, output excluded) and our 200k/1M inference match that fallback. Validated live: our bar read 29% at the same moment the user's own Claude Code status line read 29% (290k context). Caveat (noted by claude-pulse): transcript input tokens include the system prompt, tools, MCP and memory, while Claude Code's native context figure counts only conversation tokens, so the two can differ slightly in some states; they agreed in our check.
