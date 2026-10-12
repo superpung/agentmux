@@ -58,7 +58,11 @@ public enum InventoryProbe {
         echo "@@section processes"
         printf '%s\\n' "$procs"
         echo "@@section agents"
-        printf '%s\\n' "$procs" | awk '$5 !~ /^Z/ && $6 ~ /^(codex|claude|node|bun|deno)$/ { print $3 }' | head -n \(maxAgentCandidates) | while read -r pid; do
+        # Panes whose activity we already know from the session log; the screen
+        # is not captured for these, which keeps tmux load (and any risk of a
+        # tmux bug) low. A plain for-loop so logpanes survives each iteration.
+        logpanes=" "
+        for pid in $(printf '%s\\n' "$procs" | awk '$5 !~ /^Z/ && $6 ~ /^(codex|claude|node|bun|deno)$/ { print $3 }' | head -n \(maxAgentCandidates)); do
           echo "@@agent $pid"
           echo "exe $(readlink "/proc/$pid/exe" 2>/dev/null)"
           tr '\\0\\n' '\\n ' < "/proc/$pid/cmdline" 2>/dev/null | head -n 2 | cut -c1-160 | sed 's/^/arg /'
@@ -79,6 +83,8 @@ public enum InventoryProbe {
               ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
               echo "log $ev $lage"
               clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+              # A definitive Claude log event means we need no screen fallback.
+              case "$ev" in */turn_duration|assistant/*|user/*) [ -n "$clpane" ] && logpanes="$logpanes$clpane " ;; esac
               # Last active = the last real turn (assistant/user), NOT the file
               # mtime: Claude Code keeps touching the transcript with bookkeeping
               # (modes, hooks, latches) long after the agent went idle. Only the
@@ -111,10 +117,8 @@ public enum InventoryProbe {
               re=$(date -d "$rts" +%s 2>/dev/null)
               if [ -n "$re" ]; then echo "@@active $cpane $(( $(date +%s) - re ))"; else echo "@@active $cpane $cage"; fi
               recent=$(tail -n 500 "$crf" 2>/dev/null | jq -rc 'if .type=="event_msg" and (.payload.type=="task_started" or .payload.type=="task_complete" or .payload.type=="turn_aborted") then "T "+.payload.type elif .type=="event_msg" and .payload.type=="token_count" then "U \\(.payload.info.last_token_usage.input_tokens // 0) \\(.payload.info.model_context_window // 0) \\(.payload.rate_limits.primary.used_percent // "-")" else empty end' 2>/dev/null)
-              case "$(printf '%s\\n' "$recent" | grep '^T ' | tail -n 1)" in
-                *task_started) echo "@@logstate $cpane working $cage" ;;
-                *task_complete|*turn_aborted) echo "@@logstate $cpane idle $cage" ;;
-              esac
+              cst=$(case "$(printf '%s\\n' "$recent" | grep '^T ' | tail -n 1)" in *task_started) echo working ;; *task_complete|*turn_aborted) echo idle ;; esac)
+              [ -n "$cst" ] && { echo "@@logstate $cpane $cst $cage"; logpanes="$logpanes$cpane "; }
               uvals=$(printf '%s\\n' "$recent" | grep '^U ' | tail -n 1 | cut -d' ' -f2-)
               [ -n "$uvals" ] && echo "@@usage $cpane $uvals"
             fi
@@ -127,6 +131,9 @@ public enum InventoryProbe {
         # when the user opens a terminal to view it.)
         printf '%s\\n' "$procs" | awk '$6 ~ /^(codex|claude|node|bun|deno)$/ { print $1 }' | sort -u | head -n \(maxAgentCandidates) | while read -r pane; do
           [ -n "$pane" ] || continue
+          # Skip panes whose activity the session log already settled — no need
+          # to capture the screen for them.
+          case "$logpanes" in *" $pane "*) continue ;; esac
           scr=$(tm capture-pane -p -t "$pane" 2>/dev/null | tail -n 24)
           if printf '%s' "$scr" | grep -qiE '…[[:space:]]*\\([0-9]+[[:space:]]*[hms]|esc to interrupt'; then st=working
           elif printf '%s' "$scr" | grep -qE '· Ready ·|^[[:space:]]*(❯|›)'; then st=idle
