@@ -38,7 +38,22 @@ struct AgentEntry: Identifiable, Hashable {
     var session: String
     /// Seconds since the agent last wrote its session log (nil if unknown).
     var lastActiveSeconds: Int?
+    /// CLAUDE_CONFIG_DIR / CODEX_HOME for this agent, if set (else the default).
+    var configDir: String?
     var id: PaneRef { ref }
+
+    /// The config dir shown in place of the generic kind label, e.g.
+    /// ".claude-2" or ".codex" — identifies which account an agent uses.
+    var configLabel: String {
+        if let dir = configDir, !dir.isEmpty {
+            return (dir as NSString).lastPathComponent
+        }
+        switch kind {
+        case .claudeCode: return ".claude"
+        case .codex: return ".codex"
+        default: return kind.label
+        }
+    }
 
     /// A stable identity for user labels (pin / rename), surviving pane-id
     /// changes: the container, session, project and agent kind.
@@ -119,7 +134,8 @@ extension AppModel {
                     device: device,
                     location: location(of: pane.id, in: snapshot),
                     session: sessionName(of: pane.id, in: snapshot),
-                    lastActiveSeconds: snapshot.lastActiveSeconds[pane.id]
+                    lastActiveSeconds: snapshot.lastActiveSeconds[pane.id],
+                    configDir: detection.configDirectory
                 )
             }
         }

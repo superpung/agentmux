@@ -33,7 +33,7 @@ struct DetailView: View {
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         .toolbar { toolbarContent }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.selection != nil { StatusBar() }
         }
     }

@@ -131,7 +131,7 @@ struct SidebarView: View {
                 .help("Refresh all targets")
             }
         }
-        .safeAreaInset(edge: .bottom) { StatusFooter() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter() }
         .sheet(item: $renaming) { agent in
             RenameSheet(current: model.customName(agent.identityKey) ?? "", placeholder: agent.title) { name in
                 model.setCustomName(agent.identityKey, name)
@@ -199,7 +199,7 @@ struct SidebarView: View {
     private var matchedAgents: [AgentEntry] {
         model.agentEntries.filter { agent in
             filter.includes(agent.activity)
-                && matches("\(agent.title) \(agent.kind.label) \(agent.space.path) \(agent.session) \(agent.device.name)")
+                && matches("\(agent.title) \(agent.kind.label) \(agent.configLabel) \(agent.space.path) \(agent.session) \(agent.device.name)")
         }
     }
 
@@ -347,7 +347,7 @@ private struct AgentRow: View {
                         .lineLimit(1)
                 }
                 HStack(spacing: 4) {
-                    Text(entry.kind.label)
+                    Text(entry.configLabel)
                     if showDevice {
                         Text("·")
                         Text(entry.device.name)
