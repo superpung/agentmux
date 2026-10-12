@@ -41,6 +41,13 @@ struct AgentMuxApp: App {
         }
         .defaultSize(width: 900, height: 600)
 
+        Window("Sessions", id: "sessions") {
+            SessionsWindow()
+                .environment(model)
+                .frame(minWidth: 460, minHeight: 360)
+        }
+        .defaultSize(width: 620, height: 640)
+
         Settings {
             SettingsView()
                 .environment(model)

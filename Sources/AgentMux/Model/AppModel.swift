@@ -359,6 +359,44 @@ final class AppModel {
         return resources[hostID]
     }
 
+    // MARK: Session admin (only from the Sessions window; deletes are confirmed)
+
+    /// Returns nil on success (and requests a refresh), or an error string.
+    private func adminResult(_ result: Result<Void, RemoteFailure>, targetID: String) -> String? {
+        switch result {
+        case .success:
+            state(targetID)?.refreshRequested = true
+            return nil
+        case let .failure(failure):
+            return "\(failure.kind.rawValue): \(failure.detail)"
+        }
+    }
+
+    func newSession(_ targetID: String, name: String) async -> String? {
+        guard let s = state(targetID) else { return "unknown target" }
+        return adminResult(await TmuxAdmin.newSession(host: s.host, target: s.target, name: name), targetID: targetID)
+    }
+
+    func newWindow(_ targetID: String, sessionID: String) async -> String? {
+        guard let s = state(targetID) else { return "unknown target" }
+        return adminResult(await TmuxAdmin.newWindow(host: s.host, target: s.target, sessionID: sessionID), targetID: targetID)
+    }
+
+    func killSession(_ targetID: String, sessionID: String) async -> String? {
+        guard let s = state(targetID) else { return "unknown target" }
+        return adminResult(await TmuxAdmin.killSession(host: s.host, target: s.target, sessionID: sessionID), targetID: targetID)
+    }
+
+    func killWindow(_ targetID: String, windowID: String) async -> String? {
+        guard let s = state(targetID) else { return "unknown target" }
+        return adminResult(await TmuxAdmin.killWindow(host: s.host, target: s.target, windowID: windowID), targetID: targetID)
+    }
+
+    func killPane(_ targetID: String, paneID: String) async -> String? {
+        guard let s = state(targetID) else { return "unknown target" }
+        return adminResult(await TmuxAdmin.killPane(host: s.host, target: s.target, paneID: paneID), targetID: targetID)
+    }
+
     func refresh(_ targetID: String) {
         state(targetID)?.refreshRequested = true
     }

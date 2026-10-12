@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @AppStorage("showResourceInspector") private var showInspector = false
 
@@ -12,6 +13,12 @@ struct RootView: View {
         } detail: {
             DetailView()
                 .toolbar {
+                    ToolbarItem {
+                        Button { openWindow(id: "sessions") } label: {
+                            Label("Sessions", systemImage: "rectangle.stack")
+                        }
+                        .help("Manage this container's tmux sessions, windows and panes")
+                    }
                     ToolbarItem {
                         Button { showInspector.toggle() } label: {
                             Label("Resources", systemImage: "chart.bar.xaxis")
