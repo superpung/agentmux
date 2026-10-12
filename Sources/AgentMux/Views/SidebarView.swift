@@ -100,7 +100,7 @@ struct SidebarView: View {
             ForEach(groups) { group in
                 Section {
                     ForEach(group.agents) { agent in
-                        AgentRow(entry: agent, showDevice: showDevice)
+                        AgentRow(entry: agent, showDevice: showDevice, showServer: showServer)
                             .tag(agent.ref)
                             .contextMenu { rowMenu(agent) }
                     }
@@ -184,9 +184,13 @@ struct SidebarView: View {
     }
 
     /// The container is already the section header, so its per-row badge is
-    /// redundant then.
+    /// redundant then; both are shown only when agents span more than one.
     private var showDevice: Bool {
         grouping != .container && model.showsAgentDeviceBadge
+    }
+
+    private var showServer: Bool {
+        model.showsAgentServerBadge
     }
 
     private func matches(_ haystack: String) -> Bool {
@@ -331,6 +335,7 @@ private struct AgentRow: View {
     @Environment(AppModel.self) private var model
     let entry: AgentEntry
     let showDevice: Bool
+    let showServer: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -348,9 +353,11 @@ private struct AgentRow: View {
                 }
                 HStack(spacing: 6) {
                     Text(entry.configLabel)
-                    HStack(spacing: 3) {
-                        Image(systemName: "server.rack").imageScale(.small)
-                        Text(entry.device.server)
+                    if showServer {
+                        HStack(spacing: 3) {
+                            Image(systemName: "server.rack").imageScale(.small)
+                            Text(entry.device.server)
+                        }
                     }
                     if showDevice {
                         HStack(spacing: 3) {
@@ -364,7 +371,9 @@ private struct AgentRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 0)
-            if let active = RelativeTime.short(entry.lastActiveSeconds) {
+            // While working, the spinner already says "active now"; the time
+            // would be redundant.
+            if entry.activity != .working, let active = RelativeTime.short(entry.lastActiveSeconds) {
                 Text(active)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

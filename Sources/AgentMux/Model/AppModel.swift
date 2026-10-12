@@ -82,6 +82,12 @@ final class AppModel {
     private var targetStates: [String: TargetState] = [:]
     private var isPolling = false
     private var pollers: [String: Task<Void, Never>] = [:]
+    /// Live host/container resources, by host id, refreshed only while a view
+    /// (the inspector or dashboard) is showing them.
+    private(set) var resources: [String: HostResources] = [:]
+    private var resourcePoller: Task<Void, Never>?
+    private var resourceConsumers = 0
+    static let resourceInterval: Duration = .seconds(5)
     private var releasedOrphans: Set<String> = []
     @ObservationIgnored private let notifier = Notifier()
 
@@ -308,12 +314,49 @@ final class AppModel {
                 await self?.poll(state)
             }
         }
+        if resourcePoller == nil {
+            resourcePoller = Task { [weak self] in await self?.pollResourcesLoop() }
+        }
     }
 
     func stopPolling() {
         isPolling = false
         pollers.values.forEach { $0.cancel() }
         pollers.removeAll()
+        resourcePoller?.cancel()
+        resourcePoller = nil
+    }
+
+    // MARK: Resource monitoring
+
+    /// Resource polling runs only while something is watching it.
+    func beginResourceMonitoring() {
+        resourceConsumers += 1
+    }
+
+    func endResourceMonitoring() {
+        resourceConsumers = max(0, resourceConsumers - 1)
+    }
+
+    private func pollResourcesLoop() async {
+        while !Task.isCancelled {
+            if resourceConsumers > 0 {
+                for host in hosts {
+                    if case let .success(snapshot) = await ResourceProbe.run(host: host) {
+                        resources[host.id] = snapshot
+                    }
+                }
+                try? await Task.sleep(for: Self.resourceInterval)
+            } else {
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    /// Resources for the host behind a target id.
+    func resources(forTarget targetID: String) -> HostResources? {
+        guard let hostID = state(targetID)?.host.id else { return nil }
+        return resources[hostID]
     }
 
     func refresh(_ targetID: String) {

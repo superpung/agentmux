@@ -372,6 +372,46 @@ arg -p
     }
 }
 
+@Suite struct ResourceProbeTests {
+    @Test func parsesHostGPUAndContainers() {
+        let text = """
+        @@host
+        48
+        0.52 0.58 0.59 1/1234 5678
+        38056 128536
+        @@gpu
+        0, NVIDIA RTX, 45, 1234, 16384
+        @@containers
+        app01\t207.12%\t47.74%\t45.83GiB / 96GiB\t84.8GB / 139GB\t4.56TB / 565GB\t15660
+        app02\t28.41%\t19.45%\t18.68GiB / 96GiB\t59.5GB / 17.9GB\t664GB / 124GB\t646
+        @@end
+        """
+        let r = ResourceProbe.parse(text)
+        #expect(r.cores == 48)
+        #expect(r.load1 == 0.52)
+        #expect(r.load5 == 0.58)
+        #expect(r.load15 == 0.59)
+        #expect(r.memUsedMB == 38056)
+        #expect(r.memTotalMB == 128536)
+        #expect(r.gpus.count == 1)
+        #expect(r.gpus.first?.utilizationPercent == 45)
+        #expect(r.gpus.first?.memTotalMB == 16384)
+        #expect(r.containers["app01"]?.cpuPercent == 207.12)
+        #expect(r.containers["app01"]?.memPercent == 47.74)
+        #expect(r.containers["app01"]?.pids == 15660)
+        #expect(r.containers["app01"]?.memText == "45.83GiB / 96GiB")
+        #expect(r.containers["app02"]?.cpuPercent == 28.41)
+    }
+
+    @Test func handlesNoGPU() {
+        let text = "@@host\n4\n1.0 1.0 1.0\n100 200\n@@gpu\n@@containers\n@@end"
+        let r = ResourceProbe.parse(text)
+        #expect(r.cores == 4)
+        #expect(r.gpus.isEmpty)
+        #expect(r.containers.isEmpty)
+    }
+}
+
 @Suite struct DockerDiscoveryTests {
     @Test func parsesTabSeparatedRows() {
         let text = """

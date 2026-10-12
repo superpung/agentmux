@@ -192,6 +192,11 @@ extension AppModel {
         deviceFilter == nil && Set(allAgentEntries.map(\.device.name)).count > 1
     }
 
+    /// Show the server on a row only when agents span more than one server.
+    var showsAgentServerBadge: Bool {
+        deviceFilter == nil && Set(allAgentEntries.map(\.device.server)).count > 1
+    }
+
     var showsPaneDeviceBadge: Bool {
         deviceFilter == nil && Set(paneEntries.map(\.device.name)).count > 1
     }
