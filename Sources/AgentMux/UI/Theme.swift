@@ -75,10 +75,10 @@ struct AgentStatusGlyph: View {
     var body: some View {
         switch activity {
         case .working:
-            SpinnerView(color: Theme.working)
+            SpinnerView(color: Theme.textSecondary)
                 .frame(width: 12, height: 12)
         case .waitingInput, .waitingApproval:
-            Image(systemName: "exclamationmark.circle")
+            Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.warning)
         case .idle, .exited, .unknown:
@@ -87,18 +87,33 @@ struct AgentStatusGlyph: View {
     }
 }
 
-/// Status pill for the detail titlebar. Unknown shows nothing rather than a guess.
+/// Status icon for the detail titlebar. Unknown shows nothing rather than a
+/// guess; the text label is kept as a tooltip.
 struct ActivityPill: View {
     let activity: AgentActivity
 
     var body: some View {
         if let label {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.activityColor(activity))
-                .padding(.horizontal, 8)
-                .frame(height: 20)
-                .background(Theme.activityColor(activity).opacity(0.13), in: Capsule())
+            Group {
+                if activity == .working {
+                    SpinnerView(color: Theme.textSecondary).frame(width: 13, height: 13)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.activityColor(activity))
+                }
+            }
+            .help(label)
+        }
+    }
+
+    private var icon: String {
+        switch activity {
+        case .working: "circle.dotted"
+        case .waitingInput, .waitingApproval: "exclamationmark.circle.fill"
+        case .idle: "checkmark.circle"
+        case .exited: "stop.circle"
+        case .unknown: "questionmark.circle"
         }
     }
 

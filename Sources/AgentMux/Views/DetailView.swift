@@ -181,15 +181,18 @@ private struct UsageView: View {
     var body: some View {
         HStack(spacing: 14) {
             if let fraction = usage.contextFraction {
-                Meter(label: "ctx", fraction: fraction,
+                Meter(systemImage: "square.stack.3d.up.fill", fraction: fraction,
                       tooltip: "Context: \(short(usage.contextTokens)) / \(short(usage.contextWindow)) tokens")
             } else if let context = usage.contextTokens {
-                Text("ctx \(Self.short(context))")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                    .help("Context: \(context) tokens (the model's window is not in the log)")
+                HStack(spacing: 4) {
+                    Image(systemName: "square.stack.3d.up.fill").imageScale(.small)
+                    Text(Self.short(context))
+                }
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                .help("Context: \(context) tokens (the model's window is not in the log)")
             }
             if let rate = usage.rateLimitPercent {
-                Meter(label: "limit", fraction: rate / 100, tooltip: "Rate limit used: \(rate)%")
+                Meter(systemImage: "hourglass", fraction: rate / 100, tooltip: "Rate limit used: \(rate)%")
             }
         }
     }
@@ -201,15 +204,15 @@ private struct UsageView: View {
     }
 }
 
-/// A labelled bar with a trailing percentage.
+/// An icon, a bar, and a trailing percentage.
 private struct Meter: View {
-    let label: String
+    let systemImage: String
     let fraction: Double
     let tooltip: String
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(label).font(.caption2).foregroundStyle(.tertiary)
+            Image(systemName: systemImage).imageScale(.small).foregroundStyle(.tertiary)
             Capsule().fill(.quaternary)
                 .frame(width: 48, height: 5)
                 .overlay(alignment: .leading) {

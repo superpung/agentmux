@@ -346,11 +346,17 @@ private struct AgentRow: View {
                     Text(model.customName(entry.identityKey) ?? entry.title)
                         .lineLimit(1)
                 }
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Text(entry.configLabel)
+                    HStack(spacing: 3) {
+                        Image(systemName: "server.rack").imageScale(.small)
+                        Text(entry.device.server)
+                    }
                     if showDevice {
-                        Text("·")
-                        Text(entry.device.name)
+                        HStack(spacing: 3) {
+                            Image(systemName: "shippingbox").imageScale(.small)
+                            Text(entry.device.name)
+                        }
                     }
                 }
                 .font(.caption)

@@ -6,6 +6,8 @@ struct DeviceInfo: Identifiable, Hashable {
     var id: String
     var name: String
     var subtitle: String
+    /// The SSH host this device is on (display name).
+    var server: String
     var osID: String?
 }
 
@@ -85,7 +87,8 @@ extension TargetState {
         case .name: parts.append("-L \(target.tmuxSocket.value ?? "")")
         case .path: parts.append("-S \(target.tmuxSocket.value ?? "")")
         }
-        return DeviceInfo(id: target.id, name: name, subtitle: parts.joined(separator: " · "), osID: snapshot?.osID)
+        let server = host.displayName.isEmpty ? host.sshDestination : host.displayName
+        return DeviceInfo(id: target.id, name: name, subtitle: parts.joined(separator: " · "), server: server, osID: snapshot?.osID)
     }
 
     var isOnline: Bool { lastSuccess != nil && lastFailure == nil }
