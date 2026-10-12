@@ -15,7 +15,8 @@ struct PaneRef: Hashable, Sendable, Codable {
 @MainActor
 @Observable
 final class TargetState: Identifiable {
-    let host: HostConfig
+    /// Updated in place when the host is edited in Settings.
+    var host: HostConfig
     let target: TargetConfig
     var snapshot: InventorySnapshot?
     var detections: [String: AgentDetection] = [:]
@@ -235,11 +236,16 @@ final class AppModel {
             targetStates.removeValue(forKey: id)
         }
 
-        for (host, target) in desired where targetStates[target.id] == nil {
-            let state = TargetState(host: host, target: target)
-            targetStates[target.id] = state
-            if isPolling {
-                pollers[target.id] = Task { [weak self] in await self?.poll(state) }
+        for (host, target) in desired {
+            if let existing = targetStates[target.id] {
+                // Keep the live state, but pick up an edited host name / ssh.
+                if existing.host != host { existing.host = host }
+            } else {
+                let state = TargetState(host: host, target: target)
+                targetStates[target.id] = state
+                if isPolling {
+                    pollers[target.id] = Task { [weak self] in await self?.poll(state) }
+                }
             }
         }
 
