@@ -43,8 +43,8 @@ private struct ContainerCard: View {
                       fraction: cores > 0 ? container.cpuPercent / Double(cores * 100) : nil)
             StatMeter(icon: "memorychip", title: "Memory", value: "\(Int(container.memPercent.rounded()))% · \(container.memText)",
                       fraction: container.memPercent / 100)
-            StatLine(icon: "network", title: "Net", value: container.netText)
-            StatLine(icon: "internaldrive", title: "Disk", value: container.blockText)
+            StatLine(icon: "network", title: "Net I/O", value: container.netText)
+            StatLine(icon: "externaldrive.badge.timemachine", title: "Block I/O", value: container.blockText)
             StatLine(icon: "number", title: "Processes", value: "\(container.pids)")
         }
     }
