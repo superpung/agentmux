@@ -28,6 +28,12 @@ public enum CommandRunner {
         stdoutLimit: Int = 4 << 20,
         stderrLimit: Int = 64 << 10
     ) async throws -> CommandResult {
+        // Record what we're about to run remotely, including the piped script
+        // (truncated), so a later crash can be traced to the exact command.
+        let scriptPreview = stdin.map { String(decoding: $0.prefix(2000), as: UTF8.self) } ?? ""
+        CommandLog.log("ssh", (executable as NSString).lastPathComponent,
+                       (arguments.joined(separator: " ") + (scriptPreview.isEmpty ? "" : " <<< " + scriptPreview)))
+
         let run = Run(stdoutLimit: stdoutLimit, stderrLimit: stderrLimit)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)

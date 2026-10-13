@@ -115,6 +115,7 @@ public final class ControlClient: @unchecked Sendable {
     /// command, or the first error.
     public func send(_ commands: [String], completion: @escaping @Sendable (Result<[ControlReply], ControlError>) -> Void) {
         let command = commands.joined(separator: " ; ")
+        CommandLog.log("ctrl", clientTag, command)
         guard !commands.isEmpty, !command.contains("\n"), !command.contains("\r") else {
             queue.async { completion(.failure(.invalidCommand)) }
             return
