@@ -514,6 +514,7 @@ final class AppModel {
             if previousServer != snapshot.server {
                 invalidateTerminals(of: state)
             }
+            closeOrphanedMirrors(state)
             await releaseOrphansOnce(state)
             if let pending = pendingSelect, pending.targetID == state.id,
                snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)
@@ -544,6 +545,22 @@ final class AppModel {
         releasedOrphans.insert(state.id)
         let live = terminals.values.filter { $0.ref.targetID == state.id }.map(\.clientTag)
         _ = await ClientRelease.release(host: state.host, context: context, options: SSHOptions(), tags: [], keeping: live)
+    }
+
+    /// Closes a mirror once its pane no longer belongs to any real (non-grouped)
+    /// session — i.e. the user killed their session and only our own grouped
+    /// mirror session was keeping that window (and its agent) alive. Closing the
+    /// mirror destroys the grouped session, so the window dies as the user
+    /// intended and the ghost leaves the UI. A grouped session always coexists
+    /// with its real session while open, so this never fires on a live view.
+    private func closeOrphanedMirrors(_ state: TargetState) {
+        guard let snapshot = state.snapshot else { return }
+        for ref in Array(terminals.keys) where ref.targetID == state.id {
+            if !snapshot.hasRealSession(ref.paneID) {
+                closeTerminal(ref)
+                if selection == ref { selection = nil }
+            }
+        }
     }
 
     /// A restarted tmux server reuses pane ids; views of the old generation

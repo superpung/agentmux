@@ -121,6 +121,7 @@ extension AppModel {
             return snapshot.panes.compactMap { pane in
                 guard let detection = state.detections[pane.id],
                       detection.kind == .codex || detection.kind == .claudeCode,
+                      snapshot.hasRealSession(pane.id),
                       let ref = state.ref(for: pane.id) else { return nil }
                 let window = windowName(of: pane.id, in: snapshot)
                 let title = AgentTitle.from(paneTitle: pane.title, kind: detection.kind)
@@ -150,7 +151,7 @@ extension AppModel {
             let device = state.device
             return snapshot.panes.compactMap { pane in
                 if let kind = state.detections[pane.id]?.kind, kind == .codex || kind == .claudeCode { return nil }
-                guard let ref = state.ref(for: pane.id) else { return nil }
+                guard snapshot.hasRealSession(pane.id), let ref = state.ref(for: pane.id) else { return nil }
                 return PaneEntry(
                     ref: ref,
                     title: windowName(of: pane.id, in: snapshot) ?? pane.currentCommand,

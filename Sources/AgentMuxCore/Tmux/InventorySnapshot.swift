@@ -162,4 +162,15 @@ public struct InventorySnapshot: Sendable, Equatable {
         }
         return rows.first { !isGrouped($0.sessionID) } ?? rows.first
     }
+
+    /// Whether a pane belongs to any real (non-grouped) session. A pane that
+    /// lives only in an AgentMux grouped mirror session is a ghost — its real
+    /// session was killed and only our mirror is keeping the window alive.
+    public func hasRealSession(_ paneID: String) -> Bool {
+        memberships.contains { membership in
+            guard membership.paneID == paneID else { return false }
+            let name = sessions.first { $0.id == membership.sessionID }?.name ?? ""
+            return !name.hasPrefix(RemoteCommand.groupedSessionPrefix)
+        }
+    }
 }
