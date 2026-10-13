@@ -78,7 +78,11 @@ public enum InventoryProbe {
             ccfg=${ccfg:-$HOME/.claude}
             cenc=$(readlink "/proc/$pid/cwd" 2>/dev/null | sed 's#/#-#g')
             lf="$ccfg/projects/$cenc/$res.jsonl"
-            if [ -n "$res" ] && [ -f "$lf" ]; then
+            # Resumed via the picker (no --resume id on the cmdline) or started
+            # fresh: Claude does not keep the transcript fd open, so locate the
+            # active one as the newest .jsonl in the pane's project dir.
+            { [ -z "$res" ] || [ ! -f "$lf" ]; } && lf=$(ls -t "$ccfg/projects/$cenc/"*.jsonl 2>/dev/null | head -n 1)
+            if [ -n "$lf" ] && [ -f "$lf" ]; then
               lage=$(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))
               ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
               echo "log $ev $lage"
@@ -108,6 +112,16 @@ public enum InventoryProbe {
           if [ "$(cat /proc/$pid/comm 2>/dev/null)" = codex ] && command -v jq >/dev/null 2>&1; then
             cpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
             crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | head -1)
+            # The app-server daemon can hold the rollout fd (tagged with another
+            # pane), so when this pane's own process has no rollout fd, locate
+            # the file by the `resume <id>` on its cmdline — accurate per pane,
+            # which also avoids reading another session's data by mistake.
+            if [ -z "$crf" ]; then
+              crid=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE 'resume [0-9a-f-]{36}' | head -1 | awk '{print $2}')
+              cch=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
+              cch=${cch:-$HOME/.codex}
+              [ -n "$crid" ] && crf=$(find "$cch/sessions" -name "rollout-*-$crid.jsonl" 2>/dev/null | head -1)
+            fi
             if [ -n "$cpane" ] && [ -n "$crf" ]; then
               cage=$(( $(date +%s) - $(stat -c %Y "$crf" 2>/dev/null) ))
               # Last active = the last real turn event, not the file mtime (Codex
