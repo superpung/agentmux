@@ -363,6 +363,18 @@ private struct AgentRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 0)
+            // Marks agents whose mirror is currently open in the app.
+            if model.poppedOut.contains(entry.ref) {
+                Image(systemName: "macwindow.on.rectangle")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                    .help("Open in its own window")
+            } else if model.terminal(for: entry.ref) != nil {
+                Circle()
+                    .fill(Theme.success)
+                    .frame(width: 6, height: 6)
+                    .help("Open")
+            }
             // While working, the spinner already says "active now"; the time
             // would be redundant.
             if entry.activity != .working, let active = RelativeTime.short(entry.lastActiveSeconds) {
