@@ -23,11 +23,9 @@ struct DashboardView: View {
                                valueTint: idleCount == 0 ? Theme.textTertiary : Theme.success, fillHeight: true)
                 }
                 containersSection
-                if !attention.isEmpty {
-                    AgentListSection(title: "Needs attention", systemImage: "exclamationmark.circle.fill", tint: Theme.warning, agents: attention)
-                }
-                if !working.isEmpty {
-                    AgentListSection(title: "Working now", systemImage: "circle.dotted", tint: Theme.working, agents: working)
+                if !agents.isEmpty {
+                    AgentListSection(title: "All agents", systemImage: "square.stack.3d.up",
+                                     tint: Theme.textSecondary, agents: sortedAgents)
                 }
             }
             .padding(20)
@@ -45,6 +43,19 @@ struct DashboardView: View {
     private var attention: [AgentEntry] { agents.filter { $0.activity.needsAttention } }
     private var idleCount: Int { agents.filter { $0.activity == .idle }.count }
     private var serverCount: Int { Set(model.targets.map(\.host.id)).count }
+
+    /// Urgency first (needs-attention, then working), then most-recently active.
+    private var sortedAgents: [AgentEntry] {
+        agents.sorted { a, b in
+            let ra = rank(a.activity), rb = rank(b.activity)
+            if ra != rb { return ra < rb }
+            return (a.lastActiveSeconds ?? .max) < (b.lastActiveSeconds ?? .max)
+        }
+    }
+
+    private func rank(_ activity: AgentActivity) -> Int {
+        activity.needsAttention ? 0 : (activity == .working ? 1 : 2)
+    }
 
     // MARK: Sections
 
