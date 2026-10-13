@@ -43,7 +43,7 @@ public enum RemoteFileService {
                                        "-printf", #"%y\t%Y\t%s\t%f\n"#])
         let result = await RemoteScript.run("\(find) 2>/dev/null", host: host, target: target,
                                             options: options, timeoutSeconds: 15)
-        return result.map { parseListing(directory, $0) }
+        return result.map { parseListing(directory, stripFraming($0)) }
     }
 
     /// Reads a file for preview: text (truncated past the cap), an image (under
@@ -61,10 +61,20 @@ public enum RemoteFileService {
         head -c \(cap) \(qf) 2>/dev/null | base64 | tr -d '\\n'
         """
         let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 20)
-        return result.flatMap { parseRead($0, isImage: isImage, cap: cap) }
+        return result.flatMap { parseRead(stripFraming($0), isImage: isImage, cap: cap) }
     }
 
     // MARK: Parsing (pure; unit-tested)
+
+    /// `RemoteCommand.script` prepends an `@@container …` line (from a
+    /// `docker inspect`) for container targets. Drop any such framing lines
+    /// before parsing the script's own output.
+    static func stripFraming(_ output: String) -> String {
+        guard output.contains("@@container ") else { return output }
+        return output.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("@@container ") }
+            .joined(separator: "\n")
+    }
 
     static func parseListing(_ directory: String, _ output: String) -> [RemoteFileEntry] {
         let base = directory.hasSuffix("/") ? directory : directory + "/"

@@ -60,4 +60,21 @@ import Testing
     @Test func readMissingFileIsFailure() {
         #expect((try? RemoteFileService.parseRead("@@size -1\n", isImage: false, cap: 1024).get()) == nil)
     }
+
+    @Test func stripsContainerFramingBeforeRead() throws {
+        // RemoteCommand.script prepends an "@@container …" line for containers.
+        let framed = "@@container abc123 running 2026-10-13T00:00:00Z 42\n@@size 5\n" + Data("hello".utf8).base64EncodedString()
+        let content = try RemoteFileService.parseRead(RemoteFileService.stripFraming(framed), isImage: false, cap: 1024).get()
+        #expect(content == .text("hello", truncated: false, byteCount: 5))
+    }
+
+    @Test func stripsContainerFramingBeforeListing() {
+        let framed = "@@container abc123 running X 42\nd\td\t4096\tsrc\nf\tf\t10\ta.txt\n"
+        let entries = RemoteFileService.parseListing("/data/x", RemoteFileService.stripFraming(framed))
+        #expect(entries.map(\.name) == ["src", "a.txt"])
+    }
+
+    @Test func stripFramingNoOpWithoutContainerLine() {
+        #expect(RemoteFileService.stripFraming("@@size 5\nAAAA") == "@@size 5\nAAAA")
+    }
 }
