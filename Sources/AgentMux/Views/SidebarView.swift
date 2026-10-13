@@ -120,8 +120,7 @@ struct SidebarView: View {
         .searchable(text: $query, placement: .sidebar, prompt: "Search agents")
         .navigationTitle("AgentMux")
         .toolbar {
-            ToolbarItem { filterMenu }
-            ToolbarItem { groupingMenu }
+            ToolbarItem { viewOptionsMenu }
             ToolbarItem {
                 Button {
                     model.refreshAll()
@@ -149,30 +148,23 @@ struct SidebarView: View {
         }
     }
 
-    private var groupingMenu: some View {
-        Menu {
-            Picker("Group by", selection: $groupingRaw) {
-                ForEach(GroupBy.allCases) { option in
-                    Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
-                }
-            }
-        } label: {
-            Label("Group by", systemImage: "rectangle.3.group")
-        }
-        .help("Group agents by container, project, session or status")
-    }
-
-    private var filterMenu: some View {
+    private var viewOptionsMenu: some View {
         Menu {
             Picker("Show", selection: $filterRaw) {
                 ForEach(AgentFilter.allCases) { option in
                     Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
                 }
             }
+            Divider()
+            Picker("Group by", selection: $groupingRaw) {
+                ForEach(GroupBy.allCases) { option in
+                    Label(option.label, systemImage: option.systemImage).tag(option.rawValue)
+                }
+            }
         } label: {
-            Label("Filter", systemImage: filter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+            Label("View options", systemImage: filter == .all ? "slider.horizontal.3" : "line.3.horizontal.decrease.circle.fill")
         }
-        .help("Show all agents, only active ones, or only those needing attention")
+        .help("Filter and group agents")
     }
 
     // MARK: Grouped data

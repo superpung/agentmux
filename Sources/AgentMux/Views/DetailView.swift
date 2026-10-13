@@ -26,13 +26,17 @@ struct DetailView: View {
                 } else if model.terminal(for: ref) == nil {
                     PanePlaceholderView(ref: ref)
                 }
-            } else {
+            } else if model.configError != nil || model.hosts.isEmpty {
                 EmptyStateView()
+            } else {
+                DashboardView()
             }
         }
         .navigationTitle(title)
-        .navigationSubtitle(subtitle)
         .toolbar { toolbarContent }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if model.selection != nil { ContextBar() }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.selection != nil { StatusBar() }
         }
@@ -45,17 +49,6 @@ struct DetailView: View {
         return "AgentMux"
     }
 
-    private var subtitle: String {
-        guard let ref = model.selection else { return "" }
-        if let agent = model.agentEntry(ref) {
-            return "\(agent.kind.label) · \(agent.space.path)"
-        }
-        if let pane = model.paneEntry(ref) {
-            return pane.space.path
-        }
-        return ""
-    }
-
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         if let ref = model.selection, let agent = model.agentEntry(ref), agent.activity != .unknown {
             ToolbarItem(placement: .navigation) {
@@ -63,30 +56,85 @@ struct DetailView: View {
             }
         }
         if let ref = model.selection, let terminal = model.terminal(for: ref) {
-            ToolbarItemGroup {
-                if !model.poppedOut.contains(ref) {
-                    Button {
-                        model.popOut(ref)
-                        openWindow(value: ref)
-                    } label: {
-                        Label("Open in New Window", systemImage: "macwindow.on.rectangle")
+            ToolbarItem {
+                Menu {
+                    if !model.poppedOut.contains(ref) {
+                        Button {
+                            model.popOut(ref)
+                            openWindow(value: ref)
+                        } label: {
+                            Label("Open in New Window", systemImage: "macwindow.on.rectangle")
+                        }
                     }
-                    .help("Show this agent in its own window")
-                }
-                Button {
-                    terminal.resync()
+                    Button {
+                        terminal.resync()
+                    } label: {
+                        Label("Redraw", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Divider()
+                    Button {
+                        model.closeTerminal(ref)
+                        model.selection = nil
+                    } label: {
+                        Label("Close View", systemImage: "xmark.circle")
+                    }
                 } label: {
-                    Label("Redraw", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Actions", systemImage: "ellipsis.circle")
                 }
-                .help("Rebuild this view from the pane's current screen")
-                Button {
-                    model.closeTerminal(ref)
-                    model.selection = nil
-                } label: {
-                    Label("Close", systemImage: "xmark.circle")
-                }
-                .help("Closes this view and ends its tmux client. The agent and its window keep running on the server.")
+                .menuIndicator(.hidden)
+                .help("Open in a new window, redraw, or close this view")
             }
+        }
+    }
+}
+
+/// A slim identity strip under the toolbar: the old subtitle, but with the same
+/// brand / server / container / folder icons the sidebar uses.
+private struct ContextBar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let ref = model.selection {
+            HStack(spacing: 12) {
+                if let agent = model.agentEntry(ref) {
+                    chip(brandIcon(agent.kind), agent.configLabel)
+                    chip(icon("server.rack"), agent.device.server)
+                    chip(icon("shippingbox"), agent.device.name)
+                    chip(icon("folder"), agent.space.path)
+                } else if let pane = model.paneEntry(ref) {
+                    chip(icon("terminal"), pane.command)
+                    chip(icon("shippingbox"), pane.device.name)
+                    chip(icon("folder"), pane.space.path)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(.bar)
+            .overlay(alignment: .bottom) { Divider() }
+        }
+    }
+
+    private func chip(_ icon: some View, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            icon
+            Text(text).truncationMode(.middle)
+        }
+        .layoutPriority(1)
+    }
+
+    private func icon(_ name: String) -> some View {
+        Image(systemName: name).imageScale(.small).foregroundStyle(.tertiary)
+    }
+
+    @ViewBuilder private func brandIcon(_ kind: AgentKind) -> some View {
+        if let resource = BrandIconLoader.agentIcon(for: kind) {
+            BrandIcon(resource: resource, size: 12)
+        } else {
+            icon("terminal")
         }
     }
 }
@@ -124,7 +172,7 @@ private struct StatusBar: View {
                     UsageView(usage: usage)
                 }
             }
-            .font(.caption)
+            .font(.footnote)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -184,11 +232,11 @@ private struct UsageView: View {
                 Meter(systemImage: "square.stack.3d.up.fill", fraction: fraction,
                       tooltip: "Context: \(short(usage.contextTokens)) / \(short(usage.contextWindow)) tokens")
             } else if let context = usage.contextTokens {
-                HStack(spacing: 4) {
-                    Image(systemName: "square.stack.3d.up.fill").imageScale(.small)
+                HStack(spacing: 5) {
+                    Image(systemName: "square.stack.3d.up.fill").imageScale(.medium).foregroundStyle(.secondary)
                     Text(Self.short(context))
                 }
-                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                 .help("Context: \(context) tokens (the model's window is not in the log)")
             }
             if let rate = usage.rateLimitPercent {
@@ -211,16 +259,16 @@ private struct Meter: View {
     let tooltip: String
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: systemImage).imageScale(.small).foregroundStyle(.tertiary)
+        HStack(spacing: 6) {
+            Image(systemName: systemImage).imageScale(.medium).foregroundStyle(.secondary)
             Capsule().fill(.quaternary)
-                .frame(width: 48, height: 5)
+                .frame(width: 56, height: 6)
                 .overlay(alignment: .leading) {
                     Capsule().fill(color)
-                        .frame(width: 48 * max(0, min(1, fraction)), height: 5)
+                        .frame(width: 56 * max(0, min(1, fraction)), height: 6)
                 }
             Text("\(Int((fraction * 100).rounded()))%")
-                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
         }
         .help(tooltip)
     }

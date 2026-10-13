@@ -2,7 +2,6 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @AppStorage("showResourceInspector") private var showInspector = false
 
@@ -13,15 +12,9 @@ struct RootView: View {
         } detail: {
             DetailView()
                 .toolbar {
-                    ToolbarItem {
-                        Button { openWindow(id: "sessions") } label: {
-                            Label("Sessions", systemImage: "rectangle.stack")
-                        }
-                        .help("Manage this container's tmux sessions, windows and panes")
-                    }
-                    ToolbarItem {
+                    ToolbarItem(placement: .primaryAction) {
                         Button { showInspector.toggle() } label: {
-                            Label("Resources", systemImage: "chart.bar.xaxis")
+                            Label("Resources", systemImage: "sidebar.right")
                         }
                         .help("Show container and host resources")
                     }
@@ -31,11 +24,21 @@ struct RootView: View {
             ResourceInspector()
                 .inspectorColumnWidth(min: 230, ideal: 280, max: 380)
         }
+        .overlay {
+            if model.showCommandPalette {
+                CommandPalette(isPresented: paletteBinding)
+                    .transition(.opacity)
+            }
+        }
         .onChange(of: model.selection) { _, selection in
             for terminal in model.terminals.values {
                 terminal.setActive(terminal.ref == selection)
             }
         }
+    }
+
+    private var paletteBinding: Binding<Bool> {
+        Binding(get: { model.showCommandPalette }, set: { model.showCommandPalette = $0 })
     }
 
     /// Selecting a row opens its mirror (on an attachable target) and marks it

@@ -22,6 +22,11 @@ struct AgentMuxApp: App {
         .commands {
             SidebarCommands()
             CommandGroup(after: .toolbar) {
+                Button("Command Palette") { model.showCommandPalette = true }
+                    .keyboardShortcut("k", modifiers: .command)
+                Button("Dashboard") { model.selection = nil }
+                    .keyboardShortcut("0", modifiers: .command)
+                OpenSessionsButton()
                 Button("Refresh") { model.refreshAll() }
                     .keyboardShortcut("r", modifiers: .command)
                 Button("Next Agent") { model.selectAdjacentAgent(1) }
@@ -48,10 +53,28 @@ struct AgentMuxApp: App {
         }
         .defaultSize(width: 620, height: 640)
 
+        MenuBarExtra {
+            MenuBarContent(model: model)
+        } label: {
+            MenuBarLabel(model: model)
+        }
+        .menuBarExtraStyle(.window)
+
         Settings {
             SettingsView()
                 .environment(model)
         }
+    }
+}
+
+/// Menu command that opens the dedicated Sessions window (the only place tmux
+/// sessions are created or killed). Lives in a view so it can read `openWindow`.
+private struct OpenSessionsButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Sessions") { openWindow(id: "sessions") }
+            .keyboardShortcut("s", modifiers: [.command, .shift])
     }
 }
 
