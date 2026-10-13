@@ -90,6 +90,8 @@ struct MenuBarContent: View {
         VStack(spacing: 1) {
             Text("\(value)").font(.system(.title3, design: .rounded).weight(.semibold))
                 .monospacedDigit().foregroundStyle(tint)
+                .contentTransition(.numericText())
+                .animation(.easeOut(duration: 0.25), value: value)
             Text(label).font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)

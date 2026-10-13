@@ -32,6 +32,7 @@ struct DetailView: View {
                 DashboardView()
             }
         }
+        .animation(.easeInOut(duration: 0.16), value: model.selection)
         .navigationTitle(title)
         .toolbar { toolbarContent }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -52,7 +53,7 @@ struct DetailView: View {
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         if let ref = model.selection, let agent = model.agentEntry(ref), agent.activity != .unknown {
             ToolbarItem(placement: .navigation) {
-                ActivityPill(activity: agent.activity)
+                StatusChip(activity: agent.activity, showsIdle: true)
             }
         }
         if let ref = model.selection, let terminal = model.terminal(for: ref) {

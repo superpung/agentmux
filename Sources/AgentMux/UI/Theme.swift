@@ -109,48 +109,6 @@ struct AgentStatusGlyph: View {
     }
 }
 
-/// Status icon for the detail titlebar. Unknown shows nothing rather than a
-/// guess; the text label is kept as a tooltip.
-struct ActivityPill: View {
-    let activity: AgentActivity
-
-    var body: some View {
-        if let label {
-            Group {
-                if activity == .working {
-                    SpinnerView(color: Theme.textSecondary).frame(width: 13, height: 13)
-                } else {
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.activityColor(activity))
-                }
-            }
-            .help(label)
-        }
-    }
-
-    private var icon: String {
-        switch activity {
-        case .working: "circle.dotted"
-        case .waitingInput, .waitingApproval: "exclamationmark.circle.fill"
-        case .idle: "checkmark.circle"
-        case .exited: "stop.circle"
-        case .unknown: "questionmark.circle"
-        }
-    }
-
-    private var label: String? {
-        switch activity {
-        case .working: "Working"
-        case .waitingInput: "Needs input"
-        case .waitingApproval: "Needs approval"
-        case .idle: "Idle"
-        case .exited: "Exited"
-        case .unknown: nil
-        }
-    }
-}
-
 struct SpinnerView<S: ShapeStyle>: View {
     let color: S
     @State private var spinning = false

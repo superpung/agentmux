@@ -8,11 +8,14 @@ import SwiftUI
 struct StatusChip: View {
     let activity: AgentActivity
     var compact = false
+    /// In a list, idle on every row is noise, so it's hidden by default. A
+    /// single focal status (e.g. the detail titlebar) can opt in to show it.
+    var showsIdle = false
 
     var body: some View {
-        // Idle is the quiet default — showing it on every row is just noise.
-        // Only working / needs-input / needs-approval / exited earn a chip.
-        if activity != .idle, let label = Theme.activityLabel(activity) {
+        // Only working / needs-input / needs-approval / exited earn a chip in a
+        // list; idle is shown only where `showsIdle` is set.
+        if (showsIdle || activity != .idle), let label = Theme.activityLabel(activity) {
             let tint = Theme.activityColor(activity)
             HStack(spacing: 4) {
                 if activity == .working {
@@ -103,6 +106,8 @@ struct MetricCard: View {
                 Text(value)
                     .font(.system(.title2, design: .rounded).weight(.semibold))
                     .monospacedDigit().foregroundStyle(valueTint)
+                    .contentTransition(.numericText())
+                    .animation(.easeOut(duration: 0.25), value: value)
                 if let unit {
                     Text(unit).font(.caption).foregroundStyle(.secondary)
                 }
