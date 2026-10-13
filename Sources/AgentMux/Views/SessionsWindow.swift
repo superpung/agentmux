@@ -35,7 +35,7 @@ struct SessionsWindow: View {
             Text("The programs running in \(request.label) will be terminated. This can't be undone.")
         }
         .sheet(isPresented: $showNewSession) {
-            NewSessionSheet(name: $newSessionName) { name in
+            NewSessionSheet(name: $newSessionName, container: model.state(targetID)?.device.name ?? targetID) { name in
                 run { await model.newSession(targetID, name: name) }
             }
         }
@@ -53,7 +53,12 @@ struct SessionsWindow: View {
             }
             .labelsHidden()
             .fixedSize()
-            if busy { ProgressView().controlSize(.small) }
+            if busy {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.small)
+                    Text("Updating…").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             Button {
                 newSessionName = ""
@@ -75,9 +80,9 @@ struct SessionsWindow: View {
                 ForEach(nodes(in: snapshot)) { session in
                     Section {
                         ForEach(session.children ?? []) { window in
-                            windowRow(window)
+                            windowRow(window, in: session)
                             ForEach(window.children ?? []) { pane in
-                                paneRow(pane)
+                                paneRow(pane, in: window, session: session)
                             }
                         }
                     } header: {
@@ -87,10 +92,23 @@ struct SessionsWindow: View {
             }
             .listStyle(.inset)
         } else {
-            ContentUnavailableView(
-                "No tmux sessions", systemImage: "rectangle.on.rectangle.slash",
-                description: Text("This container has no running tmux server, or isn't connected yet.")
-            )
+            ContentUnavailableView {
+                Label("No tmux sessions", systemImage: "rectangle.on.rectangle.slash")
+            } description: {
+                Text(model.state(targetID) == nil
+                    ? "This container isn't connected yet."
+                    : "This container has no running tmux server. Create a session to start one.")
+            } actions: {
+                if model.state(targetID) != nil {
+                    Button {
+                        newSessionName = ""
+                        showNewSession = true
+                    } label: {
+                        Label("New Session", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -117,21 +135,35 @@ struct SessionsWindow: View {
         }
     }
 
-    @ViewBuilder private func windowRow(_ node: Node) -> some View {
+    @ViewBuilder private func windowRow(_ node: Node, in session: Node) -> some View {
         if case let .window(index, name) = node.kind {
             let title = name.isEmpty ? node.id : name
             row(indent: 0, icon: AnyView(Image(systemName: "macwindow").foregroundStyle(.secondary)), title: "\(index)  \(title)", mono: false, accessory: AnyView(EmptyView())) {
-                Button(role: .destructive) { confirm = KillRequest(kind: .window, id: node.id, label: "window \(title)") } label: { Label("Kill Window", systemImage: "trash") }
+                Button(role: .destructive) {
+                    confirm = KillRequest(kind: .window, id: node.id, label: "window \(index) (\(title)) in session \(sessionName(session))")
+                } label: { Label("Kill Window", systemImage: "trash") }
             }
         }
     }
 
-    @ViewBuilder private func paneRow(_ node: Node) -> some View {
+    @ViewBuilder private func paneRow(_ node: Node, in window: Node, session: Node) -> some View {
         if case let .pane(command, agentKind, activity) = node.kind {
             row(indent: 1, icon: AnyView(paneIcon(agentKind)), title: command, mono: true, accessory: AnyView(agentKind != nil ? AnyView(AgentStatusGlyph(activity: activity)) : AnyView(EmptyView()))) {
-                Button(role: .destructive) { confirm = KillRequest(kind: .pane, id: node.id, label: "pane \(node.id) (\(command))") } label: { Label("Kill Pane", systemImage: "trash") }
+                Button(role: .destructive) {
+                    confirm = KillRequest(kind: .pane, id: node.id, label: "pane \(node.id) (\(command)) in \(sessionName(session)):\(windowIndex(window))")
+                } label: { Label("Kill Pane", systemImage: "trash") }
             }
         }
+    }
+
+    private func sessionName(_ node: Node) -> String {
+        if case let .session(name, _) = node.kind { return name.isEmpty ? node.id : name }
+        return node.id
+    }
+
+    private func windowIndex(_ node: Node) -> String {
+        if case let .window(index, _) = node.kind { return "\(index)" }
+        return node.id
     }
 
     private func row(indent: Int, icon: AnyView, title: String, mono: Bool, accessory: AnyView, @ViewBuilder menu: () -> some View) -> some View {
@@ -184,13 +216,34 @@ struct SessionsWindow: View {
         }
     }
 
+    /// Runs a create/kill, then keeps the "Updating…" indicator up until the
+    /// live tree actually reflects the change (the next poll round-trip, ~1-3s),
+    /// so the result never feels like it was dropped.
     private func run(_ operation: @escaping () async -> String?) {
         busy = true
         Task {
+            let before = treeSignature()
             let result = await operation()
+            if let result {
+                busy = false
+                error = result
+                return
+            }
+            for _ in 0 ..< 30 {
+                try? await Task.sleep(for: .milliseconds(150))
+                if treeSignature() != before { break }
+            }
             busy = false
-            if let result { error = result }
         }
+    }
+
+    /// A fingerprint of the current tmux tree, used to detect when a create or
+    /// kill has landed in a fresh snapshot.
+    private func treeSignature() -> String {
+        guard let s = model.state(targetID)?.snapshot else { return "nil" }
+        let sessions = s.sessions.map(\.id).sorted().joined(separator: ",")
+        let panes = s.memberships.map(\.paneID).sorted().joined(separator: ",")
+        return "\(sessions)|\(panes)"
     }
 
     private func pickDefaultTarget() {
@@ -242,27 +295,40 @@ struct SessionsWindow: View {
 
 private struct NewSessionSheet: View {
     @Binding var name: String
+    let container: String
     let onCreate: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Session").font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("New Session").font(.headline)
+                Label(container, systemImage: "shippingbox")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             TextField("Name", text: $name, prompt: Text("work"))
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(create)
+            Text("A detached tmux session; names with spaces, “.” or “:” are not allowed.")
+                .font(.caption2).foregroundStyle(.tertiary)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Create") { create() }.keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!isValid)
             }
         }
         .padding(20)
-        .frame(width: 360)
+        .frame(width: 380)
+    }
+
+    private var isValid: Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && !trimmed.contains(where: { " .:".contains($0) })
     }
 
     private func create() {
+        guard isValid else { return }
         onCreate(name)
         dismiss()
     }
