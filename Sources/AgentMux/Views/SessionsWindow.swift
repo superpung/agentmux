@@ -1,6 +1,10 @@
 import AgentMuxCore
 import SwiftUI
 
+// NOTE: body/header/actions/tree-model live here; the tree is rendered fully
+// expanded (sessions → windows → panes all visible) so nothing has to be
+// unfolded one row at a time.
+
 /// A dedicated, deliberately-opened window for managing a container's tmux
 /// tree: sessions → windows → panes. This is the ONLY place that creates or
 /// kills tmux objects on the user's own server, and every kill is confirmed.
@@ -17,13 +21,7 @@ struct SessionsWindow: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let state = model.state(targetID), let snapshot = state.snapshot {
-                tree(for: state, snapshot: snapshot)
-            } else {
-                ContentUnavailableView("No tmux sessions", systemImage: "rectangle.on.rectangle.slash",
-                                       description: Text("This container has no running tmux server, or isn't connected yet."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            content
         }
         .navigationTitle("Sessions")
         .onAppear(perform: pickDefaultTarget)
@@ -47,13 +45,14 @@ struct SessionsWindow: View {
 
     private var header: some View {
         HStack(spacing: 10) {
+            Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
             Picker("Container", selection: $targetID) {
                 ForEach(model.targets) { state in
                     Text(state.device.name).tag(state.id)
                 }
             }
             .labelsHidden()
-            .frame(maxWidth: 260)
+            .fixedSize()
             if busy { ProgressView().controlSize(.small) }
             Spacer()
             Button {
@@ -62,75 +61,115 @@ struct SessionsWindow: View {
             } label: {
                 Label("New Session", systemImage: "plus")
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
             .disabled(model.state(targetID) == nil)
         }
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
-    // MARK: Tree
-
-    private func tree(for state: TargetState, snapshot: InventorySnapshot) -> some View {
-        List {
-            ForEach(sessions(in: snapshot)) { session in
-                Section {
-                    ForEach(session.windows) { window in
-                        windowRow(window, state: state)
-                        ForEach(window.panes) { pane in
-                            paneRow(pane, state: state)
+    @ViewBuilder private var content: some View {
+        if let snapshot = model.state(targetID)?.snapshot, !snapshot.sessions.isEmpty {
+            List {
+                ForEach(nodes(in: snapshot)) { session in
+                    Section {
+                        ForEach(session.children ?? []) { window in
+                            windowRow(window)
+                            ForEach(window.children ?? []) { pane in
+                                paneRow(pane)
+                            }
                         }
+                    } header: {
+                        sessionHeader(session)
                     }
-                } header: {
-                    sessionHeader(session)
                 }
             }
+            .listStyle(.inset)
+        } else {
+            ContentUnavailableView(
+                "No tmux sessions", systemImage: "rectangle.on.rectangle.slash",
+                description: Text("This container has no running tmux server, or isn't connected yet.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private func sessionHeader(_ session: SessionItem) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "rectangle.stack")
-            Text(session.name.isEmpty ? session.id : session.name).fontWeight(.medium)
-            Text(session.id).font(.caption2).foregroundStyle(.tertiary)
-            Spacer()
-            Button { run { await model.newWindow(targetID, sessionID: session.id) } } label: {
-                Image(systemName: "plus.rectangle")
+    // MARK: Rows — session → window → pane, each indented so icons line up.
+
+    @ViewBuilder private func sessionHeader(_ node: Node) -> some View {
+        if case let .session(name, windowCount) = node.kind {
+            let title = name.isEmpty ? node.id : name
+            HStack(spacing: 7) {
+                Image(systemName: "rectangle.stack").foregroundStyle(.secondary)
+                Text(title).font(.headline)
+                Text("\(windowCount) window\(windowCount == 1 ? "" : "s")")
+                    .font(.caption).foregroundStyle(.tertiary)
+                Spacer(minLength: 6)
+                rowMenu {
+                    Button { run { await model.newWindow(targetID, sessionID: node.id) } } label: { Label("New Window", systemImage: "plus.rectangle") }
+                    Divider()
+                    Button(role: .destructive) { confirm = KillRequest(kind: .session, id: node.id, label: "session \(title)") } label: { Label("Kill Session", systemImage: "trash") }
+                }
             }
-            .buttonStyle(.borderless).help("New window in this session")
-            Button { confirm = KillRequest(kind: .session, id: session.id, label: "session \(session.name.isEmpty ? session.id : session.name)") } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless).help("Kill this session and all its windows")
+            .padding(.vertical, 2)
+            .textCase(nil)
         }
     }
 
-    private func windowRow(_ window: WindowItem, state: TargetState) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "macwindow").foregroundStyle(.secondary)
-            Text("\(window.index): \(window.name.isEmpty ? window.id : window.name)")
-            Spacer()
-            Button { confirm = KillRequest(kind: .window, id: window.id, label: "window \(window.name.isEmpty ? window.id : window.name)") } label: {
-                Image(systemName: "trash")
+    @ViewBuilder private func windowRow(_ node: Node) -> some View {
+        if case let .window(index, name) = node.kind {
+            let title = name.isEmpty ? node.id : name
+            row(indent: 0, icon: AnyView(Image(systemName: "macwindow").foregroundStyle(.secondary)), title: "\(index)  \(title)", mono: false, accessory: AnyView(EmptyView())) {
+                Button(role: .destructive) { confirm = KillRequest(kind: .window, id: node.id, label: "window \(title)") } label: { Label("Kill Window", systemImage: "trash") }
             }
-            .buttonStyle(.borderless).help("Kill this window")
         }
-        .padding(.leading, 12)
     }
 
-    private func paneRow(_ pane: PaneItem, state: TargetState) -> some View {
-        HStack(spacing: 6) {
+    @ViewBuilder private func paneRow(_ node: Node) -> some View {
+        if case let .pane(command, agentKind, activity) = node.kind {
+            row(indent: 1, icon: AnyView(paneIcon(agentKind)), title: command, mono: true, accessory: AnyView(agentKind != nil ? AnyView(AgentStatusGlyph(activity: activity)) : AnyView(EmptyView()))) {
+                Button(role: .destructive) { confirm = KillRequest(kind: .pane, id: node.id, label: "pane \(node.id) (\(command))") } label: { Label("Kill Pane", systemImage: "trash") }
+            }
+        }
+    }
+
+    private func row(indent: Int, icon: AnyView, title: String, mono: Bool, accessory: AnyView, @ViewBuilder menu: () -> some View) -> some View {
+        HStack(spacing: 8) {
+            if indent > 0 { Spacer().frame(width: CGFloat(indent) * 18) }
+            icon.frame(width: 18)
+            Text(title)
+                .font(mono ? .system(.callout, design: .monospaced) : .callout)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            accessory
+            rowMenu(menu)
+        }
+        .padding(.vertical, 1)
+    }
+
+    /// A trailing "···" menu whose glyph uses an explicit adaptive color, so it
+    /// stays visible in dark mode (a plain borderless menu renders it black).
+    private func rowMenu(@ViewBuilder _ content: () -> some View) -> some View {
+        Menu {
+            content()
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .foregroundStyle(Theme.textSecondary)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(Theme.textSecondary)
+        .fixedSize()
+    }
+
+    @ViewBuilder private func paneIcon(_ kind: AgentKind?) -> some View {
+        if let kind, let resource = BrandIconLoader.agentIcon(for: kind) {
+            BrandIcon(resource: resource, size: 14)
+        } else {
             Image(systemName: "terminal").foregroundStyle(.tertiary)
-            Text(pane.command).monospaced()
-            if let agent = pane.agent {
-                Text(agent).font(.caption2).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button { confirm = KillRequest(kind: .pane, id: pane.id, label: "pane \(pane.id) (\(pane.command))") } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless).help("Kill this pane")
         }
-        .font(.caption)
-        .padding(.leading, 28)
     }
 
     // MARK: Actions
@@ -169,33 +208,35 @@ struct SessionsWindow: View {
         let label: String
     }
 
-    struct SessionItem: Identifiable { var id: String; var name: String; var windows: [WindowItem] }
-    struct WindowItem: Identifiable { var id: String; var name: String; var index: Int; var panes: [PaneItem] }
-    struct PaneItem: Identifiable { var id: String; var command: String; var agent: String? }
-
-    private func sessions(in snapshot: InventorySnapshot) -> [SessionItem] {
-        snapshot.sessions.map { session in
-            let rows = snapshot.memberships.filter { $0.sessionID == session.id }
-            let windowIDs = rows.map(\.windowID).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
-            let windows = windowIDs.map { windowID -> WindowItem in
-                let window = snapshot.windows.first { $0.id == windowID }
-                let windowRows = rows.filter { $0.windowID == windowID }.sorted { $0.paneIndex < $1.paneIndex }
-                let panes = windowRows.compactMap { row -> PaneItem? in
-                    guard let pane = snapshot.pane(row.paneID) else { return nil }
-                    return PaneItem(id: pane.id, command: pane.currentCommand, agent: agentLabel(pane.id))
-                }
-                return WindowItem(id: windowID, name: window?.name ?? "", index: windowRows.first?.windowIndex ?? 0, panes: panes)
-            }
-            return SessionItem(id: session.id, name: session.name, windows: windows)
+    struct Node: Identifiable {
+        let id: String
+        let kind: Kind
+        var children: [Node]?
+        enum Kind {
+            case session(name: String, windowCount: Int)
+            case window(index: Int, name: String)
+            case pane(command: String, agent: AgentKind?, activity: AgentActivity)
         }
     }
 
-    private func agentLabel(_ paneID: String) -> String? {
-        guard let state = model.state(targetID), let kind = state.detections[paneID]?.kind,
-              kind == .codex || kind == .claudeCode else { return nil }
-        let activity = state.activities[paneID] ?? .unknown
-        let name = kind == .codex ? "codex" : "claude"
-        return activity == .working ? "\(name) · working" : name
+    private func nodes(in snapshot: InventorySnapshot) -> [Node] {
+        let state = model.state(targetID)
+        return snapshot.sessions.map { session in
+            let rows = snapshot.memberships.filter { $0.sessionID == session.id }
+            let windowIDs = rows.map(\.windowID).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+            let windows = windowIDs.map { windowID -> Node in
+                let window = snapshot.windows.first { $0.id == windowID }
+                let windowRows = rows.filter { $0.windowID == windowID }.sorted { $0.paneIndex < $1.paneIndex }
+                let panes = windowRows.compactMap { r -> Node? in
+                    guard let pane = snapshot.pane(r.paneID) else { return nil }
+                    let kind = state?.detections[pane.id]?.kind
+                    let agent = (kind == .codex || kind == .claudeCode) ? kind : nil
+                    return Node(id: pane.id, kind: .pane(command: pane.currentCommand, agent: agent, activity: state?.activities[pane.id] ?? .unknown), children: nil)
+                }
+                return Node(id: windowID, kind: .window(index: windowRows.first?.windowIndex ?? 0, name: window?.name ?? ""), children: panes)
+            }
+            return Node(id: session.id, kind: .session(name: session.name, windowCount: windows.count), children: windows)
+        }
     }
 }
 
