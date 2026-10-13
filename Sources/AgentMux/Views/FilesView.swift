@@ -272,17 +272,21 @@ private struct CodePreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
-        scroll.hasHorizontalScroller = true
+        scroll.hasHorizontalScroller = false
         scroll.hasVerticalScroller = true
         if let tv = scroll.documentView as? NSTextView {
             tv.isEditable = false
             tv.isSelectable = true
             tv.isRichText = true
-            tv.textContainerInset = NSSize(width: 6, height: 8)
-            tv.isHorizontallyResizable = true
+            tv.textContainerInset = NSSize(width: 8, height: 8)
+            // Soft-wrap long lines to the (narrow) panel width so nothing runs
+            // off the right edge; the inspector is too narrow for horizontal
+            // scrolling to be readable.
+            tv.isHorizontallyResizable = false
             tv.isVerticallyResizable = true
-            tv.textContainer?.widthTracksTextView = false
-            tv.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            tv.autoresizingMask = [.width]
+            tv.textContainer?.widthTracksTextView = true
+            tv.textContainer?.lineBreakMode = .byCharWrapping
             tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         }
         return scroll
@@ -291,7 +295,13 @@ private struct CodePreview: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let tv = scroll.documentView as? NSTextView else { return }
         let highlighted = CodeHighlighter.shared.highlight(text, language: language)
-        tv.textStorage?.setAttributedString(highlighted.string)
+        // Force char-level wrapping across the whole text (keeps the highlight
+        // colours) so even a long URL / key wraps instead of overflowing.
+        let styled = NSMutableAttributedString(attributedString: highlighted.string)
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byCharWrapping
+        styled.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: styled.length))
+        tv.textStorage?.setAttributedString(styled)
         tv.backgroundColor = highlighted.background
     }
 }
