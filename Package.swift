@@ -9,6 +9,9 @@ let package = Package(
         // patch; see scripts/vendor-libghostty.sh and Vendor/libghostty-spm/VENDORED.
         // Its binary target still downloads the prebuilt GhosttyKit.xcframework.
         .package(path: "Vendor/libghostty-spm"),
+        // Syntax highlighting for the file preview (highlight.js via
+        // JavaScriptCore; MIT). UI target only.
+        .package(url: "https://github.com/raspu/Highlightr.git", exact: "2.3.0"),
     ],
     targets: [
         // forkpty + execve. The child after fork must only make
@@ -24,6 +27,7 @@ let package = Package(
             dependencies: [
                 "AgentMuxCore",
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
+                .product(name: "Highlightr", package: "Highlightr"),
             ]
         ),
         // Development tool: read-only inventory of configured targets.

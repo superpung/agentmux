@@ -3,9 +3,9 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @AppStorage("showResourceInspector") private var showInspector = false
 
     var body: some View {
+        @Bindable var model = model
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(selection: selectionBinding)
                 .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
@@ -13,16 +13,16 @@ struct RootView: View {
             DetailView()
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button { showInspector.toggle() } label: {
-                            Label("Resources", systemImage: "sidebar.right")
+                        Button { model.toggleInspector() } label: {
+                            Label("Inspector", systemImage: "sidebar.right")
                         }
-                        .help("Show container and host resources")
+                        .help("Show resources and files")
                     }
                 }
         }
-        .inspector(isPresented: $showInspector) {
-            ResourceInspector()
-                .inspectorColumnWidth(min: 230, ideal: 280, max: 380)
+        .inspector(isPresented: $model.inspectorVisible) {
+            InspectorPanel()
+                .inspectorColumnWidth(min: 260, ideal: 300, max: 460)
         }
         .overlay {
             if model.showCommandPalette {

@@ -95,6 +95,34 @@ final class AppModel {
     private var resourcePoller: Task<Void, Never>?
     private var resourceConsumers = 0
     static let resourceInterval: Duration = .seconds(5)
+
+    // MARK: Inspector / file-preview UI state
+
+    enum InspectorMode: String, Sendable { case resources, files }
+    var inspectorMode: InspectorMode = .resources
+    var inspectorVisible = UserDefaults.standard.bool(forKey: "showResourceInspector") {
+        didSet { UserDefaults.standard.set(inspectorVisible, forKey: "showResourceInspector") }
+    }
+
+    func toggleInspector() { inspectorVisible.toggle() }
+    func showInspector(_ mode: InspectorMode) {
+        inspectorMode = mode
+        inspectorVisible = true
+    }
+
+    /// A request (from a terminal link or the browser) to preview a file. The
+    /// nonce lets the same path be re-requested.
+    struct PreviewRequest: Equatable, Sendable { var targetID: String; var path: String; var nonce: Int }
+    private(set) var previewRequest: PreviewRequest?
+    private var previewNonce = 0
+
+    /// Switch the inspector to Files and ask it to open `path` on `targetID`.
+    func requestFilePreview(_ path: String, targetID: String) {
+        previewNonce += 1
+        inspectorMode = .files
+        inspectorVisible = true
+        previewRequest = PreviewRequest(targetID: targetID, path: path, nonce: previewNonce)
+    }
     private var releasedOrphans: Set<String> = []
     @ObservationIgnored private let notifier = Notifier()
 

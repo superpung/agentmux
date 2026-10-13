@@ -34,6 +34,11 @@ struct AgentMuxApp: App {
                 Button("Previous Agent") { model.selectAdjacentAgent(-1) }
                     .keyboardShortcut("[", modifiers: .command)
                 Divider()
+                Button("Resources Inspector") { model.showInspector(.resources) }
+                    .keyboardShortcut("1", modifiers: [.command, .option])
+                Button("Files Inspector") { model.showInspector(.files) }
+                    .keyboardShortcut("2", modifiers: [.command, .option])
+                Divider()
             }
         }
 
