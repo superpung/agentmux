@@ -141,6 +141,8 @@ struct SessionsWindow: View {
         if case let .window(index, name) = node.kind {
             let title = name.isEmpty ? node.id : name
             row(indent: 0, icon: AnyView(Image(systemName: "macwindow").foregroundStyle(.secondary)), title: "\(index)  \(title)", mono: false, accessory: AnyView(EmptyView())) {
+                Button { run { await model.newWindow(targetID, sessionID: session.id) } } label: { Label("New Window in \(sessionName(session))", systemImage: "plus.rectangle") }
+                Divider()
                 Button(role: .destructive) {
                     confirm = KillRequest(kind: .window, id: node.id, label: "window \(index) (\(title)) in session \(sessionName(session))")
                 } label: { Label("Kill Window", systemImage: "trash") }
@@ -354,6 +356,7 @@ private struct LaunchAgentSheet: View {
     @State private var sessions: [AgentSessionInfo] = []
     @State private var picked: Set<String> = []
     @State private var freshCwd = ""
+    @State private var destination = ""   // "" = new session, else a session id
     @State private var loadingDirs = true
     @State private var loadingSessions = false
     @State private var launching = false
@@ -393,6 +396,17 @@ private struct LaunchAgentSheet: View {
                 Text("Start fresh").tag(false)
             }
             .pickerStyle(.segmented)
+
+            HStack {
+                Text("Start in").foregroundStyle(.secondary)
+                Picker("Start in", selection: $destination) {
+                    Text("New session").tag("")
+                    ForEach(model.realSessions(targetID), id: \.id) { s in
+                        Text("session: \(s.name.isEmpty ? s.id : s.name)").tag(s.id)
+                    }
+                }
+                .labelsHidden()
+            }
 
             Divider()
 
@@ -488,18 +502,22 @@ private struct LaunchAgentSheet: View {
         guard let dir = selectedDir else { return }
         launching = true
         error = nil
+        let into = destination
         Task {
             var failures: [String] = []
+            func start(cwd: String, resumeID: String?) async -> String? {
+                if into.isEmpty {
+                    return await model.launchAgent(targetID, kind: kind, configDir: dir.path, cwd: cwd, resumeID: resumeID)
+                } else {
+                    return await model.launchAgentInWindow(targetID, sessionID: into, kind: kind, configDir: dir.path, cwd: cwd, resumeID: resumeID)
+                }
+            }
             if resuming {
                 for session in sessions where picked.contains(session.id) {
-                    if let e = await model.launchAgent(targetID, kind: kind, configDir: dir.path, cwd: session.cwd, resumeID: session.id) {
-                        failures.append(e)
-                    }
+                    if let e = await start(cwd: session.cwd, resumeID: session.id) { failures.append(e) }
                 }
             } else {
-                if let e = await model.launchAgent(targetID, kind: kind, configDir: dir.path, cwd: freshCwd.trimmingCharacters(in: .whitespaces), resumeID: nil) {
-                    failures.append(e)
-                }
+                if let e = await start(cwd: freshCwd.trimmingCharacters(in: .whitespaces), resumeID: nil) { failures.append(e) }
             }
             launching = false
             if failures.isEmpty { dismiss() } else { error = failures.joined(separator: "\n") }

@@ -442,6 +442,20 @@ final class AppModel {
         return adminResult(await AgentLauncher.launchInNewSession(host: s.host, target: s.target, name: name, cwd: cwd, command: command), targetID: targetID)
     }
 
+    /// Starts (or resumes) one agent in a new window of an existing session.
+    func launchAgentInWindow(_ targetID: String, sessionID: String, kind: AgentKind, configDir: String, cwd: String, resumeID: String?) async -> String? {
+        guard let s = state(targetID) else { return "unknown target" }
+        guard let command = AgentCommand.launch(kind: kind, configDir: configDir, resumeID: resumeID) else {
+            return "Couldn't build a launch command for this agent."
+        }
+        return adminResult(await AgentLauncher.launchInNewWindow(host: s.host, target: s.target, sessionID: sessionID, cwd: cwd, command: command), targetID: targetID)
+    }
+
+    /// Real (non-grouped) sessions on a target, for the launch destination picker.
+    func realSessions(_ targetID: String) -> [InventorySnapshot.Session] {
+        (state(targetID)?.snapshot?.sessions ?? []).filter { !$0.name.hasPrefix(RemoteCommand.groupedSessionPrefix) }
+    }
+
     /// A tmux-safe session name derived from `base`, made unique against the
     /// sessions already on the target.
     func uniqueSessionName(_ targetID: String, base: String) -> String {

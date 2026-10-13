@@ -122,11 +122,14 @@ public final class PaneMirror: @unchecked Sendable {
     private func flushSize(_ generation: Int) {
         guard !ended, generation == sizeGeneration, let size = pendingSize, size != requestedSize else { return }
         requestedSize = size
-        // Soft size: `refresh-client -C` sizes this client's current window
-        // (the agent's window, in our grouped session) under `window-size
-        // latest`. It is not forced, so it self-heals to the user's clients
-        // when we leave — no restore needed.
-        client.send("refresh-client -C \(size.columns)x\(size.rows)") { _ in }
+        // Forced size: a grouped session shares the window (and its single
+        // size) with the user's session, so `refresh-client -C` is overridden
+        // by the user's client under `window-size latest`, which garbles our
+        // view. `resize-window` sets the window to `manual` and forces our size
+        // so the mirror always renders correctly; `close()` restores `latest`.
+        // Side effect: while this view is open the user's own terminal reflows
+        // to this size, because it is the same shared window.
+        client.send("resize-window -x \(size.columns) -y \(size.rows)") { _ in }
         // Some TUIs (Codex) repaint their bottom input composer asynchronously
         // after the resize's SIGWINCH, so the layout-change capture misses it.
         // Re-capture once the repaint has settled, if no newer resize arrived.
@@ -139,6 +142,9 @@ public final class PaneMirror: @unchecked Sendable {
     public func close() {
         client.queue.async { [self] in
             guard !ended else { return }
+            // Restore automatic sizing before leaving so the shared window
+            // follows the user's own client again (we forced it to `manual`).
+            client.send("set-option window-size latest") { _ in }
             // Remove our grouped session now; its windows survive in the
             // user's session, and `destroy-unattached` is the crash-safety
             // net if this command never lands.

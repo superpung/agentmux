@@ -71,7 +71,10 @@ final class PaneTerminal {
                 self?.noteActivity()
             },
             onGeometry: { [weak self] geometry in
-                Task { @MainActor in self?.geometry = geometry }
+                Task { @MainActor in
+                    self?.geometry = geometry
+                    self?.fitFontToRemote(geometry)
+                }
             },
             onEnded: { [weak self] reason in
                 gate.close()
@@ -81,6 +84,31 @@ final class PaneTerminal {
         gate.markLive()
         phase = .live
         scheduleSmokeIfRequested()
+    }
+
+    /// Keeps the mirror readable when another tmux client controls the shared
+    /// window size. Normally the local surface drives the remote size, so the
+    /// remote grid matches the surface grid. But `refresh-client -C` is only a
+    /// soft request: when the user is attached at a larger size (window-size
+    /// latest), the remote stays bigger than our surface and its wider rows wrap
+    /// and garble. Scale the font so the remote grid fits the surface's pixel
+    /// area; when the app owns the size the grids match and this is a no-op. It
+    /// converges because each refit shrinks the font gap below the thrash guard.
+    private func fitFontToRemote(_ geometry: PaneMirror.Geometry) {
+        guard let m = state.surfaceSize,
+              geometry.columns > 0, geometry.rows > 0,
+              m.cellWidthPixels > 0, m.cellHeightPixels > 0,
+              m.widthPixels > 0, m.heightPixels > 0 else { return }
+        if Int(m.columns) == geometry.columns, Int(m.rows) == geometry.rows { return }
+        let current = Double(state.fontSize ?? Float(Self.fontSize))
+        guard current > 0 else { return }
+        let fitWidth = current * Double(m.widthPixels) / (Double(geometry.columns) * Double(m.cellWidthPixels))
+        let fitHeight = current * Double(m.heightPixels) / (Double(geometry.rows) * Double(m.cellHeightPixels))
+        // A hair under the exact fit so the surface ends up at least as large as
+        // the remote grid (a column short would still wrap).
+        let target = max(5, min(fitWidth, fitHeight) * 0.99)
+        guard abs(target - current) >= 0.5 else { return }
+        _ = state.performBindingAction("set_font_size:\(String(format: "%.1f", target))")
     }
 
     /// Runs on the mirror's serial queue when pane output arrives. Throttled so
