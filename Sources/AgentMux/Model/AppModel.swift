@@ -68,6 +68,8 @@ final class AppModel {
     var spaceFilter: SpaceKey?
     var showDevicePanel = false
     var showSearch = false
+    /// Toggled by ⌘K; RootView shows the command palette overlay.
+    var showCommandPalette = false
     private(set) var terminals: [PaneRef: PaneTerminal] = [:]
     /// Mirrors shown in their own window; the main detail renders a placeholder
     /// for these so a single surface is never in two view hierarchies.
@@ -395,6 +397,26 @@ final class AppModel {
     func killPane(_ targetID: String, paneID: String) async -> String? {
         guard let s = state(targetID) else { return "unknown target" }
         return adminResult(await TmuxAdmin.killPane(host: s.host, target: s.target, paneID: paneID), targetID: targetID)
+    }
+
+    /// Sends a prompt to an agent from the command palette: selects and opens
+    /// it (so the user sees what was sent), waits for the mirror to connect,
+    /// then pastes the text and presses Enter. Returns nil on success, else an
+    /// error string. Observe-only targets are refused.
+    func sendPrompt(_ ref: PaneRef, _ text: String) async -> String? {
+        guard state(ref.targetID)?.target.access.allowsAttach == true else {
+            return "This target is observe-only."
+        }
+        select(ref)
+        // Wait up to ~4s for the control-mode mirror to go live.
+        for _ in 0 ..< 40 {
+            if terminal(for: ref)?.canSend == true { break }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard let terminal = terminal(for: ref), terminal.canSend else {
+            return "The agent isn't connected yet — try again in a moment."
+        }
+        return terminal.send(text, submit: true) ? nil : "Couldn't send input to this pane."
     }
 
     func refresh(_ targetID: String) {

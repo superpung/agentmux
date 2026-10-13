@@ -124,6 +124,17 @@ final class PaneTerminal {
         return mirror.paste(text)
     }
 
+    /// Whether input can currently be delivered (mirror live and on screen).
+    var canSend: Bool { gate.isOpen }
+
+    /// Pastes `text`, then (when `submit`) presses Enter so an agent CLI runs
+    /// the prompt. Returns false if input is not currently allowed.
+    func send(_ text: String, submit: Bool) -> Bool {
+        guard gate.isOpen, mirror.paste(text) else { return false }
+        if submit { mirror.sendInput(Data([0x0d])) }
+        return true
+    }
+
     func resync() {
         mirror.resync()
     }
