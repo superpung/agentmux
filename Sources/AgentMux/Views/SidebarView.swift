@@ -117,6 +117,7 @@ struct SidebarView: View {
                 }
             }
         }
+        .animation(.snappy(duration: 0.28), value: groups.map { g in g.agents.map { "\($0.id)" }.joined(separator: ",") }.joined(separator: "|"))
         .searchable(text: $query, placement: .sidebar, prompt: "Search agents")
         .navigationTitle("AgentMux")
         .toolbar {
@@ -240,7 +241,7 @@ struct SidebarView: View {
         return activity == .working ? 1 : 2
     }
 
-    static func statusBucket(_ activity: AgentActivity) -> (id: String, label: String) {
+    nonisolated static func statusBucket(_ activity: AgentActivity) -> (id: String, label: String) {
         if activity.needsAttention { return ("attention", "Needs attention") }
         switch activity {
         case .working: return ("working", "Working")

@@ -393,6 +393,12 @@ final class AppModel {
             push("container.\(name).mem", container.memPercent)
         }
         for gpu in snapshot.gpus { push("gpu.\(gpu.index)", gpu.utilizationPercent) }
+        // Drop series for containers / GPUs that are gone, so stale keys don't
+        // accumulate over a long session.
+        var live: Set<String> = ["host.cpu", "host.mem"]
+        for name in snapshot.containers.keys { live.insert("container.\(name).cpu"); live.insert("container.\(name).mem") }
+        for gpu in snapshot.gpus { live.insert("gpu.\(gpu.index)") }
+        series = series.filter { live.contains($0.key) }
         resourceHistory[hostID] = series
     }
 
