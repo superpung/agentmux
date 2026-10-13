@@ -14,6 +14,7 @@ struct SessionsWindow: View {
     @State private var confirm: KillRequest?
     @State private var newSessionName = ""
     @State private var showNewSession = false
+    @State private var showLaunch = false
     @State private var busy = false
     @State private var error: String?
 
@@ -39,6 +40,9 @@ struct SessionsWindow: View {
                 run { await model.newSession(targetID, name: name) }
             }
         }
+        .sheet(isPresented: $showLaunch) {
+            LaunchAgentSheet(targetID: targetID)
+        }
     }
 
     // MARK: Header
@@ -60,18 +64,24 @@ struct SessionsWindow: View {
                 }
             }
             Spacer()
-            Button {
-                newSessionName = ""
-                showNewSession = true
-            } label: {
-                Label("New Session", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(model.state(targetID) == nil)
+            newMenu
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private var newMenu: some View {
+        Menu {
+            Button { showLaunch = true } label: { Label("Launch Agent…", systemImage: "sparkles") }
+            Button { newSessionName = ""; showNewSession = true } label: { Label("Empty Session", systemImage: "terminal") }
+        } label: {
+            Label("New", systemImage: "plus")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(model.state(targetID) == nil)
     }
 
     @ViewBuilder private var content: some View {
@@ -99,15 +109,7 @@ struct SessionsWindow: View {
                     ? "This container isn't connected yet."
                     : "This container has no running tmux server. Create a session to start one.")
             } actions: {
-                if model.state(targetID) != nil {
-                    Button {
-                        newSessionName = ""
-                        showNewSession = true
-                    } label: {
-                        Label("New Session", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+                if model.state(targetID) != nil { newMenu }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -331,5 +333,199 @@ private struct NewSessionSheet: View {
         guard isValid else { return }
         onCreate(name)
         dismiss()
+    }
+}
+
+/// Launch (or resume) a Claude Code / Codex agent: pick the account (config
+/// dir), then resume chosen past sessions or start fresh in a project dir. Each
+/// launched agent lands in its own new tmux session. Session metadata only —
+/// never message text.
+private struct LaunchAgentSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let targetID: String
+
+    @State private var kind: AgentKind = .claudeCode
+    @State private var configDirs: [AgentConfigDir] = []
+    @State private var selectedDir: AgentConfigDir?
+    @State private var resuming = true
+    @State private var sessions: [AgentSessionInfo] = []
+    @State private var picked: Set<String> = []
+    @State private var freshCwd = ""
+    @State private var loadingDirs = true
+    @State private var loadingSessions = false
+    @State private var launching = false
+    @State private var error: String?
+
+    private var dirsForKind: [AgentConfigDir] { configDirs.filter { $0.kind == kind } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Launch Agent").font(.headline)
+                Label(model.state(targetID)?.device.name ?? targetID, systemImage: "shippingbox")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Picker("Agent", selection: $kind) {
+                Text("Claude Code").tag(AgentKind.claudeCode)
+                Text("Codex").tag(AgentKind.codex)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: kind) { _, _ in selectDefaultDir(); Task { await loadSessions() } }
+
+            HStack {
+                Text("Account").foregroundStyle(.secondary)
+                Picker("Account", selection: Binding(get: { selectedDir }, set: { selectedDir = $0; Task { await loadSessions() } })) {
+                    if dirsForKind.isEmpty { Text("none found").tag(Optional<AgentConfigDir>.none) }
+                    ForEach(dirsForKind) { dir in
+                        Text(dir.label).tag(Optional(dir))
+                    }
+                }
+                .labelsHidden()
+                if loadingDirs { ProgressView().controlSize(.small) }
+            }
+
+            Picker("Mode", selection: $resuming) {
+                Text("Resume existing").tag(true)
+                Text("Start fresh").tag(false)
+            }
+            .pickerStyle(.segmented)
+
+            Divider()
+
+            if resuming { resumeList } else { freshFields }
+
+            if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
+
+            HStack {
+                if launching { ProgressView().controlSize(.small); Text("Launching…").font(.caption).foregroundStyle(.secondary) }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Launch") { launch() }.keyboardShortcut(.defaultAction)
+                    .disabled(!canLaunch)
+            }
+        }
+        .padding(18)
+        .frame(width: 540, height: 580)
+        .task { await loadDirs() }
+    }
+
+    @ViewBuilder private var resumeList: some View {
+        if loadingSessions {
+            centered { ProgressView(); Text("Loading sessions…").font(.caption).foregroundStyle(.secondary) }
+        } else if selectedDir == nil {
+            centered { Text("No account selected.").foregroundStyle(.secondary) }
+        } else if sessions.isEmpty {
+            centered { Text("No past sessions for this account.").foregroundStyle(.secondary) }
+        } else {
+            List(sessions) { session in
+                Button { toggle(session.id) } label: {
+                    SessionPickRow(session: session, picked: picked.contains(session.id))
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.inset)
+            .frame(maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder private var freshFields: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Project directory").foregroundStyle(.secondary)
+            TextField("Path", text: $freshCwd, prompt: Text("/data/project"))
+                .textFieldStyle(.roundedBorder)
+            Text("A new \(kind == .codex ? "Codex" : "Claude Code") agent starts in a tmux session here.")
+                .font(.caption2).foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func centered<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+        VStack(spacing: 8) { content() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var canLaunch: Bool {
+        guard !launching, selectedDir != nil else { return false }
+        return resuming ? !picked.isEmpty : !freshCwd.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func toggle(_ id: String) {
+        if picked.contains(id) { picked.remove(id) } else { picked.insert(id) }
+    }
+
+    // MARK: Loading
+
+    private func loadDirs() async {
+        loadingDirs = true
+        if case let .success(dirs) = await model.agentConfigDirs(targetID) { configDirs = dirs }
+        loadingDirs = false
+        selectDefaultDir()
+        await loadSessions()
+    }
+
+    private func selectDefaultDir() {
+        if selectedDir == nil || selectedDir?.kind != kind { selectedDir = dirsForKind.first }
+    }
+
+    private func loadSessions() async {
+        picked = []
+        guard let dir = selectedDir else { sessions = []; return }
+        loadingSessions = true
+        sessions = []
+        switch await model.agentSessions(targetID, dir) {
+        case let .success(list): sessions = list
+        case let .failure(f): error = "\(f.kind.rawValue): \(f.detail)"
+        }
+        loadingSessions = false
+    }
+
+    private func launch() {
+        guard let dir = selectedDir else { return }
+        launching = true
+        error = nil
+        Task {
+            var failures: [String] = []
+            if resuming {
+                for session in sessions where picked.contains(session.id) {
+                    if let e = await model.launchAgent(targetID, kind: kind, configDir: dir.path, cwd: session.cwd, resumeID: session.id) {
+                        failures.append(e)
+                    }
+                }
+            } else {
+                if let e = await model.launchAgent(targetID, kind: kind, configDir: dir.path, cwd: freshCwd.trimmingCharacters(in: .whitespaces), resumeID: nil) {
+                    failures.append(e)
+                }
+            }
+            launching = false
+            if failures.isEmpty { dismiss() } else { error = failures.joined(separator: "\n") }
+        }
+    }
+}
+
+private struct SessionPickRow: View {
+    let session: AgentSessionInfo
+    let picked: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(picked ? Color.accentColor : .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(SpaceLabel.label(session.cwd)).lineLimit(1)
+                Text(session.cwd).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            VStack(alignment: .trailing, spacing: 1) {
+                if let rel = RelativeTime.short(max(0, Int(Date().timeIntervalSince1970) - session.lastActiveEpoch)) {
+                    Text(rel).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
+                Text("\(session.eventCount) events").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 2)
     }
 }

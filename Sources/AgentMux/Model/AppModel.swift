@@ -419,6 +419,42 @@ final class AppModel {
         return terminal.send(text, submit: true) ? nil : "Couldn't send input to this pane."
     }
 
+    // MARK: Agent launch (only from the Sessions window)
+
+    func agentConfigDirs(_ targetID: String) async -> Result<[AgentConfigDir], RemoteFailure> {
+        guard let s = state(targetID) else { return .failure(RemoteFailure(.remoteCommandFailed, detail: "unknown target")) }
+        return await AgentSessionProbe.configDirs(host: s.host, target: s.target)
+    }
+
+    func agentSessions(_ targetID: String, _ dir: AgentConfigDir) async -> Result<[AgentSessionInfo], RemoteFailure> {
+        guard let s = state(targetID) else { return .failure(RemoteFailure(.remoteCommandFailed, detail: "unknown target")) }
+        return await AgentSessionProbe.sessions(host: s.host, target: s.target, configDir: dir)
+    }
+
+    /// Starts (or resumes) one agent in its own new tmux session. Returns nil on
+    /// success, else an error string.
+    func launchAgent(_ targetID: String, kind: AgentKind, configDir: String, cwd: String, resumeID: String?) async -> String? {
+        guard let s = state(targetID) else { return "unknown target" }
+        guard let command = AgentCommand.launch(kind: kind, configDir: configDir, resumeID: resumeID) else {
+            return "Couldn't build a launch command for this agent."
+        }
+        let name = uniqueSessionName(targetID, base: SpaceLabel.label(cwd))
+        return adminResult(await AgentLauncher.launchInNewSession(host: s.host, target: s.target, name: name, cwd: cwd, command: command), targetID: targetID)
+    }
+
+    /// A tmux-safe session name derived from `base`, made unique against the
+    /// sessions already on the target.
+    func uniqueSessionName(_ targetID: String, base: String) -> String {
+        let cleaned = base.map { ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") ? $0 : "-" }
+        var name = String(cleaned).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if name.isEmpty { name = "agent" }
+        let existing = Set(state(targetID)?.snapshot?.sessions.map(\.name) ?? [])
+        guard existing.contains(name) else { return name }
+        var n = 2
+        while existing.contains("\(name)-\(n)") { n += 1 }
+        return "\(name)-\(n)"
+    }
+
     func refresh(_ targetID: String) {
         state(targetID)?.refreshRequested = true
     }
