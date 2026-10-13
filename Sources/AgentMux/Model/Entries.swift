@@ -215,7 +215,7 @@ extension AppModel {
     }
 
     private func sessionName(of paneID: String, in snapshot: InventorySnapshot) -> String {
-        guard let row = snapshot.memberships.first(where: { $0.paneID == paneID }) else { return "" }
+        guard let row = snapshot.primaryMembership(of: paneID) else { return "" }
         return snapshot.sessions.first { $0.id == row.sessionID }?.name ?? row.sessionID
     }
 

@@ -149,4 +149,17 @@ public struct InventorySnapshot: Sendable, Equatable {
     public func pane(_ id: String) -> Pane? {
         panes.first { $0.id == id }
     }
+
+    /// A pane's membership in a real session, preferring one that isn't an
+    /// AgentMux grouped mirror session ("agentmux-…"). Grouped sessions share a
+    /// real session's windows, so a pane can be a member of both; labels and
+    /// identity must come from the real one, and must not flip when a mirror
+    /// opens or closes.
+    public func primaryMembership(of paneID: String) -> Membership? {
+        let rows = memberships.filter { $0.paneID == paneID }
+        func isGrouped(_ sessionID: String) -> Bool {
+            (sessions.first { $0.id == sessionID }?.name ?? "").hasPrefix(RemoteCommand.groupedSessionPrefix)
+        }
+        return rows.first { !isGrouped($0.sessionID) } ?? rows.first
+    }
 }

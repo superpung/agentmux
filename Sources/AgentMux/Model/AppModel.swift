@@ -622,7 +622,7 @@ final class AppModel {
 
     /// `session:window.pane` using the first membership.
     func location(of paneID: String, in snapshot: InventorySnapshot) -> String {
-        guard let row = snapshot.memberships.first(where: { $0.paneID == paneID }) else { return paneID }
+        guard let row = snapshot.primaryMembership(of: paneID) else { return paneID }
         let session = snapshot.sessions.first { $0.id == row.sessionID }?.name ?? row.sessionID
         return "\(session):\(row.windowIndex).\(row.paneIndex)"
     }

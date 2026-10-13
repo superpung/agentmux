@@ -276,7 +276,9 @@ struct SessionsWindow: View {
 
     private func nodes(in snapshot: InventorySnapshot) -> [Node] {
         let state = model.state(targetID)
-        return snapshot.sessions.map { session in
+        // Hide AgentMux's own grouped mirror sessions ("agentmux-…"); they just
+        // mirror a real session's windows and aren't the user's to manage.
+        return snapshot.sessions.filter { !$0.name.hasPrefix(RemoteCommand.groupedSessionPrefix) }.map { session in
             let rows = snapshot.memberships.filter { $0.sessionID == session.id }
             let windowIDs = rows.map(\.windowID).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
             let windows = windowIDs.map { windowID -> Node in
