@@ -1,27 +1,37 @@
 import AgentMuxCore
 import SwiftUI
 
-/// Overview shown in the detail pane when no agent is selected: fleet totals,
-/// the agents that need you, who's working, and a per-container resource card.
-/// Selecting any row jumps straight to that agent. Read-only throughout.
+/// Fleet overview shown when no agent is selected: KPI cards, per-container
+/// resource cards with live sparklines, and the agents that need you or are
+/// working. Selecting any row jumps straight to that agent. Read-only throughout.
 struct DashboardView: View {
     @Environment(AppModel.self) private var model
 
+    private let columns = [GridItem(.adaptive(minimum: 170), spacing: 12)]
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 22) {
                 header
-                summary
+                LazyVGrid(columns: columns, spacing: 12) {
+                    MetricCard(icon: "square.stack.3d.up", title: "Agents", value: "\(agents.count)", fillHeight: true)
+                    MetricCard(icon: "circle.dotted", title: "Working", value: "\(working.count)",
+                               valueTint: working.isEmpty ? Theme.textTertiary : Theme.working, fillHeight: true)
+                    MetricCard(icon: "exclamationmark.circle.fill", title: "Needs attention", value: "\(attention.count)",
+                               valueTint: attention.isEmpty ? Theme.textTertiary : Theme.warning, fillHeight: true)
+                    MetricCard(icon: "checkmark.circle", title: "Idle", value: "\(idleCount)",
+                               valueTint: idleCount == 0 ? Theme.textTertiary : Theme.success, fillHeight: true)
+                }
+                containersSection
                 if !attention.isEmpty {
                     AgentListSection(title: "Needs attention", systemImage: "exclamationmark.circle.fill", tint: Theme.warning, agents: attention)
                 }
                 if !working.isEmpty {
                     AgentListSection(title: "Working now", systemImage: "circle.dotted", tint: Theme.working, agents: working)
                 }
-                containersSection
             }
             .padding(20)
-            .frame(maxWidth: 820, alignment: .leading)
+            .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { model.beginResourceMonitoring() }
@@ -33,6 +43,7 @@ struct DashboardView: View {
     private var agents: [AgentEntry] { model.allAgentEntries }
     private var working: [AgentEntry] { agents.filter { $0.activity == .working } }
     private var attention: [AgentEntry] { agents.filter { $0.activity.needsAttention } }
+    private var idleCount: Int { agents.filter { $0.activity == .idle }.count }
     private var serverCount: Int { Set(model.targets.map(\.host.id)).count }
 
     // MARK: Sections
@@ -57,51 +68,23 @@ struct DashboardView: View {
         return "\(servers) server\(servers == 1 ? "" : "s") · \(containers) container\(containers == 1 ? "" : "s") · \(agents.count) agent\(agents.count == 1 ? "" : "s")"
     }
 
-    private var summary: some View {
-        HStack(spacing: 12) {
-            SummaryCard(icon: "circle.dotted", value: working.count, label: "Working", tint: Theme.working)
-            SummaryCard(icon: "exclamationmark.circle.fill", value: attention.count, label: "Need attention", tint: Theme.warning)
-            SummaryCard(icon: "checkmark.circle", value: idleCount, label: "Idle", tint: Theme.success)
-        }
-    }
-
-    private var idleCount: Int { agents.filter { $0.activity == .idle }.count }
-
     @ViewBuilder private var containersSection: some View {
         if !model.targets.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Servers & containers", systemImage: "server.rack")
                     .font(.headline).foregroundStyle(.secondary)
-                ForEach(model.targets) { state in
-                    ContainerSummaryCard(state: state, agents: agents.filter { $0.ref.targetID == state.id })
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 380), spacing: 12)], spacing: 12) {
+                    ForEach(model.targets) { state in
+                        ContainerSummaryCard(state: state, agents: agents.filter { $0.ref.targetID == state.id })
+                    }
                 }
             }
         }
     }
 }
 
-/// One big number with an icon and caption.
-private struct SummaryCard: View {
-    let icon: String
-    let value: Int
-    let label: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: icon).font(.title3).foregroundStyle(tint)
-            Text("\(value)").font(.system(.largeTitle, design: .rounded).weight(.semibold)).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Theme.itemWash, in: RoundedRectangle(cornerRadius: 12))
-    }
-}
-
 /// A titled list of agents; each row jumps to that agent when clicked.
 private struct AgentListSection: View {
-    @Environment(AppModel.self) private var model
     let title: String
     let systemImage: String
     let tint: Color
@@ -129,8 +112,7 @@ private struct DashAgentRow: View {
     var body: some View {
         Button { model.select(agent.ref) } label: {
             HStack(spacing: 8) {
-                brandIcon
-                    .frame(width: 18)
+                brandIcon.frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.customName(agent.identityKey) ?? agent.title).lineLimit(1)
                     Text("\(agent.configLabel) · \(agent.device.name) · \(agent.spaceLabel)")
@@ -140,7 +122,7 @@ private struct DashAgentRow: View {
                 if agent.activity != .working, let active = RelativeTime.short(agent.lastActiveSeconds) {
                     Text(active).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                 }
-                AgentStatusGlyph(activity: agent.activity)
+                StatusChip(activity: agent.activity)
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 12)
@@ -158,15 +140,15 @@ private struct DashAgentRow: View {
     }
 }
 
-/// A container with its agent status breakdown and (when available) live CPU /
-/// memory meters.
+/// A container card: name + status breakdown, then live CPU and memory
+/// mini-metrics with sparklines.
 private struct ContainerSummaryCard: View {
     @Environment(AppModel.self) private var model
     let state: TargetState
     let agents: [AgentEntry]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
                 Text(state.device.name).font(.headline)
@@ -177,14 +159,17 @@ private struct ContainerSummaryCard: View {
                 Spacer()
                 statusPills
             }
-            if let resources = model.resources[state.host.id] {
-                if let container = resources.containers[state.target.container ?? ""] {
-                    StatMeter(icon: "cpu", title: "CPU",
-                              value: resources.cores > 0 ? "\(String(format: "%.1f", container.cpuPercent / 100)) / \(resources.cores) cores" : "\(Int(container.cpuPercent.rounded()))%",
-                              fraction: resources.cores > 0 ? container.cpuPercent / Double(resources.cores * 100) : nil)
-                    StatMeter(icon: "memorychip", title: "Memory",
-                              value: "\(Int(container.memPercent.rounded()))% · \(container.memText)",
-                              fraction: container.memPercent / 100)
+
+            if let resources = model.resources[state.host.id],
+               let name = state.target.container, let container = resources.containers[name] {
+                HStack(alignment: .top, spacing: 16) {
+                    InlineMetric(title: "CPU",
+                                 value: resources.cores > 0 ? String(format: "%.1f", container.cpuPercent / 100) : "\(Int(container.cpuPercent.rounded()))",
+                                 unit: resources.cores > 0 ? "/ \(resources.cores) cores" : "%",
+                                 history: model.history(state.host.id, "container.\(name).cpu"), tint: Theme.working)
+                    InlineMetric(title: "Memory",
+                                 value: "\(Int(container.memPercent.rounded()))", unit: "% · \(container.memText)",
+                                 history: model.history(state.host.id, "container.\(name).mem"), tint: Theme.accent)
                 }
             } else if state.isOnline {
                 Text("Resources loading…").font(.caption2).foregroundStyle(.tertiary)
@@ -194,15 +179,16 @@ private struct ContainerSummaryCard: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.itemWash, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var statusPills: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             pill(count: agents.filter { $0.activity == .working }.count, color: Theme.working, label: "working")
             pill(count: agents.filter { $0.activity.needsAttention }.count, color: Theme.warning, label: "attention")
-            Text("\(agents.count) agent\(agents.count == 1 ? "" : "s")")
-                .font(.caption).foregroundStyle(.secondary)
+            Text("\(agents.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                + Text(" agent\(agents.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.tertiary)
         }
     }
 
@@ -214,5 +200,30 @@ private struct ContainerSummaryCard: View {
             }
             .help("\(count) \(label)")
         }
+    }
+}
+
+/// A borderless metric (title, big value + unit, sparkline) for use inside a card.
+private struct InlineMetric: View {
+    let title: String
+    let value: String
+    var unit: String?
+    var history: [Double]
+    var tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value).font(.system(.title3, design: .rounded).weight(.semibold)).monospacedDigit()
+                if let unit { Text(unit).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            if history.count >= 2 {
+                Sparkline(values: history, tint: tint).frame(height: 22)
+            } else {
+                Color.clear.frame(height: 22)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

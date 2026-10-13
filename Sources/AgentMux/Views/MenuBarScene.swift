@@ -31,6 +31,7 @@ struct MenuBarContent: View {
     private var agents: [AgentEntry] { model.allAgentEntries }
     private var attention: [AgentEntry] { agents.filter { $0.activity.needsAttention } }
     private var working: [AgentEntry] { agents.filter { $0.activity == .working } }
+    private var idleCount: Int { agents.filter { $0.activity == .idle }.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,8 +42,10 @@ struct MenuBarContent: View {
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
-            .padding(.bottom, 8)
+            .padding(.bottom, 10)
 
+            Divider()
+            fleetSummary
             Divider()
 
             ScrollView {
@@ -56,16 +59,65 @@ struct MenuBarContent: View {
                     section("Working", working)
                 }
             }
-            .frame(maxHeight: 360)
+            .frame(maxHeight: 300)
 
             Divider()
             footer
         }
         .frame(width: 320)
+        .onAppear { model.beginResourceMonitoring() }
+        .onDisappear { model.endResourceMonitoring() }
     }
 
     private var countsText: String {
         "\(working.count) working · \(attention.count) need you"
+    }
+
+    // A condensed fleet dashboard: KPI counts + per-container live meters.
+    private var fleetSummary: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                kpi("Working", working.count, working.isEmpty ? Theme.textTertiary : Theme.working)
+                kpi("Attention", attention.count, attention.isEmpty ? Theme.textTertiary : Theme.warning)
+                kpi("Idle", idleCount, idleCount == 0 ? Theme.textTertiary : Theme.success)
+            }
+            ForEach(model.targets) { state in containerLine(state) }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    private func kpi(_ label: String, _ value: Int, _ tint: Color) -> some View {
+        VStack(spacing: 1) {
+            Text("\(value)").font(.system(.title3, design: .rounded).weight(.semibold))
+                .monospacedDigit().foregroundStyle(tint)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private func containerLine(_ state: TargetState) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "shippingbox").imageScale(.small).foregroundStyle(.tertiary)
+            Text(state.device.name).font(.caption).lineLimit(1)
+            Spacer(minLength: 6)
+            if let resources = model.resources[state.host.id],
+               let name = state.target.container, let container = resources.containers[name] {
+                miniMeter("CPU", resources.cores > 0 ? container.cpuPercent / Double(resources.cores * 100) : container.cpuPercent / 100)
+                miniMeter("MEM", container.memPercent / 100)
+            } else if state.isOnline {
+                Text("…").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func miniMeter(_ label: String, _ fraction: Double) -> some View {
+        let f = min(1, max(0, fraction))
+        return HStack(spacing: 4) {
+            Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary).fixedSize()
+            ProgressView(value: f).frame(width: 30).tint(Theme.meterColor(f))
+            Text("\(Int((f * 100).rounded()))%").font(.caption2).monospacedDigit()
+                .foregroundStyle(.secondary).frame(width: 30, alignment: .trailing)
+        }
     }
 
     @ViewBuilder private func section(_ title: String, _ list: [AgentEntry]) -> some View {
@@ -82,7 +134,7 @@ struct MenuBarContent: View {
                             Text(agent.device.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 4)
-                        AgentStatusGlyph(activity: agent.activity)
+                        StatusChip(activity: agent.activity)
                     }
                     .contentShape(Rectangle())
                     .padding(.horizontal, 14).padding(.vertical, 5)
