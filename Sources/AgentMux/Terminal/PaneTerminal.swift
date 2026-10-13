@@ -24,6 +24,8 @@ final class PaneTerminal {
     /// Called (throttled) when the mirrored pane emits output, so the model can
     /// refresh this agent's state promptly while the user is watching it.
     @ObservationIgnored var onActivity: (@MainActor @Sendable () -> Void)?
+    /// A path the user asked to preview (via the terminal's context menu).
+    @ObservationIgnored var onPreviewRequest: ((String) -> Void)?
     /// Last time an activity notification fired; confined to the mirror queue.
     @ObservationIgnored nonisolated(unsafe) private var lastActivityNotify = Date.distantPast
     private(set) var phase: Phase = .connecting
@@ -59,6 +61,7 @@ final class PaneTerminal {
         state.makePlatformView = { [weak self] in
             let view = PasteInterceptingTerminalView(frame: .zero)
             view.onPaste = { text in self?.paste(text) ?? false }
+            view.onPreviewPath = { raw in self?.onPreviewRequest?(raw) }
             return view
         }
         var options = TerminalSurfaceOptions(backend: .inMemory(session))
@@ -180,6 +183,36 @@ final class PaneTerminal {
 /// bracketed paste before the view was opened.
 final class PasteInterceptingTerminalView: AppTerminalView {
     var onPaste: ((String) -> Bool)?
+    var onPreviewPath: ((String) -> Void)?
+
+    /// Adds a "Preview … in Files" item when the current selection looks like a
+    /// path. Ghostty's copy-on-select keeps the selection on the pasteboard, so
+    /// it is read from there.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        if let path = Self.selectedPath() {
+            let name = (path as NSString).lastPathComponent
+            let item = NSMenuItem(title: "Preview “\(name)” in Files",
+                                  action: #selector(previewSelectedPath(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = path
+            menu.insertItem(.separator(), at: 0)
+            menu.insertItem(item, at: 0)
+        }
+        return menu
+    }
+
+    @objc private func previewSelectedPath(_ sender: NSMenuItem) {
+        if let path = sender.representedObject as? String { onPreviewPath?(path) }
+    }
+
+    private static func selectedPath() -> String? {
+        guard let raw = NSPasteboard.general.string(forType: .string) else { return nil }
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty, s.count < 4096, !s.contains("\n") else { return nil }
+        let looksLikePath = s.contains("/") || !(s as NSString).pathExtension.isEmpty
+        return looksLikePath ? s : nil
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.type == .keyDown,

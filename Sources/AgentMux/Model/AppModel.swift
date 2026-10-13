@@ -123,6 +123,23 @@ final class AppModel {
         inspectorVisible = true
         previewRequest = PreviewRequest(targetID: targetID, path: path, nonce: previewNonce)
     }
+
+    /// A path selected in `ref`'s terminal: resolve it (relative paths against
+    /// the agent's cwd) and preview it.
+    func previewFromTerminal(_ raw: String, ref: PaneRef) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let path: String
+        if trimmed.hasPrefix("/") {
+            path = trimmed
+        } else if let cwd = agentEntry(ref)?.space.path ?? paneEntry(ref)?.space.path, !cwd.isEmpty {
+            path = (cwd as NSString).appendingPathComponent(trimmed)
+        } else {
+            path = trimmed
+        }
+        if selection != ref { select(ref) }
+        requestFilePreview(path, targetID: ref.targetID)
+    }
     private var releasedOrphans: Set<String> = []
     @ObservationIgnored private let notifier = Notifier()
 
@@ -794,6 +811,7 @@ final class AppModel {
         do {
             let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
             terminal.onActivity = { [weak self] in self?.nudge(ref.targetID) }
+            terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
             terminals[ref] = terminal
         } catch {
             state.lastFailure = RemoteFailure(.remoteCommandFailed, detail: "\(error)")
