@@ -20,6 +20,7 @@ public struct RemoteFileEntry: Sendable, Hashable, Identifiable {
 public enum RemoteFileContent: Sendable, Equatable {
     case text(String, truncated: Bool, byteCount: Int)
     case image(Data)
+    case pdf(Data)
     case binary(byteCount: Int)
     case tooLarge(byteCount: Int)
     case empty
@@ -53,7 +54,10 @@ public enum RemoteFileService {
     ) async -> Result<RemoteFileContent, RemoteFailure> {
         let ext = (path as NSString).pathExtension.lowercased()
         let isImage = imageExtensions.contains(ext)
-        let cap = isImage ? imageByteCap : textByteCap
+        let isPDF = ext == "pdf"
+        // Images / PDFs are read whole (up to the image cap); SVG is text but
+        // needs the whole file to render, so it also gets the larger cap.
+        let cap = (isImage || isPDF || ext == "svg") ? imageByteCap : textByteCap
         let qf = ShellQuote.command([path])
         let script = """
         sz=$(stat -c %s \(qf) 2>/dev/null || echo -1)
@@ -61,7 +65,7 @@ public enum RemoteFileService {
         head -c \(cap) \(qf) 2>/dev/null | base64 | tr -d '\\n'
         """
         let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 20)
-        return result.flatMap { parseRead(stripFraming($0), isImage: isImage, cap: cap) }
+        return result.flatMap { parseRead(stripFraming($0), isImage: isImage, isPDF: isPDF, cap: cap) }
     }
 
     // MARK: Parsing (pure; unit-tested)
@@ -94,7 +98,7 @@ public enum RemoteFileService {
         }
     }
 
-    static func parseRead(_ output: String, isImage: Bool, cap: Int) -> Result<RemoteFileContent, RemoteFailure> {
+    static func parseRead(_ output: String, isImage: Bool, isPDF: Bool = false, cap: Int) -> Result<RemoteFileContent, RemoteFailure> {
         guard let newline = output.firstIndex(of: "\n") else {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "unreadable response"))
         }
@@ -108,6 +112,9 @@ public enum RemoteFileService {
         let b64 = output[output.index(after: newline)...].trimmingCharacters(in: .whitespacesAndNewlines)
         guard let data = Data(base64Encoded: b64) else {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "base64 decode failed"))
+        }
+        if isPDF {
+            return size > cap ? .success(.tooLarge(byteCount: size)) : .success(.pdf(data))
         }
         if isImage {
             return size > cap ? .success(.tooLarge(byteCount: size)) : .success(.image(data))

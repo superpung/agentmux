@@ -12,6 +12,8 @@ let package = Package(
         // Syntax highlighting for the file preview (highlight.js via
         // JavaScriptCore; MIT). UI target only.
         .package(url: "https://github.com/raspu/Highlightr.git", exact: "2.3.0"),
+        // Rendered Markdown preview (SwiftUI-native; MIT). UI target only.
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", exact: "2.4.1"),
     ],
     targets: [
         // forkpty + execve. The child after fork must only make
@@ -28,6 +30,7 @@ let package = Package(
                 "AgentMuxCore",
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
                 .product(name: "Highlightr", package: "Highlightr"),
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
             ]
         ),
         // Development tool: read-only inventory of configured targets.

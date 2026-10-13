@@ -46,6 +46,13 @@ import Testing
         #expect(content == .image(data))
     }
 
+    @Test func readPdfUnderCapIsPdf() throws {
+        let data = Data([0x25, 0x50, 0x44, 0x46]) // %PDF
+        let out = "@@size 4\n" + data.base64EncodedString()
+        let content = try RemoteFileService.parseRead(out, isImage: false, isPDF: true, cap: 1024).get()
+        #expect(content == .pdf(data))
+    }
+
     @Test func readImageOverCapIsTooLarge() throws {
         let out = "@@size 99999\n" + Data([0x00]).base64EncodedString()
         let content = try RemoteFileService.parseRead(out, isImage: true, cap: 1024).get()

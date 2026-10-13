@@ -1,7 +1,10 @@
 import AgentMuxCore
 import AppKit
 import Highlightr
+import MarkdownUI
+import PDFKit
 import SwiftUI
+import WebKit
 
 /// The right inspector: a Resources / Files switch over the two panels.
 struct InspectorPanel: View {
@@ -220,19 +223,17 @@ struct FilesView: View {
 private struct PreviewPane: View {
     let preview: FilePreview
 
+    private var ext: String { (preview.path as NSString).pathExtension.lowercased() }
+
     var body: some View {
         switch preview.content {
         case let .text(text, truncated, bytes):
-            VStack(spacing: 0) {
-                if truncated {
-                    Label("Showing the first \(RemoteFileService.textByteCap / 1024) KB of \(sizeText(bytes))",
-                          systemImage: "scissors")
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Theme.itemWash)
-                }
-                CodePreview(text: text, language: CodeHighlighter.language(for: preview.path))
+            switch ext {
+            case "md", "markdown": MarkdownPreview(source: text)
+            case "csv": CSVPreview(text: text, separator: ",")
+            case "tsv": CSVPreview(text: text, separator: "\t")
+            case "svg": SVGPreview(svg: text)
+            default: codeText(text, truncated: truncated, bytes: bytes)
             }
         case let .image(data):
             ScrollView([.horizontal, .vertical]) {
@@ -243,12 +244,28 @@ private struct PreviewPane: View {
                     message("Can't decode image", "photo.badge.exclamationmark")
                 }
             }
+        case let .pdf(data):
+            PDFPreview(data: data)
         case let .binary(bytes):
             message("Binary file · \(sizeText(bytes))", "doc.badge.gearshape")
         case let .tooLarge(bytes):
             message("Too large to preview · \(sizeText(bytes))", "exclamationmark.magnifyingglass")
         case .empty:
             message("Empty file", "doc")
+        }
+    }
+
+    private func codeText(_ text: String, truncated: Bool, bytes: Int) -> some View {
+        VStack(spacing: 0) {
+            if truncated {
+                Label("Showing the first \(RemoteFileService.textByteCap / 1024) KB of \(sizeText(bytes))",
+                      systemImage: "scissors")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Theme.itemWash)
+            }
+            CodePreview(text: text, language: CodeHighlighter.language(for: preview.path))
         }
     }
 
@@ -373,4 +390,128 @@ final class CodeHighlighter {
         default: return nil
         }
     }
+}
+
+// MARK: - Rich-format previews
+
+/// Markdown with a Rendered / Source toggle (rendered via swift-markdown-ui).
+private struct MarkdownPreview: View {
+    let source: String
+    @State private var rendered = true
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $rendered) {
+                Text("Rendered").tag(true)
+                Text("Source").tag(false)
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            Divider()
+            if rendered {
+                ScrollView {
+                    Markdown(source)
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                CodePreview(text: source, language: "markdown")
+            }
+        }
+    }
+}
+
+/// A CSV / TSV table (first row as header). Basic split — no quoted-field CSV.
+private struct CSVPreview: View {
+    let text: String
+    let separator: Character
+
+    private var rows: [[String]] {
+        text.split(separator: "\n", omittingEmptySubsequences: true).prefix(1000).map {
+            $0.split(separator: separator, omittingEmptySubsequences: false).map(String.init)
+        }
+    }
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 3) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                            Text(cell)
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .fontWeight(index == 0 ? .semibold : .regular)
+                                .foregroundStyle(index == 0 ? Theme.text : Theme.textSecondary)
+                                .lineLimit(1).fixedSize()
+                        }
+                    }
+                    if index == 0 { Divider() }
+                }
+            }
+            .padding(10)
+        }
+    }
+}
+
+/// Renders an SVG via WKWebView (JavaScript disabled, external navigation
+/// blocked). Suited to self-contained SVGs such as waveforms.
+private struct SVGPreview: NSViewRepresentable {
+    let svg: String
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        let web = WKWebView(frame: .zero, configuration: config)
+        web.navigationDelegate = context.coordinator
+        web.setValue(false, forKey: "drawsBackground")
+        return web
+    }
+
+    func updateNSView(_ web: WKWebView, context: Context) {
+        guard context.coordinator.svg != svg else { return }
+        context.coordinator.svg = svg
+        context.coordinator.programmaticLoad = true
+        let html = """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <style>html,body{margin:0;height:100%}body{display:flex;align-items:center;justify-content:center}
+        svg{max-width:100%;height:auto}</style></head><body>\(svg)</body></html>
+        """
+        web.loadHTMLString(html, baseURL: nil)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var svg: String?
+        var programmaticLoad = false
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if programmaticLoad { programmaticLoad = false; decisionHandler(.allow) }
+            else { decisionHandler(.cancel) }
+        }
+    }
+}
+
+/// Renders a PDF with PDFKit.
+private struct PDFPreview: NSViewRepresentable {
+    let data: Data
+
+    func makeNSView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateNSView(_ view: PDFView, context: Context) {
+        guard context.coordinator.data != data else { return }
+        context.coordinator.data = data
+        view.document = PDFDocument(data: data)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator { var data: Data? }
 }
