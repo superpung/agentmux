@@ -559,6 +559,10 @@ final class AppModel {
         releasedOrphans.insert(state.id)
         let live = terminals.values.filter { $0.ref.targetID == state.id }.map(\.clientTag)
         _ = await ClientRelease.release(host: state.host, context: context, options: SSHOptions(), tags: [], keeping: live)
+        // We no longer set `destroy-unattached` (it crashes tmux on abrupt
+        // teardown), so reap grouped mirror sessions a crashed instance left
+        // behind — now unattached after ClientRelease, killed safely here.
+        await PaneMirror.reapOrphanGroupedSessions(prefix: RemoteCommand.groupedSessionPrefix, host: state.host, target: state.target)
     }
 
     /// Closes a mirror once its pane no longer belongs to any real (non-grouped)

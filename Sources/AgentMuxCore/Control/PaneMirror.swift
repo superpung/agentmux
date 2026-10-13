@@ -19,6 +19,11 @@ public final class PaneMirror: @unchecked Sendable {
 
     public let paneID: String
     private let client: ControlClient
+    // Kept so teardown can destroy the grouped session over a fresh, non-control
+    // connection (no control client attached — the safe path for the tmux bug).
+    private let host: HostConfig
+    private let target: TargetConfig
+    private let options: SSHOptions
 
     // Confined to client.queue.
     private var live = false
@@ -41,6 +46,9 @@ public final class PaneMirror: @unchecked Sendable {
             throw InvalidRemoteValue(field: "pane", value: paneID)
         }
         self.paneID = paneID
+        self.host = host
+        self.target = target
+        self.options = options
         client = try ControlClient(host: host, target: target, session: session, options: options)
     }
 
@@ -57,10 +65,15 @@ public final class PaneMirror: @unchecked Sendable {
             self.onEnded = onEnded
         }
         try client.start { [weak self] event in self?.handle(event) }
-        // The client is attached to its own grouped session: remove it when
-        // the client leaves (or the app dies), and focus the agent's window
-        // so `refresh-client -C` sizes that window and not another.
-        client.send("set-option destroy-unattached on") { _ in }
+        // NOTE: we deliberately do NOT set `destroy-unattached`. It auto-destroys
+        // the grouped session the instant our control client drops (app killed /
+        // crashed), and that abrupt teardown — a grouped session dying while a
+        // control-mode client is being torn down — triggers a tmux server
+        // segfault (NULL deref in server_client_loop / cmd_find_best_session;
+        // the same bug hit by other control-mode tmux tools). Grouped sessions
+        // left behind by an abrupt exit are instead reaped on next launch by
+        // AppModel, with no control client attached (the safe teardown).
+        // Focus the agent's window so `refresh-client -C` sizes it, not another.
         if let target = TmuxQuote.id(paneID) {
             client.send("select-window -t \(target)") { _ in }
         }
@@ -140,22 +153,53 @@ public final class PaneMirror: @unchecked Sendable {
     }
 
     public func close() {
+        let groupedSession = RemoteCommand.groupedSessionName(clientTag: client.clientTag)
         client.queue.async { [self] in
             guard !ended else { return }
             // Restore automatic sizing before leaving so the shared window
             // follows the user's own client again (we forced it to `manual`).
             client.send("set-option window-size latest") { _ in }
-            // Remove our grouped session now; its windows survive in the
-            // user's session, and `destroy-unattached` is the crash-safety
-            // net if this command never lands.
-            client.send("kill-session -t \(RemoteCommand.groupedSessionName(clientTag: client.clientTag))") { _ in }
             ended = true
             onTerminalBytes = nil
             onGeometry = nil
             onEnded = nil
         }
-        // Let kill-session flush before stdin closes.
+        // Detach our control client, then destroy the now-unattached grouped
+        // session over a SEPARATE (non-control) connection. Destroying it while
+        // our control-mode client is still attached is what segfaults the tmux
+        // server, so we never kill it through this client. Its windows survive
+        // in the user's session.
         client.queue.asyncAfter(deadline: .now() + 0.2) { [client] in client.close() }
+        Task { [host, target, options] in
+            try? await Task.sleep(for: .milliseconds(500))
+            _ = await PaneMirror.killGroupedSession(groupedSession, host: host, target: target, options: options)
+        }
+    }
+
+    /// Kills a grouped mirror session by exact name over a fresh connection
+    /// (no control-mode client attached). Used by `close()` and by the orphan
+    /// reaper after an abrupt app exit.
+    public static func killGroupedSession(_ name: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()) async -> Result<String, RemoteFailure> {
+        guard let tmux = try? target.executionContext().tmux else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "no tmux context"))
+        }
+        let argv = tmux.argv + ["kill-session", "-t", "=\(name)"]
+        return await RemoteScript.run(ShellQuote.command(argv) + " 2>/dev/null", host: host, target: target, options: options, timeoutSeconds: 10)
+    }
+
+    /// Kills any *unattached* grouped mirror session (`prefix…`) left behind by
+    /// an abrupt app exit. Run once per target on launch. Our own live mirrors
+    /// stay attached, so they are never touched. No control client is attached
+    /// to the ones killed here — the safe teardown for the tmux crash.
+    public static func reapOrphanGroupedSessions(prefix: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()) async {
+        guard let tmux = try? target.executionContext().tmux else { return }
+        let t = ShellQuote.command(tmux.argv)
+        let script = """
+        \(t) list-sessions -F '#{session_attached} #{session_name}' 2>/dev/null | while read -r a n; do
+          case "$n" in \(prefix)*) [ "$a" = 0 ] && \(t) kill-session -t "=$n" 2>/dev/null ;; esac
+        done
+        """
+        _ = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 15)
     }
 
     // MARK: - Queue-confined
