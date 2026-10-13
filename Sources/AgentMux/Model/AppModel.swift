@@ -87,6 +87,11 @@ final class AppModel {
     /// Live host/container resources, by host id, refreshed only while a view
     /// (the inspector or dashboard) is showing them.
     private(set) var resources: [String: HostResources] = [:]
+    /// Rolling metric history for sparklines, by host id then series key
+    /// ("host.cpu", "host.mem", "container.<name>.cpu", "container.<name>.mem",
+    /// "gpu.<i>"). Oldest-to-newest, capped at `historyCapacity` points.
+    private(set) var resourceHistory: [String: [String: [Double]]] = [:]
+    private static let historyCapacity = 40
     private var resourcePoller: Task<Void, Never>?
     private var resourceConsumers = 0
     static let resourceInterval: Duration = .seconds(5)
@@ -346,6 +351,7 @@ final class AppModel {
                 for host in hosts {
                     if case let .success(snapshot) = await ResourceProbe.run(host: host) {
                         resources[host.id] = snapshot
+                        recordHistory(host.id, snapshot)
                     }
                 }
                 try? await Task.sleep(for: Self.resourceInterval)
@@ -359,6 +365,35 @@ final class AppModel {
     func resources(forTarget targetID: String) -> HostResources? {
         guard let hostID = state(targetID)?.host.id else { return nil }
         return resources[hostID]
+    }
+
+    /// A rolling series for sparklines (oldest-to-newest); empty until enough
+    /// samples have arrived.
+    func history(_ hostID: String, _ key: String) -> [Double] {
+        resourceHistory[hostID]?[key] ?? []
+    }
+
+    private func recordHistory(_ hostID: String, _ snapshot: HostResources) {
+        var series = resourceHistory[hostID] ?? [:]
+        func push(_ key: String, _ value: Double) {
+            var points = series[key] ?? []
+            points.append(value)
+            if points.count > Self.historyCapacity {
+                points.removeFirst(points.count - Self.historyCapacity)
+            }
+            series[key] = points
+        }
+        let cores = Double(max(snapshot.cores, 1))
+        push("host.cpu", min(100, snapshot.load1 / cores * 100))
+        push("host.mem", snapshot.memPercent)
+        for (name, container) in snapshot.containers {
+            // docker's cpuPercent is summed across cores (0…cores*100); scale to
+            // a share of the whole host so the sparkline reads 0…100.
+            push("container.\(name).cpu", min(100, container.cpuPercent / cores))
+            push("container.\(name).mem", container.memPercent)
+        }
+        for gpu in snapshot.gpus { push("gpu.\(gpu.index)", gpu.utilizationPercent) }
+        resourceHistory[hostID] = series
     }
 
     // MARK: Session admin (only from the Sessions window; deletes are confirmed)

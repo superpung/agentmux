@@ -66,6 +66,27 @@ enum Theme {
         case .exited, .unknown: textGhost
         }
     }
+
+    /// Short label for a status chip; nil when there is nothing worth asserting.
+    static func activityLabel(_ activity: AgentActivity) -> String? {
+        switch activity {
+        case .working: "Working"
+        case .waitingInput: "Needs input"
+        case .waitingApproval: "Needs approval"
+        case .idle: "Idle"
+        case .exited: "Exited"
+        case .unknown: nil
+        }
+    }
+
+    /// A load / usage fraction (0…1) mapped to the shared semantic ramp.
+    static func meterColor(_ fraction: Double) -> Color {
+        switch fraction {
+        case ..<0.7: success
+        case ..<0.9: warning
+        default: danger
+        }
+    }
 }
 
 /// Spinner while working, a mark when the agent needs you, nothing otherwise.
@@ -75,7 +96,8 @@ struct AgentStatusGlyph: View {
     var body: some View {
         switch activity {
         case .working:
-            SpinnerView(color: Theme.textSecondary)
+            // Same weight as the adjacent last-active time (.tertiary).
+            SpinnerView(color: .tertiary)
                 .frame(width: 12, height: 12)
         case .waitingInput, .waitingApproval:
             Image(systemName: "exclamationmark.circle.fill")
@@ -129,8 +151,8 @@ struct ActivityPill: View {
     }
 }
 
-struct SpinnerView: View {
-    let color: Color
+struct SpinnerView<S: ShapeStyle>: View {
+    let color: S
     @State private var spinning = false
 
     var body: some View {
