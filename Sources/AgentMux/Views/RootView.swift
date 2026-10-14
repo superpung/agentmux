@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
@@ -13,16 +14,25 @@ struct RootView: View {
             DetailView()
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button { model.toggleInspector() } label: {
-                            Label("Inspector", systemImage: "sidebar.right")
+                        Button { openWindow(id: "files") } label: {
+                            Label("Files", systemImage: "folder")
                         }
-                        .help("Show resources and files")
+                        .help("Browse this agent's files")
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { model.toggleInspector() } label: {
+                            Label("Resources", systemImage: "sidebar.right")
+                        }
+                        .help("Show container and host resources")
                     }
                 }
         }
         .inspector(isPresented: $model.inspectorVisible) {
-            InspectorPanel()
-                .inspectorColumnWidth(min: 260, ideal: 300, max: 460)
+            ResourceInspector()
+                .inspectorColumnWidth(min: 230, ideal: 280, max: 380)
+        }
+        .onChange(of: model.previewRequest) { _, request in
+            if request != nil { openWindow(id: "files") }
         }
         .overlay {
             if model.showCommandPalette {

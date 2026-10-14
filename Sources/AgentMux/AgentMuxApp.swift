@@ -34,10 +34,7 @@ struct AgentMuxApp: App {
                 Button("Previous Agent") { model.selectAdjacentAgent(-1) }
                     .keyboardShortcut("[", modifiers: .command)
                 Divider()
-                Button("Resources Inspector") { model.showInspector(.resources) }
-                    .keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Files Inspector") { model.showInspector(.files) }
-                    .keyboardShortcut("2", modifiers: [.command, .option])
+                OpenFilesButton()
                 Divider()
             }
         }
@@ -57,6 +54,13 @@ struct AgentMuxApp: App {
                 .frame(minWidth: 460, minHeight: 360)
         }
         .defaultSize(width: 620, height: 640)
+
+        Window("Files", id: "files") {
+            FileBrowserWindow()
+                .environment(model)
+                .frame(minWidth: 640, minHeight: 420)
+        }
+        .defaultSize(width: 1000, height: 680)
 
         MenuBarExtra {
             MenuBarContent(model: model)
@@ -80,6 +84,16 @@ private struct OpenSessionsButton: View {
     var body: some View {
         Button("Sessions") { openWindow(id: "sessions") }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+    }
+}
+
+/// Opens the Files window (two-pane file browser for the selected agent).
+private struct OpenFilesButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Files") { openWindow(id: "files") }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
     }
 }
 

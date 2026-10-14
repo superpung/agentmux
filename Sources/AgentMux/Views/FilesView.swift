@@ -6,40 +6,22 @@ import PDFKit
 import SwiftUI
 import WebKit
 
-/// The right inspector: a Resources / Files switch over the two panels.
-struct InspectorPanel: View {
+/// The dedicated Files window: a two-pane browser (tree | wide preview) for the
+/// selected agent's project files. Read-only.
+struct FileBrowserWindow: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var model = model
-        VStack(spacing: 0) {
-            Picker("Inspector", selection: $model.inspectorMode) {
-                Text("Resources").tag(AppModel.InspectorMode.resources)
-                Text("Files").tag(AppModel.InspectorMode.files)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
-            Divider()
-            switch model.inspectorMode {
-            case .resources: ResourceInspector()
-            case .files: filesTab
-            }
-        }
-    }
-
-    @ViewBuilder private var filesTab: some View {
         if let ref = model.selection, let state = model.state(ref.targetID), let root = fileRoot(ref) {
-            FilesView(ref: ref, host: state.host, target: state.target, root: root)
+            FileBrowser(ref: ref, host: state.host, target: state.target, root: root)
                 .id(ref) // reset the browser when the selected agent changes
         } else {
-            VStack(spacing: 6) {
-                Image(systemName: "folder").font(.title3).foregroundStyle(.tertiary)
-                Text("Select an agent to browse its files.")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            VStack(spacing: 10) {
+                Image(systemName: "folder").font(.largeTitle).foregroundStyle(.tertiary)
+                Text("Select an agent in the main window to browse its files.")
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding()
         }
     }
 
@@ -50,31 +32,56 @@ struct InspectorPanel: View {
     }
 }
 
-private struct FilePreview: Equatable {
-    var path: String
-    var content: RemoteFileContent
-}
-
-/// A read-only directory browser + file preview, rooted at the agent's cwd.
-struct FilesView: View {
+/// Directory tree on the left, a wide resizable preview on the right.
+private struct FileBrowser: View {
     @Environment(AppModel.self) private var model
     let ref: PaneRef
     let host: HostConfig
     let target: TargetConfig
     let root: String
+    @State private var selected: String?
+
+    var body: some View {
+        NavigationSplitView {
+            FileTree(host: host, target: target, root: root, selected: $selected)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 300, max: 480)
+        } detail: {
+            FilePreviewView(host: host, target: target, path: selected)
+        }
+        .navigationTitle((root as NSString).lastPathComponent)
+        .navigationSubtitle(selected.map { ($0 as NSString).lastPathComponent } ?? "")
+        .onAppear { applyPreviewRequest() }
+        .onChange(of: model.previewRequest) { _, _ in applyPreviewRequest() }
+    }
+
+    private func applyPreviewRequest() {
+        if let req = model.previewRequest, req.targetID == ref.targetID { selected = req.path }
+    }
+}
+
+private struct FilePreview: Equatable {
+    var path: String
+    var content: RemoteFileContent
+}
+
+/// A read-only directory browser: navigate into folders, select a file to
+/// preview (binds `selected`).
+private struct FileTree: View {
+    let host: HostConfig
+    let target: TargetConfig
+    let root: String
+    @Binding var selected: String?
 
     @State private var cwd: String
     @State private var entries: [RemoteFileEntry] = []
     @State private var loading = false
     @State private var error: String?
-    @State private var preview: FilePreview?
-    @State private var previewing = false
 
-    init(ref: PaneRef, host: HostConfig, target: TargetConfig, root: String) {
-        self.ref = ref
+    init(host: HostConfig, target: TargetConfig, root: String, selected: Binding<String?>) {
         self.host = host
         self.target = target
         self.root = root
+        _selected = selected
         _cwd = State(initialValue: root)
     }
 
@@ -82,43 +89,20 @@ struct FilesView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let preview {
-                PreviewPane(preview: preview)
-            } else if previewing {
-                center { ProgressView().controlSize(.small) }
-            } else {
-                directoryList
-            }
+            content
         }
-        .task(id: cwd) { await loadDir() }
-        .onAppear { consumePreviewRequest() }
-        .onChange(of: model.previewRequest) { _, _ in consumePreviewRequest() }
+        .task(id: cwd) { await load() }
     }
-
-    // MARK: Header / breadcrumb
 
     private var header: some View {
         HStack(spacing: 6) {
-            if preview != nil {
-                backButton("chevron.left") { preview = nil }
-                Text((cwd as NSString).lastPathComponent + "/" + ((preview?.path ?? "") as NSString).lastPathComponent)
-                    .font(.caption).lineLimit(1).truncationMode(.head)
-            } else {
-                backButton("chevron.up") { navigateUp() }
-                    .disabled(cwd == root)
-                    .opacity(cwd == root ? 0.35 : 1)
-                Text(displayPath).font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.head)
-            }
+            Button { navigateUp() } label: { Image(systemName: "chevron.up").font(.caption.weight(.semibold)) }
+                .buttonStyle(.borderless).disabled(cwd == root).opacity(cwd == root ? 0.35 : 1)
+            Text(displayPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
             Spacer(minLength: 4)
             if loading { ProgressView().controlSize(.mini) }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-    }
-
-    private func backButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).font(.caption.weight(.semibold)) }
-            .buttonStyle(.borderless)
     }
 
     private var displayPath: String {
@@ -127,23 +111,21 @@ struct FilesView: View {
         return (root as NSString).lastPathComponent + rel
     }
 
-    // MARK: Directory list
-
-    @ViewBuilder private var directoryList: some View {
+    @ViewBuilder private var content: some View {
         if let error {
-            center {
+            centered {
                 VStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
                     Text(error).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
             }
         } else if entries.isEmpty, !loading {
-            center { Text("Empty folder").font(.caption).foregroundStyle(.tertiary) }
+            centered { Text("Empty folder").font(.caption).foregroundStyle(.tertiary) }
         } else {
             List {
                 ForEach(entries) { entry in
                     Button {
-                        if entry.isDirectory { cwd = entry.path } else { Task { await open(entry.path) } }
+                        if entry.isDirectory { cwd = entry.path } else { selected = entry.path }
                     } label: {
                         HStack(spacing: 7) {
                             Image(systemName: entry.isDirectory ? "folder.fill" : icon(for: entry.name))
@@ -151,28 +133,27 @@ struct FilesView: View {
                                 .frame(width: 16)
                             Text(entry.name).lineLimit(1).truncationMode(.middle)
                             Spacer(minLength: 4)
-                            if !entry.isDirectory {
-                                Text(sizeText(entry.size)).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
-                            } else {
+                            if entry.isDirectory {
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            } else {
+                                Text(sizeText(entry.size)).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                             }
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .listRowBackground(!entry.isDirectory && selected == entry.path ? Theme.itemWashSelected : Color.clear)
                 }
             }
             .listStyle(.inset)
         }
     }
 
-    private func center<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    private func centered<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding()
     }
 
-    // MARK: Loading
-
-    private func loadDir() async {
+    private func load() async {
         error = nil
         loading = true
         defer { loading = false }
@@ -182,28 +163,11 @@ struct FilesView: View {
         }
     }
 
-    private func open(_ path: String) async {
-        preview = nil
-        previewing = true
-        defer { previewing = false }
-        switch await RemoteFileService.read(path, host: host, target: target) {
-        case let .success(content): preview = FilePreview(path: path, content: content)
-        case let .failure(f): error = "\(f.kind.rawValue): \(f.detail)"
-        }
-    }
-
     private func navigateUp() {
         guard cwd != root else { return }
         let parent = (cwd as NSString).deletingLastPathComponent
         cwd = parent.hasPrefix(root) || parent == root ? parent : root
     }
-
-    private func consumePreviewRequest() {
-        guard let req = model.previewRequest, req.targetID == ref.targetID else { return }
-        Task { await open(req.path) }
-    }
-
-    // MARK: Formatting
 
     private func sizeText(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
@@ -212,10 +176,58 @@ struct FilesView: View {
     private func icon(for name: String) -> String {
         let ext = (name as NSString).pathExtension.lowercased()
         if CodeHighlighter.imageExtensions.contains(ext) { return "photo" }
+        if ext == "pdf" { return "doc.richtext" }
         if ["md", "markdown", "txt", "rst"].contains(ext) { return "doc.text" }
         if ["json", "yml", "yaml", "toml", "ini", "cfg", "conf"].contains(ext) { return "gearshape" }
+        if ["csv", "tsv"].contains(ext) { return "tablecells" }
         if ["zip", "gz", "tar", "xz", "bz2", "7z"].contains(ext) { return "doc.zipper" }
         return "doc"
+    }
+}
+
+/// Loads and shows the preview for one selected file path (right pane).
+private struct FilePreviewView: View {
+    let host: HostConfig
+    let target: TargetConfig
+    let path: String?
+
+    @State private var content: RemoteFileContent?
+    @State private var loading = false
+    @State private var error: String?
+
+    var body: some View {
+        Group {
+            if path == nil {
+                placeholder("Select a file to preview", "doc.text.magnifyingglass")
+            } else if loading {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error {
+                placeholder(error, "exclamationmark.triangle")
+            } else if let content, let path {
+                PreviewPane(preview: FilePreview(path: path, content: content))
+            }
+        }
+        .task(id: path) { await load() }
+    }
+
+    private func placeholder(_ text: String, _ icon: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).font(.title2).foregroundStyle(.tertiary)
+            Text(text).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding()
+    }
+
+    private func load() async {
+        content = nil
+        error = nil
+        guard let path else { return }
+        loading = true
+        defer { loading = false }
+        switch await RemoteFileService.read(path, host: host, target: target) {
+        case let .success(c): content = c
+        case let .failure(f): error = "\(f.kind.rawValue): \(f.detail)"
+        }
     }
 }
 
