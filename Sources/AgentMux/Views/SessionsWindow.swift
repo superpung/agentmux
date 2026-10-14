@@ -356,6 +356,7 @@ private struct LaunchAgentSheet: View {
     @State private var sessions: [AgentSessionInfo] = []
     @State private var picked: Set<String> = []
     @State private var freshCwd = ""
+    @State private var browsing = false
     @State private var destination = ""   // "" = new session, else a session id
     @State private var loadingDirs = true
     @State private var loadingSessions = false
@@ -449,13 +450,46 @@ private struct LaunchAgentSheet: View {
     @ViewBuilder private var freshFields: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Project directory").foregroundStyle(.secondary)
-            TextField("Path", text: $freshCwd, prompt: Text("/data/project"))
-                .textFieldStyle(.roundedBorder)
-            Text("A new \(kind == .codex ? "Codex" : "Claude Code") agent starts in a tmux session here.")
+            HStack(spacing: 6) {
+                TextField("Path", text: $freshCwd, prompt: Text("/data/project"))
+                    .textFieldStyle(.roundedBorder)
+                if !knownDirs.isEmpty {
+                    Menu {
+                        ForEach(knownDirs, id: \.self) { dir in
+                            Button(dir) { freshCwd = dir }
+                        }
+                    } label: { Image(systemName: "clock.arrow.circlepath") }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .help("Existing project directories on this container")
+                }
+                Button { browsing = true } label: { Image(systemName: "folder") }
+                    .help("Browse the container")
+            }
+            Text("A new \(kind == .codex ? "Codex" : "Claude Code") agent starts in a tmux session here — created if it doesn't exist.")
                 .font(.caption2).foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $browsing) {
+            if let state = model.state(targetID) {
+                RemoteDirPicker(host: state.host, target: state.target, start: browseStart) { freshCwd = $0 }
+            }
+        }
+    }
+
+    /// Distinct cwds of agents / panes already on this container — the common
+    /// case for a new launch is reusing an existing project.
+    private var knownDirs: [String] {
+        let agents = model.allAgentEntries.filter { $0.ref.targetID == targetID }.map(\.space.path)
+        let panes = model.paneEntries.filter { $0.ref.targetID == targetID }.map(\.space.path)
+        return Array(Set(agents + panes)).filter { !$0.isEmpty && $0 != "~" }.sorted()
+    }
+
+    private var browseStart: String {
+        let typed = freshCwd.trimmingCharacters(in: .whitespaces)
+        if typed.hasPrefix("/") { return typed }
+        if let first = knownDirs.first { return (first as NSString).deletingLastPathComponent }
+        return "/"
     }
 
     private func centered<V: View>(@ViewBuilder _ content: () -> V) -> some View {
@@ -517,10 +551,120 @@ private struct LaunchAgentSheet: View {
                     if let e = await start(cwd: session.cwd, resumeID: session.id) { failures.append(e) }
                 }
             } else {
-                if let e = await start(cwd: freshCwd.trimmingCharacters(in: .whitespaces), resumeID: nil) { failures.append(e) }
+                let cwd = freshCwd.trimmingCharacters(in: .whitespaces)
+                // Create the directory if it doesn't exist (idempotent), so a
+                // brand-new project path works.
+                if let state = model.state(targetID),
+                   case let .failure(f) = await RemoteFileService.makeDirectory(cwd, host: state.host, target: state.target) {
+                    failures.append("\(f.kind.rawValue): \(f.detail)")
+                } else if let e = await start(cwd: cwd, resumeID: nil) {
+                    failures.append(e)
+                }
             }
             launching = false
             if failures.isEmpty { dismiss() } else { error = failures.joined(separator: "\n") }
+        }
+    }
+}
+
+/// A remote directory picker: navigate the container's folders, make a new one,
+/// and choose the current folder. Dir-only (read lists + one `mkdir` write).
+private struct RemoteDirPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let host: HostConfig
+    let target: TargetConfig
+    let onChoose: (String) -> Void
+
+    @State private var cwd: String
+    @State private var dirs: [RemoteFileEntry] = []
+    @State private var loading = false
+    @State private var error: String?
+    @State private var makingFolder = false
+    @State private var newName = ""
+
+    init(host: HostConfig, target: TargetConfig, start: String, onChoose: @escaping (String) -> Void) {
+        self.host = host
+        self.target = target
+        self.onChoose = onChoose
+        _cwd = State(initialValue: start.isEmpty ? "/" : start)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Button { up() } label: { Image(systemName: "chevron.up") }
+                    .buttonStyle(.borderless).disabled(cwd == "/")
+                Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                Spacer()
+                if loading { ProgressView().controlSize(.mini) }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            Divider()
+            Group {
+                if let error {
+                    VStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
+                        Text(error).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if dirs.isEmpty, !loading {
+                    Text("No subfolders").font(.caption).foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(dirs) { dir in
+                            Button { cwd = dir.path } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: "folder.fill").foregroundStyle(Theme.accent).frame(width: 16)
+                                    Text(dir.name).lineLimit(1).truncationMode(.middle)
+                                    Spacer(minLength: 4)
+                                    Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                                }.contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                    }.listStyle(.inset)
+                }
+            }
+            Divider()
+            HStack {
+                Button { newName = ""; makingFolder = true } label: { Label("New Folder", systemImage: "folder.badge.plus") }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Choose") { onChoose(cwd); dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+        }
+        .frame(width: 460, height: 460)
+        .task(id: cwd) { await load() }
+        .alert("New folder in \((cwd as NSString).lastPathComponent)", isPresented: $makingFolder) {
+            TextField("Name", text: $newName)
+            Button("Create") { Task { await createFolder() } }
+            Button("Cancel", role: .cancel) { newName = "" }
+        }
+    }
+
+    private func load() async {
+        error = nil
+        loading = true
+        defer { loading = false }
+        switch await RemoteFileService.list(cwd, host: host, target: target) {
+        case let .success(items): dirs = items.filter(\.isDirectory)
+        case let .failure(f): dirs = []; error = "\(f.kind.rawValue): \(f.detail)"
+        }
+    }
+
+    private func up() {
+        let parent = (cwd as NSString).deletingLastPathComponent
+        cwd = parent.isEmpty ? "/" : parent
+    }
+
+    private func createFolder() async {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        newName = ""
+        guard !name.isEmpty else { return }
+        let path = (cwd as NSString).appendingPathComponent(name)
+        switch await RemoteFileService.makeDirectory(path, host: host, target: target) {
+        case .success: cwd = path // navigate into the new folder
+        case let .failure(f): error = "\(f.kind.rawValue): \(f.detail)"
         }
     }
 }

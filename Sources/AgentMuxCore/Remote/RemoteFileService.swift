@@ -68,6 +68,20 @@ public enum RemoteFileService {
         return result.flatMap { parseRead(stripFraming($0), isImage: isImage, isPDF: isPDF, cap: cap) }
     }
 
+    /// Creates a directory (and parents) in the container — the one write here,
+    /// used by the launch flow / directory picker when the user makes a new
+    /// folder. `mkdir -p` is idempotent, so an existing path is a no-op.
+    public static func makeDirectory(
+        _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<Void, RemoteFailure> {
+        let script = "mkdir -p \(ShellQuote.command([path])) 2>&1"
+        return await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 15)
+            .flatMap { output in
+                let message = stripFraming(output).trimmingCharacters(in: .whitespacesAndNewlines)
+                return message.isEmpty ? .success(()) : .failure(RemoteFailure(.remoteCommandFailed, detail: message))
+            }
+    }
+
     // MARK: Parsing (pure; unit-tested)
 
     /// `RemoteCommand.script` prepends an `@@container …` line (from a
