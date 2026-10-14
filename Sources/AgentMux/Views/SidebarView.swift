@@ -376,19 +376,19 @@ private struct AgentRow: View {
                     Text(entry.configLabel)
                     if showProject {
                         HStack(spacing: 3) {
-                            Image(systemName: "folder").imageScale(.small)
+                            Image(systemName: "folder").imageScale(.small).frame(width: 11)
                             Text(entry.spaceLabel)
                         }
                     }
                     if showServer {
                         HStack(spacing: 3) {
-                            Image(systemName: "server.rack").imageScale(.small)
+                            Image(systemName: "server.rack").imageScale(.small).frame(width: 11)
                             Text(entry.device.server)
                         }
                     }
                     if showDevice {
                         HStack(spacing: 3) {
-                            Image(systemName: "shippingbox").imageScale(.small)
+                            Image(systemName: "shippingbox").imageScale(.small).frame(width: 11)
                             Text(entry.device.name)
                         }
                     }
