@@ -476,16 +476,24 @@ private struct FooterIconChrome: ViewModifier {
 private struct StatusFooter: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @State private var countHover = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 7, height: 7)
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            // The fleet summary doubles as a shortcut to the dashboard.
+            Button { model.selection = nil } label: {
+                HStack(spacing: 6) {
+                    Circle().fill(dotColor).frame(width: 7, height: 7)
+                    Text(statusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .contentShape(Rectangle())
+                .background(countHover ? Color.primary.opacity(0.08) : .clear,
+                            in: RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .onHover { countHover = $0 }
+            .help("Show the dashboard")
             Spacer(minLength: 8)
             HStack(spacing: 4) {
                 Button { openWindow(id: "sessions") } label: {
@@ -500,7 +508,7 @@ private struct StatusFooter: View {
                 .help("Settings")
             }
         }
-        .padding(.leading, 14)
+        .padding(.leading, 9)
         .padding(.trailing, 8)
         .padding(.vertical, 4)
         .background(.bar)
