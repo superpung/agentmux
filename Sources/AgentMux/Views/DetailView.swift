@@ -121,14 +121,16 @@ private struct ContextBar: View {
 
     private func chip(_ icon: some View, _ text: String) -> some View {
         HStack(spacing: 4) {
-            icon
+            // A fixed icon box so SF Symbols of different intrinsic widths (and
+            // the brand glyph) share one visual size and the labels line up.
+            icon.frame(width: 15, height: 12)
             Text(text).truncationMode(.middle)
         }
         .layoutPriority(1)
     }
 
     private func icon(_ name: String) -> some View {
-        Image(systemName: name).imageScale(.small).foregroundStyle(.tertiary)
+        Image(systemName: name).font(.system(size: 11)).foregroundStyle(.tertiary)
     }
 
     @ViewBuilder private func brandIcon(_ kind: AgentKind) -> some View {
