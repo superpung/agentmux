@@ -161,22 +161,18 @@ private struct UsageBadges: View {
     let usage: InventorySnapshot.AgentUsage
 
     var body: some View {
-        HStack(spacing: 7) {
+        // No icons: two different SF Symbols can't be made to look the same
+        // size, and the colour is what matters here. The rings are identical;
+        // context is always first, the rate-limit ring (Codex) second, and the
+        // help text says which is which.
+        HStack(spacing: 6) {
             if let fraction = usage.contextFraction {
-                gauge("square.stack.3d.up.fill", fraction, help: "Context window used: \(percent(fraction))")
+                UsageRing(fraction: fraction).help("Context window used: \(percent(fraction))")
             }
             if let rate = usage.rateLimitPercent {
-                gauge("hourglass", rate / 100, help: "Rate limit used: \(percent(rate / 100))")
+                UsageRing(fraction: rate / 100).help("Rate limit used: \(percent(rate / 100))")
             }
         }
-    }
-
-    private func gauge(_ icon: String, _ fraction: Double, help: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: icon).imageScale(.small).foregroundStyle(.tertiary)
-            UsageRing(fraction: fraction)
-        }
-        .help(help)
     }
 
     private func percent(_ f: Double) -> String { "\(Int((f * 100).rounded()))%" }
@@ -194,7 +190,7 @@ private struct UsageRing: View {
                 .stroke(Theme.meterColor(f), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
-        .frame(width: 13, height: 13)
+        .frame(width: 14, height: 14)
         .animation(.easeOut(duration: 0.3), value: f)
     }
 }
