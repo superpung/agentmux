@@ -62,6 +62,20 @@ public enum InventoryProbe {
         # is not captured for these, which keeps tmux load (and any risk of a
         # tmux bug) low. A plain for-loop so logpanes survives each iteration.
         logpanes=" "
+        # Precompute how many distinct Codex TUI panes share each (CODEX_HOME,
+        # cwd). A TUI is a codex process bound to a tmux pane that is not the
+        # shared app-server/daemon. When two or more share one home+cwd, a
+        # single shared app-server holds all their rollouts with no per-pane
+        # link, so a rollout found by fd cwd-match can't be tied to the right
+        # pane; such panes are flagged ambiguous below and get no log/usage.
+        codextui=$(for q in $(printf '%s\\n' "$procs" | awk '$6=="codex"{print $3}'); do
+          case "$(tr '\\0' ' ' < "/proc/$q/cmdline" 2>/dev/null)" in *app-server*|*daemon*) continue ;; esac
+          qpane=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+          [ -n "$qpane" ] || continue
+          qcwd=$(readlink "/proc/$q/cwd" 2>/dev/null)
+          qch=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
+          echo "${qch:-$HOME/.codex}|$qcwd|$qpane"
+        done | sort -u)
         for pid in $(printf '%s\\n' "$procs" | awk '$5 !~ /^Z/ && $6 ~ /^(codex|claude|node|bun|deno)$/ { print $3 }' | head -n \(maxAgentCandidates)); do
           echo "@@agent $pid"
           echo "exe $(readlink "/proc/$pid/exe" 2>/dev/null)"
@@ -111,23 +125,29 @@ public enum InventoryProbe {
           # keeps the probe fast on multi-MB rollouts.
           if [ "$(cat /proc/$pid/comm 2>/dev/null)" = codex ] && command -v jq >/dev/null 2>&1; then
             cpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
-            # Newer Codex runs a `codex app-server` child that keeps the rollout
-            # fds of *several* sessions open at once — the live one plus
-            # resumed-from history, and even sessions from other projects — so
-            # the first fd is often a stale past session whose last event is
-            # task_complete, which would read as idle while the agent works.
-            # Tie the rollout to this pane by the session's own working dir
-            # (session_meta.cwd), which equals the process cwd: this is robust
-            # however Codex parents its daemon — a shared daemon serving other
-            # panes can't match a cwd that is not this session's. Among the
-            # matches, pick the most recently written (the live turn is the only
-            # file being appended). Only the cwd field is read, never content.
+            # Newer Codex runs a shared `codex app-server` daemon that holds the
+            # rollout fds of several live sessions at once — including other
+            # panes' — while the TUI itself holds none. Tie the rollout to this
+            # pane by the session's own working dir (session_meta.cwd = the
+            # process cwd) and, among matches, the most recently written file.
+            # But cwd is not unique: when two Codex TUIs share a CODEX_HOME and
+            # cwd, the shared daemon's rollouts can't be mapped back to a pane,
+            # and "newest" would hand an idle pane its busy sibling's rollout.
+            # So skip fd-based attribution when this (home,cwd) has >1 TUI; only
+            # the resume-id path below (unambiguous) is kept, and activity then
+            # comes from the per-pane title spinner / screen instead. Only the
+            # cwd field is read, never content.
             pcwd=$(readlink "/proc/$pid/cwd" 2>/dev/null)
-            crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | sort -u | while read -r rf; do
-              [ -f "$rf" ] && [ -n "$pcwd" ] || continue
-              mcwd=$(head -n 1 "$rf" 2>/dev/null | jq -r '.payload.cwd // .cwd // empty' 2>/dev/null)
-              [ "$mcwd" = "$pcwd" ] && stat -c '%Y %n' "$rf" 2>/dev/null
-            done | sort -rn | head -n 1 | cut -d' ' -f2-)
+            pch=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
+            nsib=$(printf '%s\\n' "$codextui" | awk -F'|' -v h="${pch:-$HOME/.codex}" -v c="$pcwd" '$1==h && $2==c{print $3}' | sort -u | wc -l)
+            crf=""
+            if [ "${nsib:-0}" -le 1 ]; then
+              crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | sort -u | while read -r rf; do
+                [ -f "$rf" ] && [ -n "$pcwd" ] || continue
+                mcwd=$(head -n 1 "$rf" 2>/dev/null | jq -r '.payload.cwd // .cwd // empty' 2>/dev/null)
+                [ "$mcwd" = "$pcwd" ] && stat -c '%Y %n' "$rf" 2>/dev/null
+              done | sort -rn | head -n 1 | cut -d' ' -f2-)
+            fi
             # No matching rollout fd (e.g. the TUI process holds none): locate
             # the file by the `resume <id>` on its cmdline — accurate per pane,
             # which also avoids reading another session's data by mistake.
