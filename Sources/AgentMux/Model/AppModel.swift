@@ -94,6 +94,12 @@ final class AppModel {
     private static let historyCapacity = 40
     private var resourcePoller: Task<Void, Never>?
     private var resourceConsumers = 0
+    /// When each host's resource snapshot was last stored, for I/O rate deltas.
+    private var resourceSampledAt: [String: Date] = [:]
+    /// The selected agent's own process resources, and which ref they belong to
+    /// (so a just-changed selection never shows the previous agent's figures).
+    private var focusedAgentRef: PaneRef?
+    private(set) var focusedAgentResources: AgentResources?
     static let resourceInterval: Duration = .seconds(5)
 
     // MARK: Inspector / file-preview UI state
@@ -385,10 +391,15 @@ final class AppModel {
             if resourceConsumers > 0 {
                 for host in hosts {
                     if case let .success(snapshot) = await ResourceProbe.run(host: host) {
+                        var snapshot = snapshot
+                        let now = Date()
+                        fillIORates(&snapshot, previous: resources[host.id], since: resourceSampledAt[host.id], now: now)
+                        resourceSampledAt[host.id] = now
                         resources[host.id] = snapshot
                         recordHistory(host.id, snapshot)
                     }
                 }
+                await pollFocusedAgent()
                 try? await Task.sleep(for: Self.resourceInterval)
             } else {
                 try? await Task.sleep(for: .seconds(2))
@@ -406,6 +417,55 @@ final class AppModel {
     /// samples have arrived.
     func history(_ hostID: String, _ key: String) -> [Double] {
         resourceHistory[hostID]?[key] ?? []
+    }
+
+    /// Fills each container's I/O rate by differencing the cumulative Docker
+    /// figures against the previous snapshot. Left nil when the container is new,
+    /// the counters went backwards (container restarted), or the interval is too
+    /// short to trust.
+    private func fillIORates(_ snapshot: inout HostResources, previous: HostResources?, since: Date?, now: Date) {
+        guard let previous, let since else { return }
+        let dt = now.timeIntervalSince(since)
+        guard dt > 0.5 else { return }
+        for (name, container) in snapshot.containers {
+            guard let prev = previous.containers[name] else { continue }
+            var updated = container
+            if let newNet = ResourceProbe.pairTotalBytes(container.netText),
+               let oldNet = ResourceProbe.pairTotalBytes(prev.netText), newNet >= oldNet {
+                updated.netRateBytesPerSec = (newNet - oldNet) / dt
+            }
+            if let newBlk = ResourceProbe.pairTotalBytes(container.blockText),
+               let oldBlk = ResourceProbe.pairTotalBytes(prev.blockText), newBlk >= oldBlk {
+                updated.blockRateBytesPerSec = (newBlk - oldBlk) / dt
+            }
+            snapshot.containers[name] = updated
+        }
+    }
+
+    /// Probes just the selected agent's own process (CPU / memory / uptime) and
+    /// its workspace filesystem, inside that agent's container. Runs once per
+    /// cycle for the current selection only — never for every container.
+    private func pollFocusedAgent() async {
+        guard let ref = selection,
+              let state = state(ref.targetID),
+              let pid = state.detections[ref.paneID]?.pid
+        else {
+            focusedAgentResources = nil
+            focusedAgentRef = nil
+            return
+        }
+        let cwd = agentEntry(ref)?.space.path
+        if case let .success(resources) = await AgentResourceProbe.run(host: state.host, target: state.target, pid: pid, cwd: cwd),
+           selection == ref {
+            focusedAgentResources = resources
+            focusedAgentRef = ref
+        }
+    }
+
+    /// The selected agent's own process resources, but only when the latest
+    /// focused probe was for this exact ref (otherwise nil, never stale).
+    func agentResources(for ref: PaneRef) -> AgentResources? {
+        focusedAgentRef == ref ? focusedAgentResources : nil
     }
 
     private func recordHistory(_ hostID: String, _ snapshot: HostResources) {
