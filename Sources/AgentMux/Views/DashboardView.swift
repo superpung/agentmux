@@ -30,7 +30,7 @@ struct DashboardView: View {
             }
             .padding(20)
             .frame(maxWidth: 860, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .onAppear { model.beginResourceMonitoring() }
         .onDisappear { model.endResourceMonitoring() }

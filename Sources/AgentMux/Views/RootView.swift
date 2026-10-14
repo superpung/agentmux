@@ -39,7 +39,7 @@ struct RootView: View {
         }
         .inspector(isPresented: $model.inspectorVisible) {
             ResourceInspector()
-                .inspectorColumnWidth(min: 230, ideal: 280, max: 380)
+                .inspectorColumnWidth(min: 260, ideal: 330, max: 460)
         }
         .onChange(of: model.previewRequest) { _, request in
             if request != nil { openWindow(id: "files") }
