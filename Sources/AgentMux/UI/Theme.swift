@@ -111,14 +111,25 @@ struct AgentStatusGlyph: View {
 
 struct SpinnerView<S: ShapeStyle>: View {
     let color: S
-    @State private var spinning = false
+
+    /// Seconds per revolution.
+    private static var period: Double { 0.9 }
 
     var body: some View {
-        Circle()
-            .trim(from: 0.12, to: 1)
-            .stroke(color, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-            .rotationEffect(.degrees(spinning ? 360 : 0))
-            .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spinning)
-            .onAppear { spinning = true }
+        // The angle is derived from wall-clock time, not an animated @State
+        // flag with `.onAppear`. An implicit rotation animation that starts as
+        // the view is inserted gets captured by whatever ambient transaction is
+        // live at that moment (e.g. the detail view's selection-change
+        // easeInOut), which distorted the spin on appearance — the "fly". A
+        // time-driven angle is correct from the first frame and immune to that.
+        // 360° ≡ 0°, so the per-period wrap is seamless with no implicit tween.
+        TimelineView(.animation) { context in
+            let angle = context.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: Self.period) / Self.period * 360
+            Circle()
+                .trim(from: 0.12, to: 1)
+                .stroke(color, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .rotationEffect(.degrees(angle))
+        }
     }
 }
