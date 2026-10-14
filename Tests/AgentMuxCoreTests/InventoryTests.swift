@@ -451,4 +451,11 @@ arg -p
     func genericTitlesAreNil(_ title: String) {
         #expect(AgentTitle.from(paneTitle: title, kind: .claudeCode) == nil)
     }
+
+    @Test func codexActionRequiredTitleIsNotATaskName() {
+        // Real waiting-state title (2026-10-14): the status fills the task slot,
+        // so there is no name to show — the caller falls back to the session.
+        let title = "[ ! ] Action Required | ______________PR | conf-scheduler"
+        #expect(AgentTitle.from(paneTitle: title, kind: .codex) == nil)
+    }
 }

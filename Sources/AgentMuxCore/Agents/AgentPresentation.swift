@@ -31,25 +31,36 @@ public struct ActivityObservation: Sendable, Equatable {
     public static let noScreen = ActivityObservation(.unknown, .low, "no screen captured")
 }
 
-/// Infers what an agent is doing from a bounded tail of its terminal screen.
+/// Infers what an agent is doing from status-only signals (its terminal title
+/// and a server-reduced screen/log verdict — never conversation content).
 ///
-/// Conservative by design (the spec forbids false "done"/approval alerts):
-/// only `working` and `idle` are claimed, from reliable provider markers;
-/// everything else is `unknown`. Approval / waiting-input detection needs
-/// real fixtures of those states and is deliberately not guessed here.
+/// Conservative by design (the spec forbids false "done" alerts): `working`
+/// and `idle` are claimed only from reliable provider markers. The one
+/// attention state we claim is backed by a verified marker too — Codex sets
+/// "Action Required" in its title while blocked on the user; Claude Code has
+/// no verified title marker yet, so its attention states stay `unknown`.
 public enum ActivityDetector {
     /// Resolves activity from status-only inputs. The background probe never
     /// sends screen content: for Claude it reads the session log's last event
     /// type/subtype (`logEvent`), and for any agent it reduces the screen to a
     /// `working`/`idle`/`unknown` verdict on the server (`screenState`), which
-    /// mirrors `screenVerdict` below. The log wins when present.
+    /// mirrors `screenVerdict` below. It also passes the terminal `title` the
+    /// agent sets (OSC 2). Priority: an explicit "needs the user" title wins,
+    /// then the log, then the screen.
     public static func resolve(
         kind: AgentKind,
         logEvent: String?,
         logAgeSeconds _: Int? = nil,
         screenState: String?,
-        logState: String? = nil
+        logState: String? = nil,
+        title: String? = nil
     ) -> ActivityObservation {
+        // Highest priority: the agent has explicitly flagged it is blocked on
+        // the user. This outranks a "working" log/screen signal because the
+        // turn can still read as running while it waits at a prompt.
+        if let title, let attention = attentionVerdict(kind: kind, title: title) {
+            return attention
+        }
         // Codex: the rollout's last task_* event, already reduced to a verdict
         // on the server (task_started = working, task_complete = idle).
         switch logState {
@@ -73,6 +84,23 @@ public enum ActivityDetector {
         case "idle": return ActivityObservation(.idle, kind == .codex ? .high : .medium, "screen verdict: idle")
         default: return ActivityObservation(.unknown, .low, "no log or screen signal")
         }
+    }
+
+    /// Whether the terminal title shows the agent is waiting on the user.
+    ///
+    /// Codex prefixes its title with "[ ! ] Action Required | …" while blocked
+    /// on a prompt — verified live (2026-10-14): a waiting pane read
+    /// "[ ! ] Action Required | … | conf-scheduler" while working/idle panes
+    /// read "… | dashboard" / "usage-monitor" with no such marker. The title
+    /// can't tell an approval request from a plain question, so the umbrella
+    /// `.waitingInput` ("Needs input") is used; both are `needsAttention`.
+    /// Claude Code has no verified title marker, so it is left to the log rule.
+    public static func attentionVerdict(kind: AgentKind, title: String) -> ActivityObservation? {
+        guard kind == .codex else { return nil }
+        if title.range(of: "Action Required", options: .caseInsensitive) != nil {
+            return ActivityObservation(.waitingInput, .high, "title: Action Required")
+        }
+        return nil
     }
 
     /// The screen rule, kept as the reference the server's shell mirrors and
@@ -117,6 +145,13 @@ public enum AgentTitle {
         var title = String(String.UnicodeScalarView(scalars))
         if kind == .codex, let separator = title.range(of: " | ") {
             title = String(title[..<separator.lowerBound]).trimmingCharacters(in: .whitespaces)
+        }
+        // While Codex waits on the user it replaces the task-name slot with the
+        // status "[ ! ] Action Required" — a state, not a name. Drop it so the
+        // row falls back to the session/path; the waiting state is surfaced by
+        // the activity chip, not the title.
+        if kind == .codex, title.range(of: "Action Required", options: .caseInsensitive) != nil {
+            return nil
         }
         let generic: Set = ["", "claude", "claude code", "codex"]
         return generic.contains(title.lowercased()) ? nil : title

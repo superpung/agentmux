@@ -93,6 +93,32 @@ import Testing
         #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: nil, screenState: "unknown").activity == .unknown)
     }
 
+    @Test func codexActionRequiredTitleIsWaitingInput() {
+        // Real title captured live (2026-10-14) from a Codex pane blocked on a
+        // user prompt. Wins over any log/screen signal, including "working".
+        let title = "[ ! ] Action Required | ______________PR | conf-scheduler"
+        #expect(ActivityDetector.attentionVerdict(kind: .codex, title: title)?.activity == .waitingInput)
+        let r = ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "working",
+                                         logState: "working", title: title)
+        #expect(r.activity == .waitingInput)
+        #expect(r.activity.needsAttention)
+    }
+
+    @Test func codexWorkingIdleTitlesAreNotAttention() {
+        // Sibling panes captured the same moment that are NOT waiting.
+        for title in ["________DDL________ | dashboard", "usage-monitor", ""] {
+            #expect(ActivityDetector.attentionVerdict(kind: .codex, title: title) == nil)
+        }
+        // A non-attention title leaves the log/screen verdict intact.
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: nil,
+                                         logState: "working", title: "usage-monitor").activity == .working)
+    }
+
+    @Test func claudeTitleNeverClaimsAttention() {
+        // No verified Claude title marker: the phrase must not trigger for it.
+        #expect(ActivityDetector.attentionVerdict(kind: .claudeCode, title: "Action Required") == nil)
+    }
+
     @Test func activityNeedsAttentionMapping() {
         #expect(AgentActivity.waitingInput.needsAttention)
         #expect(AgentActivity.waitingApproval.needsAttention)
