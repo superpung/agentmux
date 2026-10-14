@@ -86,6 +86,7 @@ private struct FileTree: View {
     @State private var downloading: Set<String> = []
     @State private var uploading = false
     @State private var pendingOverwrite: PendingUpload?
+    @State private var pendingDelete: RemoteFileEntry?
     @State private var fileError: String?
 
     init(host: HostConfig, target: TargetConfig, root: String, selected: Binding<String?>) {
@@ -117,6 +118,29 @@ private struct FileTree: View {
             Button("Cancel", role: .cancel) { pendingOverwrite = nil }
         } message: {
             Text("Replacing it overwrites the remote file.")
+        }
+        .confirmationDialog("Delete “\(pendingDelete?.name ?? "")”?",
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let entry = pendingDelete { pendingDelete = nil; performDelete(entry) }
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("This permanently removes the remote file.")
+        }
+    }
+
+    private func performDelete(_ entry: RemoteFileEntry) {
+        Task {
+            let result = await RemoteFileService.delete(entry.path, host: host, target: target)
+            await MainActor.run { if selected == entry.path { selected = nil } }
+            switch result {
+            case .success:
+                await load()
+            case let .failure(failure):
+                await MainActor.run { fileError = failure.detail.isEmpty ? failure.kind.rawValue : failure.detail }
+            }
         }
     }
 
@@ -232,6 +256,7 @@ private struct FileTree: View {
                     .contextMenu {
                         if !entry.isDirectory {
                             Button("Download…", systemImage: "arrow.down.circle") { download(entry) }
+                            Button("Delete…", systemImage: "trash", role: .destructive) { pendingDelete = entry }
                         }
                     }
                 }

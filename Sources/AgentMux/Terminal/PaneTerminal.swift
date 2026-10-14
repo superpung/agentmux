@@ -164,7 +164,13 @@ final class PaneTerminal {
         Task { @MainActor in
             _ = await RemoteFileService.makeDirectory(directory, host: host, target: target)
             let result = await RemoteFileService.upload(png, to: path, host: host, target: target, overwrite: true)
-            if case .success = result { _ = paste(path + " ") } else { NSSound.beep() }
+            if case .success = result {
+                _ = paste(path + " ")
+                // Keep the cache small; the just-pasted file is new, so it stays.
+                await RemoteFileService.pruneOld(directory, olderThanDays: 1, host: host, target: target)
+            } else {
+                NSSound.beep()
+            }
         }
     }
 

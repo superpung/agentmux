@@ -142,6 +142,37 @@ public enum RemoteFileService {
         }
     }
 
+    /// Removes a file from the remote. A destructive write, gated in the UI by a
+    /// confirmation. It refuses a directory (never recurses), so a mis-click on a
+    /// folder cannot wipe a tree.
+    public static func delete(
+        _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<Void, RemoteFailure> {
+        let qf = ShellQuote.command([path])
+        let script = "if [ -d \(qf) ] && [ ! -L \(qf) ]; then printf '@@isdir\\n'; else rm -f \(qf) && printf '@@ok\\n' || printf '@@err\\n'; fi"
+        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 15)
+        return result.flatMap { output in
+            let text = stripFraming(output)
+            if text.contains("@@ok") { return .success(()) }
+            if text.contains("@@isdir") { return .failure(RemoteFailure(.remoteCommandFailed, detail: "that is a directory")) }
+            let detail = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: detail.isEmpty ? "delete failed" : detail))
+        }
+    }
+
+    /// Best-effort cleanup: deletes regular files in `directory` last modified
+    /// more than `days` ago. Used to keep the paste-image cache small; it never
+    /// reports failure to the caller.
+    public static func pruneOld(
+        _ directory: String, olderThanDays days: Int, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async {
+        let qd = ShellQuote.command([directory])
+        _ = await RemoteScript.run(
+            "find \(qd) -maxdepth 1 -type f -mtime +\(max(0, days - 1)) -delete 2>/dev/null; true",
+            host: host, target: target, options: options, timeoutSeconds: 15
+        )
+    }
+
     /// Creates a directory (and parents) in the container — a write like upload,
     /// used by the launch flow / directory picker when the user makes a new
     /// folder. `mkdir -p` is idempotent, so an existing path is a no-op.
