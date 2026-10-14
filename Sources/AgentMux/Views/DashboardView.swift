@@ -198,8 +198,9 @@ private struct ContainerSummaryCard: View {
         HStack(spacing: 8) {
             pill(count: agents.filter { $0.activity == .working }.count, color: Theme.working, label: "working")
             pill(count: agents.filter { $0.activity.needsAttention }.count, color: Theme.warning, label: "attention")
-            Text("\(agents.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                + Text(" agent\(agents.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.tertiary)
+            (Text("\(agents.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                + Text(" agent\(agents.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.tertiary))
+                .rollingNumber(agents.count)
         }
     }
 
@@ -208,6 +209,7 @@ private struct ContainerSummaryCard: View {
             HStack(spacing: 4) {
                 Circle().fill(color).frame(width: 7, height: 7)
                 Text("\(count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    .rollingNumber(count)
             }
             .help("\(count) \(label)")
         }
@@ -227,6 +229,7 @@ private struct InlineMetric: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value).font(.system(.title3, design: .rounded).weight(.semibold)).monospacedDigit()
+                    .rollingNumber(value)
                 if let unit { Text(unit).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
             }
             if history.count >= 2 {

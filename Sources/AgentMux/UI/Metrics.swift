@@ -100,6 +100,7 @@ struct MetricCard: View {
                     Text(chip)
                         .font(.caption2.weight(.medium)).monospacedDigit()
                         .foregroundStyle(chipTint)
+                        .rollingNumber(chip)
                         .padding(.horizontal, 6).padding(.vertical, 1.5)
                         .background(chipTint.opacity(0.12), in: Capsule())
                 }
@@ -108,8 +109,7 @@ struct MetricCard: View {
                 Text(value)
                     .font(.system(.title2, design: .rounded).weight(.semibold))
                     .monospacedDigit().foregroundStyle(valueTint)
-                    .contentTransition(.numericText())
-                    .animation(.easeOut(duration: 0.25), value: value)
+                    .rollingNumber(value)
                 if let unit {
                     Text(unit).font(.caption).foregroundStyle(.secondary)
                 }

@@ -133,3 +133,13 @@ struct SpinnerView<S: ShapeStyle>: View {
         }
     }
 }
+
+extension View {
+    /// Rolls a numeric Text digit-by-digit when `value` changes, for live
+    /// figures (metrics, counts, percentages). Not for relative-time strings,
+    /// whose format shifts ("59m" → "1h") and reads worse animated.
+    func rollingNumber(_ value: some Equatable) -> some View {
+        contentTransition(.numericText())
+            .animation(.easeOut(duration: 0.25), value: value)
+    }
+}

@@ -237,7 +237,7 @@ private struct UsageView: View {
             } else if let context = usage.contextTokens {
                 HStack(spacing: 5) {
                     Image(systemName: "square.stack.3d.up.fill").imageScale(.medium).foregroundStyle(.secondary)
-                    Text(Self.short(context))
+                    Text(Self.short(context)).rollingNumber(context)
                 }
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                 .help("Context: \(context) tokens (the model's window is not in the log)")
@@ -272,6 +272,7 @@ private struct Meter: View {
                 }
             Text("\(Int((fraction * 100).rounded()))%")
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                .rollingNumber(Int((fraction * 100).rounded()))
         }
         .help(tooltip)
     }

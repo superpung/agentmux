@@ -90,8 +90,7 @@ struct MenuBarContent: View {
         VStack(spacing: 1) {
             Text("\(value)").font(.system(.title3, design: .rounded).weight(.semibold))
                 .monospacedDigit().foregroundStyle(tint)
-                .contentTransition(.numericText())
-                .animation(.easeOut(duration: 0.25), value: value)
+                .rollingNumber(value)
             Text(label).font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -119,6 +118,7 @@ struct MenuBarContent: View {
             ProgressView(value: f).frame(width: 30).tint(Theme.meterColor(f))
             Text("\(Int((f * 100).rounded()))%").font(.caption2).monospacedDigit()
                 .foregroundStyle(.secondary).frame(width: 30, alignment: .trailing)
+                .rollingNumber(Int((f * 100).rounded()))
         }
     }
 
