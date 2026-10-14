@@ -98,14 +98,30 @@ struct SidebarView: View {
                 emptyRow
             }
             ForEach(groups) { group in
+                let isPinned = group.id == Self.pinnedGroupID
                 Section {
                     ForEach(group.agents) { agent in
-                        AgentRow(entry: agent, showDevice: showDevice, showServer: showServer, showProject: showProject)
+                        // Pinned rows span containers/projects, so they show both
+                        // badges to stay self-describing regardless of grouping.
+                        AgentRow(entry: agent,
+                                 showDevice: isPinned ? model.showsAgentDeviceBadge : showDevice,
+                                 showServer: showServer,
+                                 showProject: isPinned ? true : showProject)
                             .tag(agent.ref)
                             .contextMenu { rowMenu(agent) }
                     }
                 } header: {
-                    if !group.label.isEmpty { Text(group.label) }
+                    if isPinned {
+                        // Plain HStack, not Label: Label tints the icon accent,
+                        // and no colour override keeps the text the same native
+                        // section-header colour as the container headers below.
+                        HStack(spacing: 4) {
+                            Image(systemName: "pin.fill").imageScale(.small)
+                            Text("Pinned")
+                        }
+                    } else if !group.label.isEmpty {
+                        Text(group.label)
+                    }
                 }
             }
             if !filteredPanes.isEmpty {
@@ -206,10 +222,17 @@ struct SidebarView: View {
         }
     }
 
+    /// Sentinel id for the cross-cutting "Pinned" section at the very top.
+    static let pinnedGroupID = "agentmux.pinned"
+
     private var groups: [Group] {
+        // Pinned agents form a single section at the very top, across containers
+        // (and out of their normal group), so the one or two you actively use are
+        // always together and reachable regardless of their container's size.
+        let pinned = matchedAgents.filter { model.isPinned($0.identityKey) }
         var labels: [String: String] = [:]
         var map: [String: [AgentEntry]] = [:]
-        for agent in matchedAgents {
+        for agent in matchedAgents where !model.isPinned(agent.identityKey) {
             let k = grouping.key(agent)
             if map[k] == nil { labels[k] = grouping.label(agent) }
             map[k, default: []].append(agent)
@@ -226,6 +249,9 @@ struct SidebarView: View {
                 let ka = rank(a), kb = rank(b)
                 return ka == kb ? lhs.label < rhs.label : ka < kb
             }
+        }
+        if !pinned.isEmpty {
+            result.insert(Group(id: Self.pinnedGroupID, label: "Pinned", agents: sorted(pinned)), at: 0)
         }
         return result
     }
@@ -342,15 +368,10 @@ private struct AgentRow: View {
             agentIcon
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    if model.isPinned(entry.identityKey) {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(model.customName(entry.identityKey) ?? entry.title)
-                        .lineLimit(1)
-                }
+                // No per-row pin glyph: pinned agents live under the "Pinned"
+                // section header, so marking each row too is redundant.
+                Text(model.customName(entry.identityKey) ?? entry.title)
+                    .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(entry.configLabel)
                     if showProject {
