@@ -13,11 +13,21 @@ struct RootView: View {
         } detail: {
             DetailView()
                 .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button { openWindow(id: "files") } label: {
-                            Label("Files", systemImage: "folder")
+                    // Files and New Terminal act on the selected agent, so they
+                    // are hidden on the dashboard (nothing selected).
+                    if model.selection != nil {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button { openWindow(id: "files") } label: {
+                                Label("Files", systemImage: "folder")
+                            }
+                            .help("Browse this agent's files")
                         }
-                        .help("Browse this agent's files")
+                        ToolbarItem(placement: .primaryAction) {
+                            Button { if let spec = model.newTerminalSpec() { openWindow(value: spec) } } label: {
+                                Label("New Terminal", systemImage: "terminal")
+                            }
+                            .help("Open a throwaway shell in this agent's container")
+                        }
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Button { model.toggleInspector() } label: {
