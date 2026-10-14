@@ -27,6 +27,7 @@ struct AgentMuxApp: App {
                 Button("Dashboard") { model.selection = nil }
                     .keyboardShortcut("0", modifiers: .command)
                 OpenSessionsButton()
+                NewTerminalButton(model: model)
                 Button("Refresh") { model.refreshAll() }
                     .keyboardShortcut("r", modifiers: .command)
                 Button("Next Agent") { model.selectAdjacentAgent(1) }
@@ -47,6 +48,15 @@ struct AgentMuxApp: App {
             }
         }
         .defaultSize(width: 900, height: 600)
+
+        WindowGroup(for: EphemeralTerminalSpec.self) { $spec in
+            if let spec {
+                EphemeralTerminalWindow(spec: spec)
+                    .environment(model)
+                    .frame(minWidth: 480, minHeight: 300)
+            }
+        }
+        .defaultSize(width: 820, height: 520)
 
         Window("Sessions", id: "sessions") {
             SessionsWindow()
@@ -84,6 +94,20 @@ private struct OpenSessionsButton: View {
     var body: some View {
         Button("Sessions") { openWindow(id: "sessions") }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+    }
+}
+
+/// Opens a throwaway shell (not in tmux) in the selected agent's container.
+private struct NewTerminalButton: View {
+    @Environment(\.openWindow) private var openWindow
+    let model: AppModel
+
+    var body: some View {
+        Button("New Terminal") {
+            if let spec = model.newTerminalSpec() { openWindow(value: spec) }
+        }
+        .keyboardShortcut("t", modifiers: .command)
+        .disabled(model.selection == nil)
     }
 }
 

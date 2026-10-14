@@ -307,6 +307,37 @@ struct PoppedTerminalWindow: View {
     }
 }
 
+/// A throwaway shell window (a direct pty, not in tmux). Closing it ends the
+/// shell and its ssh connection, leaving nothing behind on the remote.
+struct EphemeralTerminalWindow: View {
+    @Environment(AppModel.self) private var model
+    let spec: EphemeralTerminalSpec
+
+    var body: some View {
+        ZStack {
+            GhosttyRuntime.terminalBackgroundColor
+            if let terminal = model.ephemeralTerminal(for: spec) {
+                EphemeralSurfaceView(terminal: terminal)
+            } else {
+                Text("Could not open a terminal here.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Terminal — \(spec.label)")
+        .onAppear { model.ephemeralTerminal(for: spec)?.setActive(true) }
+        .onDisappear { model.closeEphemeral(spec.id) }
+    }
+}
+
+private struct EphemeralSurfaceView: View {
+    let terminal: EphemeralTerminal
+
+    var body: some View {
+        TerminalSurfaceView(context: terminal.state)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 private struct PoppedInfoView: View {
     var body: some View {
         VStack(spacing: 8) {

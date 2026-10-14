@@ -880,5 +880,32 @@ final class AppModel {
     func closeAllTerminals() {
         terminals.values.forEach { $0.close() }
         terminals.removeAll()
+        ephemeralTerminals.values.forEach { $0.close() }
+        ephemeralTerminals.removeAll()
+    }
+
+    // MARK: Ephemeral terminals (throwaway shells, not in tmux)
+
+    private var ephemeralTerminals: [UUID: EphemeralTerminal] = [:]
+
+    /// A spec for a throwaway shell in the selected agent's container/host, or
+    /// nil when nothing suitable is selected. A fresh id opens a new window.
+    func newTerminalSpec() -> EphemeralTerminalSpec? {
+        guard let ref = selection, let agent = agentEntry(ref), state(ref.targetID) != nil else { return nil }
+        return EphemeralTerminalSpec(targetID: ref.targetID, label: agent.device.name, id: UUID())
+    }
+
+    /// The terminal for a window's spec, created lazily on first access.
+    func ephemeralTerminal(for spec: EphemeralTerminalSpec) -> EphemeralTerminal? {
+        if let existing = ephemeralTerminals[spec.id] { return existing }
+        guard let state = state(spec.targetID),
+              let terminal = try? EphemeralTerminal(host: state.host, target: state.target)
+        else { return nil }
+        ephemeralTerminals[spec.id] = terminal
+        return terminal
+    }
+
+    func closeEphemeral(_ id: UUID) {
+        ephemeralTerminals.removeValue(forKey: id)?.close()
     }
 }

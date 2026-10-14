@@ -113,6 +113,20 @@ public enum RemoteCommand {
         return ShellQuote.command(dockerExec(docker, interactiveTTY: false, environment: [clientTagVariable: clientTag]) + tmux)
     }
 
+    /// An interactive shell in the context, with a tty, and NOT inside tmux. For
+    /// a container it is `docker exec -it <c> <shell>`; on a bare host it is just
+    /// the shell. The shell lives only as long as this ssh connection, so closing
+    /// the view ends it and leaves no tmux state behind.
+    public static func shell(in context: ExecutionContext, environment: [String: String] = [:]) -> String {
+        let env = environment.merging(["TERM": "xterm-256color"]) { current, _ in current }
+        let command = ["sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash -i; else exec sh -i; fi"]
+        guard let docker = context.container else {
+            let envArgs = ["env"] + env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+            return ShellQuote.command(envArgs + command)
+        }
+        return ShellQuote.command(dockerExec(docker, interactiveTTY: true, environment: env) + command)
+    }
+
     static func dockerExec(_ docker: DockerExec, interactiveTTY: Bool, environment: [String: String]) -> [String] {
         var argv = ["docker", "exec", interactiveTTY ? "-it" : "-i"]
         if let user = docker.user {
