@@ -478,6 +478,12 @@ final class AppModel {
         focusedGitRef == ref ? focusedGitStatus : nil
     }
 
+    /// Any agent's usage (context tokens / rate limit) from the latest snapshot,
+    /// with Claude's context window inferred so a fraction is available for both.
+    func usage(for ref: PaneRef) -> InventorySnapshot.AgentUsage? {
+        state(ref.targetID)?.snapshot?.usage[ref.paneID]?.withInferredWindow()
+    }
+
     /// The selected agent's own process resources, but only when the latest
     /// focused probe was for this exact ref (otherwise nil, never stale).
     func agentResources(for ref: PaneRef) -> AgentResources? {

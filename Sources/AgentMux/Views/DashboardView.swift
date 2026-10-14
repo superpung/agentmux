@@ -130,6 +130,9 @@ private struct DashAgentRow: View {
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 6)
+                if let usage = model.usage(for: agent.ref) {
+                    UsageBadges(usage: usage)
+                }
                 if agent.activity != .working, let active = RelativeTime.short(agent.lastActiveSeconds) {
                     Text(active).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                 }
@@ -148,6 +151,34 @@ private struct DashAgentRow: View {
         } else {
             Image(systemName: "terminal")
         }
+    }
+}
+
+/// Compact context% and (Codex) rate-limit% badges, coloured by the usage ramp,
+/// so the whole fleet's usage reads at a glance in the agent list.
+private struct UsageBadges: View {
+    let usage: InventorySnapshot.AgentUsage
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let fraction = usage.contextFraction {
+                badge("square.stack.3d.up.fill", "\(Int((fraction * 100).rounded()))%",
+                      tint: Theme.meterColor(fraction), help: "Context window used")
+            }
+            if let rate = usage.rateLimitPercent {
+                badge("hourglass", "\(Int(rate.rounded()))%",
+                      tint: Theme.meterColor(rate / 100), help: "Rate limit used")
+            }
+        }
+    }
+
+    private func badge(_ icon: String, _ value: String, tint: Color, help: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).imageScale(.small)
+            Text(value).monospacedDigit().rollingNumber(value)
+        }
+        .font(.caption2).foregroundStyle(tint)
+        .help(help)
     }
 }
 
