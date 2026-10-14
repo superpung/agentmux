@@ -435,8 +435,26 @@ private struct PaneRow: View {
 }
 
 /// Connection summary pinned to the bottom of the sidebar.
+/// Comfortable hit area + hover highlight for a sidebar-footer icon button, so
+/// two adjacent icons read as distinct buttons instead of cramped glyphs.
+private struct FooterIconChrome: ViewModifier {
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 12.5))
+            .foregroundStyle(hovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .frame(width: 24, height: 22)
+            .background(hovering ? Color.primary.opacity(0.08) : .clear,
+                        in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+    }
+}
+
 private struct StatusFooter: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 6) {
@@ -447,10 +465,23 @@ private struct StatusFooter: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Button { openWindow(id: "sessions") } label: {
+                    Image(systemName: "rectangle.split.3x1").modifier(FooterIconChrome())
+                }
+                .buttonStyle(.plain)
+                .help("Manage tmux sessions")
+                SettingsLink {
+                    Image(systemName: "gearshape").modifier(FooterIconChrome())
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 4)
         .background(.bar)
     }
 

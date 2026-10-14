@@ -62,6 +62,7 @@ final class PaneTerminal {
             let view = PasteInterceptingTerminalView(frame: .zero)
             view.onPaste = { text in self?.paste(text) ?? false }
             view.onPreviewPath = { raw in self?.onPreviewRequest?(raw) }
+            view.onShiftEnter = { [weak self] in _ = self?.sendNewline() }
             return view
         }
         var options = TerminalSurfaceOptions(backend: .inMemory(session))
@@ -138,6 +139,15 @@ final class PaneTerminal {
         return true
     }
 
+    /// Shift+Enter inserts a soft newline in the agent's input instead of
+    /// submitting it: remote line editors (Claude Code, Codex) treat a bare LF
+    /// as a newline, while plain Enter sends CR, which submits.
+    func sendNewline() -> Bool {
+        guard gate.isOpen else { return false }
+        mirror.sendInput(Data([0x0a]))
+        return true
+    }
+
     func resync() {
         mirror.resync()
     }
@@ -184,6 +194,21 @@ final class PaneTerminal {
 final class PasteInterceptingTerminalView: AppTerminalView {
     var onPaste: ((String) -> Bool)?
     var onPreviewPath: ((String) -> Void)?
+    /// Shift+Return sends a soft newline to the pane instead of submitting.
+    var onShiftEnter: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        // keyCode 36 is the main Return key; intercept Shift+Return only (no
+        // other modifiers) so plain Enter still submits.
+        if event.keyCode == 36,
+           event.modifierFlags.intersection([.command, .control, .option, .shift]) == .shift,
+           let onShiftEnter
+        {
+            onShiftEnter()
+            return
+        }
+        super.keyDown(with: event)
+    }
 
     /// Adds a "Preview … in Files" item when the current selection looks like a
     /// path. Ghostty's copy-on-select keeps the selection on the pasteboard, so
