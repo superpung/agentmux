@@ -154,31 +154,48 @@ private struct DashAgentRow: View {
     }
 }
 
-/// Compact context% and (Codex) rate-limit% badges, coloured by the usage ramp,
-/// so the whole fleet's usage reads at a glance in the agent list.
+/// Compact context and (Codex) rate-limit usage as small coloured rings — fill
+/// and colour, not numbers — so the one or two agents near a limit stand out
+/// across the fleet without a wall of percentages. Exact values are in the help.
 private struct UsageBadges: View {
     let usage: InventorySnapshot.AgentUsage
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             if let fraction = usage.contextFraction {
-                badge("square.stack.3d.up.fill", "\(Int((fraction * 100).rounded()))%",
-                      tint: Theme.meterColor(fraction), help: "Context window used")
+                gauge("square.stack.3d.up.fill", fraction, help: "Context window used: \(percent(fraction))")
             }
             if let rate = usage.rateLimitPercent {
-                badge("hourglass", "\(Int(rate.rounded()))%",
-                      tint: Theme.meterColor(rate / 100), help: "Rate limit used")
+                gauge("hourglass", rate / 100, help: "Rate limit used: \(percent(rate / 100))")
             }
         }
     }
 
-    private func badge(_ icon: String, _ value: String, tint: Color, help: String) -> some View {
+    private func gauge(_ icon: String, _ fraction: Double, help: String) -> some View {
         HStack(spacing: 3) {
-            Image(systemName: icon).imageScale(.small)
-            Text(value).monospacedDigit().rollingNumber(value)
+            Image(systemName: icon).imageScale(.small).foregroundStyle(.tertiary)
+            UsageRing(fraction: fraction)
         }
-        .font(.caption2).foregroundStyle(tint)
         .help(help)
+    }
+
+    private func percent(_ f: Double) -> String { "\(Int((f * 100).rounded()))%" }
+}
+
+/// A small progress ring: a faint track plus a colour-ramped arc from the top.
+private struct UsageRing: View {
+    let fraction: Double
+
+    var body: some View {
+        let f = min(1, max(0, fraction))
+        ZStack {
+            Circle().stroke(Theme.hairline, lineWidth: 2.5)
+            Circle().trim(from: 0, to: f)
+                .stroke(Theme.meterColor(f), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 13, height: 13)
+        .animation(.easeOut(duration: 0.3), value: f)
     }
 }
 
