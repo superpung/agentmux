@@ -177,7 +177,7 @@ private struct UsageBadges: View {
 
     private func gauge(_ label: String, _ fraction: Double, help: String) -> some View {
         HStack(spacing: 4) {
-            Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
+            Text(label).font(.caption2).foregroundStyle(.tertiary)
             UsageRing(fraction: fraction)
         }
         .help(help)
