@@ -66,6 +66,13 @@ private struct FilePreview: Equatable {
 
 /// A read-only directory browser: navigate into folders, select a file to
 /// preview (binds `selected`).
+/// A file upload waiting on the user's confirmation to replace an existing file.
+private struct PendingUpload {
+    let data: Data
+    let path: String
+    let name: String
+}
+
 private struct FileTree: View {
     let host: HostConfig
     let target: TargetConfig
@@ -77,7 +84,9 @@ private struct FileTree: View {
     @State private var loading = false
     @State private var error: String?
     @State private var downloading: Set<String> = []
-    @State private var downloadError: String?
+    @State private var uploading = false
+    @State private var pendingOverwrite: PendingUpload?
+    @State private var fileError: String?
 
     init(host: HostConfig, target: TargetConfig, root: String, selected: Binding<String?>) {
         self.host = host
@@ -94,10 +103,52 @@ private struct FileTree: View {
             content
         }
         .task(id: cwd) { await load() }
-        .alert("Download failed", isPresented: Binding(get: { downloadError != nil }, set: { if !$0 { downloadError = nil } })) {
-            Button("OK", role: .cancel) { downloadError = nil }
+        .alert("File transfer failed", isPresented: Binding(get: { fileError != nil }, set: { if !$0 { fileError = nil } })) {
+            Button("OK", role: .cancel) { fileError = nil }
         } message: {
-            Text(downloadError ?? "")
+            Text(fileError ?? "")
+        }
+        .confirmationDialog("“\(pendingOverwrite?.name ?? "")” already exists in this folder.",
+                            isPresented: Binding(get: { pendingOverwrite != nil }, set: { if !$0 { pendingOverwrite = nil } }),
+                            titleVisibility: .visible) {
+            Button("Replace", role: .destructive) {
+                if let p = pendingOverwrite { pendingOverwrite = nil; performUpload(p.data, to: p.path, overwrite: true) }
+            }
+            Button("Cancel", role: .cancel) { pendingOverwrite = nil }
+        } message: {
+            Text("Replacing it overwrites the remote file.")
+        }
+    }
+
+    /// Picks a local file and uploads it into the folder being browsed. Writes
+    /// only where the user navigated, and never overwrites without confirming.
+    private func startUpload() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let name = url.lastPathComponent
+        let dest = (cwd as NSString).appendingPathComponent(name)
+        let data: Data
+        do { data = try Data(contentsOf: url) }
+        catch { fileError = "Could not read “\(name)”: \(error.localizedDescription)"; return }
+        performUpload(data, to: dest, overwrite: false)
+    }
+
+    private func performUpload(_ data: Data, to dest: String, overwrite: Bool) {
+        uploading = true
+        Task {
+            let result = await RemoteFileService.upload(data, to: dest, host: host, target: target, overwrite: overwrite)
+            await MainActor.run { uploading = false }
+            switch result {
+            case .success(.written):
+                await load()
+            case .success(.alreadyExists):
+                await MainActor.run { pendingOverwrite = PendingUpload(data: data, path: dest, name: (dest as NSString).lastPathComponent) }
+            case let .failure(failure):
+                await MainActor.run { fileError = failure.detail.isEmpty ? failure.kind.rawValue : failure.detail }
+            }
         }
     }
 
@@ -116,9 +167,9 @@ private struct FileTree: View {
                 switch result {
                 case let .success(data):
                     do { try data.write(to: url) }
-                    catch { downloadError = "Could not save: \(error.localizedDescription)" }
+                    catch { fileError = "Could not save: \(error.localizedDescription)" }
                 case let .failure(failure):
-                    downloadError = failure.detail.isEmpty ? failure.kind.rawValue : failure.detail
+                    fileError = failure.detail.isEmpty ? failure.kind.rawValue : failure.detail
                 }
             }
         }
@@ -130,7 +181,10 @@ private struct FileTree: View {
                 .buttonStyle(.borderless).disabled(cwd == root).opacity(cwd == root ? 0.35 : 1)
             Text(displayPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
             Spacer(minLength: 4)
-            if loading { ProgressView().controlSize(.mini) }
+            if loading || uploading { ProgressView().controlSize(.mini) }
+            Button { startUpload() } label: { Image(systemName: "square.and.arrow.up").font(.caption.weight(.semibold)) }
+                .buttonStyle(.borderless).disabled(uploading)
+                .help("Upload a file into this folder")
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
     }
@@ -190,6 +244,7 @@ private struct FileTree: View {
         content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding()
     }
 
+    @MainActor
     private func load() async {
         error = nil
         loading = true

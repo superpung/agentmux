@@ -109,7 +109,40 @@ public enum RemoteFileService {
         return .success(data)
     }
 
-    /// Creates a directory (and parents) in the container — the one write here,
+    public enum UploadResult: Sendable, Equatable { case written, alreadyExists }
+
+    /// Writes a local file into the container at `path`. A remote write, gated in
+    /// the UI by an explicit action. With `overwrite` false it refuses (returns
+    /// `.alreadyExists`) rather than clobber an existing file, so an agent's file
+    /// is never replaced without the user confirming. Capped at `downloadByteCap`.
+    public static func upload(
+        _ data: Data, to path: String, host: HostConfig, target: TargetConfig,
+        overwrite: Bool, options: SSHOptions = SSHOptions()
+    ) async -> Result<UploadResult, RemoteFailure> {
+        if data.count > downloadByteCap {
+            let limit = ByteCountFormatter.string(fromByteCount: Int64(downloadByteCap), countStyle: .file)
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "file is larger than the \(limit) upload limit"))
+        }
+        let qf = ShellQuote.command([path])
+        let guardLine = overwrite ? "" : "if [ -e \(qf) ]; then printf '@@exists\\n'; exit 0; fi"
+        let script = """
+        \(guardLine)
+        if base64 -d > \(qf) <<'__AGENTMUX_B64__'
+        \(data.base64EncodedString())
+        __AGENTMUX_B64__
+        then printf '@@ok\\n'; else printf '@@err\\n'; fi
+        """
+        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 180)
+        return result.flatMap { output in
+            let text = stripFraming(output)
+            if text.contains("@@exists") { return .success(.alreadyExists) }
+            if text.contains("@@ok") { return .success(.written) }
+            let detail = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: detail.isEmpty ? "upload failed" : detail))
+        }
+    }
+
+    /// Creates a directory (and parents) in the container — a write like upload,
     /// used by the launch flow / directory picker when the user makes a new
     /// folder. `mkdir -p` is idempotent, so an existing path is a no-op.
     public static func makeDirectory(
