@@ -61,6 +61,8 @@ struct Sparkline: View {
         .chartYScale(domain: 0 ... hi)
         .chartLegend(.hidden)
         .allowsHitTesting(false)
+        // Morph the line/area to the new sample instead of snapping each poll.
+        .animation(.easeInOut(duration: 0.4), value: values)
     }
 }
 
