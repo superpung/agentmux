@@ -76,6 +76,8 @@ private struct FileTree: View {
     @State private var entries: [RemoteFileEntry] = []
     @State private var loading = false
     @State private var error: String?
+    @State private var downloading: Set<String> = []
+    @State private var downloadError: String?
 
     init(host: HostConfig, target: TargetConfig, root: String, selected: Binding<String?>) {
         self.host = host
@@ -92,6 +94,34 @@ private struct FileTree: View {
             content
         }
         .task(id: cwd) { await load() }
+        .alert("Download failed", isPresented: Binding(get: { downloadError != nil }, set: { if !$0 { downloadError = nil } })) {
+            Button("OK", role: .cancel) { downloadError = nil }
+        } message: {
+            Text(downloadError ?? "")
+        }
+    }
+
+    /// Saves a remote file to a Mac location the user picks. Read-only on the
+    /// remote; a spinner replaces the row's size while it transfers.
+    private func download(_ entry: RemoteFileEntry) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = entry.name
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        downloading.insert(entry.path)
+        Task {
+            let result = await RemoteFileService.download(entry.path, host: host, target: target)
+            await MainActor.run {
+                downloading.remove(entry.path)
+                switch result {
+                case let .success(data):
+                    do { try data.write(to: url) }
+                    catch { downloadError = "Could not save: \(error.localizedDescription)" }
+                case let .failure(failure):
+                    downloadError = failure.detail.isEmpty ? failure.kind.rawValue : failure.detail
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -135,6 +165,8 @@ private struct FileTree: View {
                             Spacer(minLength: 4)
                             if entry.isDirectory {
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            } else if downloading.contains(entry.path) {
+                                ProgressView().controlSize(.mini)
                             } else {
                                 Text(sizeText(entry.size)).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                             }
@@ -143,6 +175,11 @@ private struct FileTree: View {
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(!entry.isDirectory && selected == entry.path ? Theme.itemWashSelected : Color.clear)
+                    .contextMenu {
+                        if !entry.isDirectory {
+                            Button("Download…", systemImage: "arrow.down.circle") { download(entry) }
+                        }
+                    }
                 }
             }
             .listStyle(.inset)

@@ -68,6 +68,47 @@ public enum RemoteFileService {
         return result.flatMap { parseRead(stripFraming($0), isImage: isImage, isPDF: isPDF, cap: cap) }
     }
 
+    /// The largest file the one-shot (non-chunked) download will transfer.
+    public static let downloadByteCap = 50 * 1024 * 1024
+
+    /// Reads a whole file for saving to the Mac (up to `downloadByteCap`). Fully
+    /// read-only — it never writes to the remote. An over-cap file fails with its
+    /// size in the detail rather than transferring a huge payload in one shot.
+    public static func download(
+        _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<Data, RemoteFailure> {
+        let qf = ShellQuote.command([path])
+        let script = """
+        sz=$(stat -c %s \(qf) 2>/dev/null || echo -1)
+        printf '@@size %s\\n' "$sz"
+        if [ "$sz" -ge 0 ] && [ "$sz" -le \(downloadByteCap) ]; then base64 \(qf) 2>/dev/null | tr -d '\\n'; fi
+        """
+        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 180)
+        return result.flatMap { parseDownload(stripFraming($0)) }
+    }
+
+    static func parseDownload(_ output: String) -> Result<Data, RemoteFailure> {
+        var size = -1
+        var b64 = ""
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("@@size ") {
+                size = Int(line.dropFirst(7).trimmingCharacters(in: .whitespaces)) ?? -1
+            } else {
+                b64 += line
+            }
+        }
+        if size < 0 { return .failure(RemoteFailure(.remoteCommandFailed, detail: "file not found or unreadable")) }
+        if size > downloadByteCap {
+            let human = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+            let limit = ByteCountFormatter.string(fromByteCount: Int64(downloadByteCap), countStyle: .file)
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "file is \(human); too large to download (max \(limit))"))
+        }
+        guard let data = Data(base64Encoded: b64.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "base64 decode failed"))
+        }
+        return .success(data)
+    }
+
     /// Creates a directory (and parents) in the container — the one write here,
     /// used by the launch flow / directory picker when the user makes a new
     /// folder. `mkdir -p` is idempotent, so an existing path is a no-op.

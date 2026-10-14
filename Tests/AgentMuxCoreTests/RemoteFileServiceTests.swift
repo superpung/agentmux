@@ -33,6 +33,27 @@ import Testing
         #expect(byteCount == 1000)
     }
 
+    @Test func downloadDecodesWholeFile() throws {
+        let data = Data("full file contents, no cap".utf8)
+        let out = "@@size \(data.count)\n" + data.base64EncodedString()
+        let got = try RemoteFileService.parseDownload(out).get()
+        #expect(got == data)
+    }
+
+    @Test func downloadRejectsOverCapWithSizeInDetail() {
+        let out = "@@size \(RemoteFileService.downloadByteCap + 1)\n"
+        guard case let .failure(failure) = RemoteFileService.parseDownload(out) else {
+            Issue.record("expected failure"); return
+        }
+        #expect(failure.detail.contains("too large"))
+    }
+
+    @Test func downloadReportsMissingFile() {
+        guard case .failure = RemoteFileService.parseDownload("@@size -1\n") else {
+            Issue.record("expected failure"); return
+        }
+    }
+
     @Test func readDetectsBinaryViaNUL() throws {
         let out = "@@size 4\n" + Data([0x89, 0x00, 0x01, 0x02]).base64EncodedString()
         let content = try RemoteFileService.parseRead(out, isImage: false, cap: 512 * 1024).get()
