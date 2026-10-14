@@ -100,7 +100,7 @@ struct SidebarView: View {
             ForEach(groups) { group in
                 Section {
                     ForEach(group.agents) { agent in
-                        AgentRow(entry: agent, showDevice: showDevice, showServer: showServer)
+                        AgentRow(entry: agent, showDevice: showDevice, showServer: showServer, showProject: showProject)
                             .tag(agent.ref)
                             .contextMenu { rowMenu(agent) }
                     }
@@ -184,6 +184,12 @@ struct SidebarView: View {
 
     private var showServer: Bool {
         model.showsAgentServerBadge
+    }
+
+    /// The project is the section header only when grouping by project; the
+    /// other groupings don't show it otherwise, so put it on the row.
+    private var showProject: Bool {
+        grouping != .project
     }
 
     private func matches(_ haystack: String) -> Bool {
@@ -329,6 +335,7 @@ private struct AgentRow: View {
     let entry: AgentEntry
     let showDevice: Bool
     let showServer: Bool
+    let showProject: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -346,6 +353,12 @@ private struct AgentRow: View {
                 }
                 HStack(spacing: 6) {
                     Text(entry.configLabel)
+                    if showProject {
+                        HStack(spacing: 3) {
+                            Image(systemName: "folder").imageScale(.small)
+                            Text(entry.spaceLabel)
+                        }
+                    }
                     if showServer {
                         HStack(spacing: 3) {
                             Image(systemName: "server.rack").imageScale(.small)
