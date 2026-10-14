@@ -111,9 +111,24 @@ public enum InventoryProbe {
           # keeps the probe fast on multi-MB rollouts.
           if [ "$(cat /proc/$pid/comm 2>/dev/null)" = codex ] && command -v jq >/dev/null 2>&1; then
             cpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
-            crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | head -1)
-            # The app-server daemon can hold the rollout fd (tagged with another
-            # pane), so when this pane's own process has no rollout fd, locate
+            # Newer Codex runs a `codex app-server` child that keeps the rollout
+            # fds of *several* sessions open at once — the live one plus
+            # resumed-from history, and even sessions from other projects — so
+            # the first fd is often a stale past session whose last event is
+            # task_complete, which would read as idle while the agent works.
+            # Tie the rollout to this pane by the session's own working dir
+            # (session_meta.cwd), which equals the process cwd: this is robust
+            # however Codex parents its daemon — a shared daemon serving other
+            # panes can't match a cwd that is not this session's. Among the
+            # matches, pick the most recently written (the live turn is the only
+            # file being appended). Only the cwd field is read, never content.
+            pcwd=$(readlink "/proc/$pid/cwd" 2>/dev/null)
+            crf=$(ls -l "/proc/$pid/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | sort -u | while read -r rf; do
+              [ -f "$rf" ] && [ -n "$pcwd" ] || continue
+              mcwd=$(head -n 1 "$rf" 2>/dev/null | jq -r '.payload.cwd // .cwd // empty' 2>/dev/null)
+              [ "$mcwd" = "$pcwd" ] && stat -c '%Y %n' "$rf" 2>/dev/null
+            done | sort -rn | head -n 1 | cut -d' ' -f2-)
+            # No matching rollout fd (e.g. the TUI process holds none): locate
             # the file by the `resume <id>` on its cmdline — accurate per pane,
             # which also avoids reading another session's data by mistake.
             if [ -z "$crf" ]; then
