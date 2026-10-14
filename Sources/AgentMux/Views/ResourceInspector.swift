@@ -14,11 +14,13 @@ struct ResourceInspector: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let ref = model.selection, let state = model.state(ref.targetID) {
                     let host = model.resources[state.host.id]
-                    if let agent = model.agentResources(for: ref) {
-                        agentSection(agent)
-                    }
+                    // Changes (code) first — it isn't a resource, so it leads
+                    // rather than splitting the resource sections below.
                     if let git = model.gitStatus(for: ref) {
                         gitSection(git)
+                    }
+                    if let agent = model.agentResources(for: ref) {
+                        agentSection(agent)
                     }
                     if let name = state.target.container, let container = host?.containers[name] {
                         containerSection(container, cores: host?.cores ?? 0)
