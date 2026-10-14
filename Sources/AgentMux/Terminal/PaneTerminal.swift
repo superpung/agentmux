@@ -34,6 +34,8 @@ final class PaneTerminal {
     private let mirror: PaneMirror
     private let session: InMemoryTerminalSession
     private let gate: InputGate
+    private let host: HostConfig
+    private let target: TargetConfig
 
     var clientTag: String { mirror.clientTag }
 
@@ -57,12 +59,15 @@ final class PaneTerminal {
         self.mirror = mirror
         self.session = session
         self.gate = gate
+        self.host = host
+        self.target = target
 
         state.makePlatformView = { [weak self] in
             let view = PasteInterceptingTerminalView(frame: .zero)
             view.onPaste = { text in self?.paste(text) ?? false }
             view.onPreviewPath = { raw in self?.onPreviewRequest?(raw) }
             view.onShiftEnter = { [weak self] in _ = self?.sendNewline() }
+            view.onPasteImage = { [weak self] png in self?.pasteImage(png) }
             return view
         }
         var options = TerminalSurfaceOptions(backend: .inMemory(session))
@@ -148,6 +153,21 @@ final class PaneTerminal {
         return true
     }
 
+    /// ⌘V of an image: the remote agent can't see the Mac's clipboard, so the
+    /// image is uploaded to a temp path in the container (/tmp, outside the
+    /// workspace) and its path is injected as text — which Claude Code reads as
+    /// an image reference. A unique name means no overwrite prompt.
+    func pasteImage(_ png: Data) {
+        guard gate.isOpen else { return }
+        let directory = "/tmp/agentmux-paste"
+        let path = "\(directory)/\(UUID().uuidString).png"
+        Task { @MainActor in
+            _ = await RemoteFileService.makeDirectory(directory, host: host, target: target)
+            let result = await RemoteFileService.upload(png, to: path, host: host, target: target, overwrite: true)
+            if case .success = result { _ = paste(path + " ") } else { NSSound.beep() }
+        }
+    }
+
     func resync() {
         mirror.resync()
     }
@@ -196,6 +216,8 @@ final class PasteInterceptingTerminalView: AppTerminalView {
     var onPreviewPath: ((String) -> Void)?
     /// Shift+Return sends a soft newline to the pane instead of submitting.
     var onShiftEnter: (() -> Void)?
+    /// ⌘V of a clipboard image (when no text is also present) hands over the PNG.
+    var onPasteImage: ((Data) -> Void)?
 
     override func keyDown(with event: NSEvent) {
         // keyCode 36 is the main Return key; intercept Shift+Return only (no
@@ -245,12 +267,31 @@ final class PasteInterceptingTerminalView: AppTerminalView {
            event.charactersIgnoringModifiers == "v",
            window?.firstResponder === self
         {
+            // Text wins when present, so a normal copy still pastes text; an
+            // image-only clipboard (a screenshot) is uploaded and referenced.
             if let text = NSPasteboard.general.string(forType: .string) {
                 _ = onPaste?(text)
+            } else if let onPasteImage, let png = Self.clipboardImagePNG() {
+                onPasteImage(png)
             }
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// The clipboard image as PNG, from raw image data or an NSImage. nil when
+    /// the clipboard holds no image.
+    static func clipboardImagePNG() -> Data? {
+        let pb = NSPasteboard.general
+        if let png = pb.data(forType: .png) { return png }
+        if let tiff = pb.data(forType: .tiff),
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) { return png }
+        if let image = NSImage(pasteboard: pb),
+           let tiff = image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) { return png }
+        return nil
     }
 }
 
