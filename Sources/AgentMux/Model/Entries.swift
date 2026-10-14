@@ -38,6 +38,10 @@ struct AgentEntry: Identifiable, Hashable {
     var location: String
     /// The agent's tmux session name (for grouping).
     var session: String
+    /// The agent's tmux window id (e.g. "@27") in its real session. Unique per
+    /// agent, so it anchors the identity key; session/path do not, because two
+    /// same-kind agents can share them.
+    var windowID: String
     /// Seconds since the agent last wrote its session log (nil if unknown).
     var lastActiveSeconds: Int?
     /// CLAUDE_CONFIG_DIR / CODEX_HOME for this agent, if set (else the default).
@@ -57,10 +61,16 @@ struct AgentEntry: Identifiable, Hashable {
         }
     }
 
-    /// A stable identity for user labels (pin / rename), surviving pane-id
-    /// changes: the container, session, project and agent kind.
+    /// A stable identity for user labels (pin / rename): the container, the
+    /// tmux window, and the agent kind. The window id is what makes it unique —
+    /// two agents of the same kind can share a session name AND working
+    /// directory (e.g. two Codex panes both in a "demo" session under
+    /// /srv/app/demo), which made the old session+path key collide so
+    /// that pinning or renaming one hit both. It also survives pane-id changes
+    /// and the agent cd-ing elsewhere (unlike the mutable current path).
     var identityKey: String {
-        "\(space.targetID)|\(session)|\(space.path)|\(kind)"
+        let anchor = windowID.isEmpty ? "\(session)|\(space.path)" : windowID
+        return "\(space.targetID)|\(anchor)|\(kind)"
     }
 }
 
@@ -138,6 +148,7 @@ extension AppModel {
                     device: device,
                     location: location(of: pane.id, in: snapshot),
                     session: sessionName(of: pane.id, in: snapshot),
+                    windowID: snapshot.primaryMembership(of: pane.id)?.windowID ?? "",
                     lastActiveSeconds: snapshot.lastActiveSeconds[pane.id],
                     configDir: detection.configDirectory
                 )
