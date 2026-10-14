@@ -129,6 +129,37 @@ conf-scheduler\t12.50%\t7.00%\t9.126GiB / 12.00GiB\t54.1GB / 74.1GB\t578GB / 143
         #expect(out.hasDisk == true)
     }
 
+    @Test func gitStatusParsesFullStatus() {
+        let out = "@@git\nbranch feature/x\ncounts 3 2\ndiff 45 12\nab 1 4\n"
+        let g = GitStatusProbe.parse(out)
+        #expect(g?.branch == "feature/x")
+        #expect(g?.changedFiles == 3)
+        #expect(g?.untracked == 2)
+        #expect(g?.insertions == 45)
+        #expect(g?.deletions == 12)
+        #expect(g?.behind == 1)
+        #expect(g?.ahead == 4)
+        #expect(g?.isClean == false)
+    }
+
+    @Test func gitStatusNoRepoIsNil() {
+        #expect(GitStatusProbe.parse("@@norepo\n") == nil)
+        #expect(GitStatusProbe.parse("") == nil)
+    }
+
+    @Test func gitStatusCleanTree() {
+        let g = GitStatusProbe.parse("@@git\nbranch main\ncounts 0 0\ndiff 0 0\n")
+        #expect(g?.isClean == true)
+        #expect(g?.branch == "main")
+    }
+
+    @Test func gitStatusAheadBehindTabSeparated() {
+        // git rev-list --left-right --count emits a tab between the two numbers.
+        let g = GitStatusProbe.parse("@@git\nbranch main\ncounts 0 0\ndiff 0 0\nab 2\t7\n")
+        #expect(g?.behind == 2)
+        #expect(g?.ahead == 7)
+    }
+
     @Test func agentResourceProbeWithoutDiskHasNoWorkspace() {
         let out = AgentResourceProbe.parse("""
         @@proc

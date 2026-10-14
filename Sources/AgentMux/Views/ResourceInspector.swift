@@ -17,6 +17,9 @@ struct ResourceInspector: View {
                     if let agent = model.agentResources(for: ref) {
                         agentSection(agent)
                     }
+                    if let git = model.gitStatus(for: ref) {
+                        gitSection(git)
+                    }
                     if let name = state.target.container, let container = host?.containers[name] {
                         containerSection(container, cores: host?.cores ?? 0)
                     }
@@ -57,6 +60,29 @@ struct ResourceInspector: View {
                 MetricRow(icon: "internaldrive", title: "Workspace",
                           value: "\(Int(agent.diskPercent.rounded()))%", unit: gbPair(agent.diskUsedKB, agent.diskTotalKB, perMB: false),
                           fraction: agent.diskPercent / 100)
+            }
+        }
+    }
+
+    /// The selected agent's git working tree: branch, how much changed, and how
+    /// it sits vs upstream. Read-only status; no file contents.
+    @ViewBuilder
+    private func gitSection(_ git: GitStatus) -> some View {
+        InspectorSection(title: "Changes", icon: "arrow.triangle.branch") {
+            MetricRow(icon: "arrow.triangle.branch", title: "Branch", value: git.branch.isEmpty ? "detached" : git.branch)
+            if git.isClean {
+                MetricRow(icon: "checkmark.seal", title: "Working tree", value: "clean")
+            } else {
+                MetricRow(icon: "doc.badge.ellipsis", title: "Changed files",
+                          value: "\(git.changedFiles)", unit: git.untracked > 0 ? "+\(git.untracked) new" : nil)
+                if git.insertions > 0 || git.deletions > 0 {
+                    MetricRow(icon: "plus.forwardslash.minus", title: "Lines",
+                              value: "+\(git.insertions)", unit: "−\(git.deletions)")
+                }
+            }
+            if git.ahead > 0 || git.behind > 0 {
+                MetricRow(icon: "arrow.up.arrow.down", title: "vs upstream",
+                          value: "↑\(git.ahead)", unit: "↓\(git.behind)")
             }
         }
     }

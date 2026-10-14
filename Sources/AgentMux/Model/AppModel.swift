@@ -100,6 +100,8 @@ final class AppModel {
     /// (so a just-changed selection never shows the previous agent's figures).
     private var focusedAgentRef: PaneRef?
     private(set) var focusedAgentResources: AgentResources?
+    private var focusedGitRef: PaneRef?
+    private(set) var focusedGitStatus: GitStatus?
     static let resourceInterval: Duration = .seconds(5)
 
     // MARK: Inspector / file-preview UI state
@@ -452,6 +454,8 @@ final class AppModel {
         else {
             focusedAgentResources = nil
             focusedAgentRef = nil
+            focusedGitStatus = nil
+            focusedGitRef = nil
             return
         }
         let cwd = agentEntry(ref)?.space.path
@@ -460,6 +464,18 @@ final class AppModel {
             focusedAgentResources = resources
             focusedAgentRef = ref
         }
+        if let cwd, !cwd.isEmpty,
+           case let .success(git) = await GitStatusProbe.run(host: state.host, target: state.target, cwd: cwd),
+           selection == ref {
+            focusedGitStatus = git
+            focusedGitRef = ref
+        }
+    }
+
+    /// The selected agent's git working-tree summary, when its directory is a
+    /// repo and the latest probe was for this exact ref.
+    func gitStatus(for ref: PaneRef) -> GitStatus? {
+        focusedGitRef == ref ? focusedGitStatus : nil
     }
 
     /// The selected agent's own process resources, but only when the latest
