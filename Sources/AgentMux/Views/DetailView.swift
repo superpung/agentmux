@@ -35,9 +35,6 @@ struct DetailView: View {
         .animation(.easeInOut(duration: 0.16), value: model.selection)
         .navigationTitle(title)
         .toolbar { toolbarContent }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if model.selection != nil { ContextBar() }
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.selection != nil { StatusBar() }
         }
@@ -89,59 +86,6 @@ struct DetailView: View {
     }
 }
 
-/// A slim identity strip under the toolbar: the old subtitle, but with the same
-/// brand / server / container / folder icons the sidebar uses.
-private struct ContextBar: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if let ref = model.selection {
-            HStack(spacing: 12) {
-                if let agent = model.agentEntry(ref) {
-                    chip(brandIcon(agent.kind), agent.configLabel)
-                    chip(icon("server.rack"), agent.device.server)
-                    chip(icon("shippingbox"), agent.device.name)
-                    chip(icon("folder"), agent.space.path)
-                } else if let pane = model.paneEntry(ref) {
-                    chip(icon("terminal"), pane.command)
-                    chip(icon("shippingbox"), pane.device.name)
-                    chip(icon("folder"), pane.space.path)
-                }
-                Spacer(minLength: 0)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(.bar)
-            .overlay(alignment: .bottom) { Divider() }
-        }
-    }
-
-    private func chip(_ icon: some View, _ text: String) -> some View {
-        HStack(spacing: 4) {
-            // A fixed icon box so SF Symbols of different intrinsic widths (and
-            // the brand glyph) share one visual size and the labels line up.
-            icon.frame(width: 15, height: 12)
-            Text(text).truncationMode(.middle)
-        }
-        .layoutPriority(1)
-    }
-
-    private func icon(_ name: String) -> some View {
-        Image(systemName: name).font(.system(size: 11)).foregroundStyle(.tertiary)
-    }
-
-    @ViewBuilder private func brandIcon(_ kind: AgentKind) -> some View {
-        if let resource = BrandIconLoader.agentIcon(for: kind) {
-            BrandIcon(resource: resource, size: 12)
-        } else {
-            icon("terminal")
-        }
-    }
-}
-
 /// The Ghostty surface filling the detail pane. The terminal scales its font
 /// so the whole remote grid fits, so the surface is never larger than this
 /// area (a Metal layer ignores SwiftUI clipping, so it must not overflow).
@@ -164,23 +108,64 @@ private struct StatusBar: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let ref = model.selection, let state = model.state(ref.targetID), let content = content(ref, state) {
+        if let ref = model.selection {
+            let state = model.state(ref.targetID)
+            let content = state.flatMap { content(ref, $0) }
             HStack(spacing: 10) {
-                if let problem = content.problem {
-                    Circle().fill(problem.color).frame(width: 7, height: 7)
-                    Text(problem.text)
-                }
+                metadata(ref)
                 Spacer(minLength: 8)
-                if let usage = content.usage {
-                    UsageView(usage: usage)
+                if let problem = content?.problem {
+                    Circle().fill(problem.color).frame(width: 7, height: 7)
+                    Text(problem.text).lineLimit(1).layoutPriority(1)
+                }
+                if let usage = content?.usage {
+                    UsageView(usage: usage).layoutPriority(1)
                 }
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
+            .lineLimit(1)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.bar)
-            .help(content.tooltip)
+            .help(content?.tooltip ?? "")
+        }
+    }
+
+    /// The agent's identity (was its own bar above the terminal, now folded in
+    /// here): account, server, container and working directory.
+    @ViewBuilder private func metadata(_ ref: PaneRef) -> some View {
+        HStack(spacing: 10) {
+            if let agent = model.agentEntry(ref) {
+                chip(brandIcon(agent.kind), agent.configLabel)
+                chip(icon("server.rack"), agent.device.server)
+                chip(icon("shippingbox"), agent.device.name)
+                chip(icon("folder"), agent.space.path)
+            } else if let pane = model.paneEntry(ref) {
+                chip(icon("terminal"), pane.command)
+                chip(icon("shippingbox"), pane.device.name)
+                chip(icon("folder"), pane.space.path)
+            }
+        }
+    }
+
+    // A fixed icon box keeps the differently-shaped SF Symbols the same size.
+    private func chip(_ icon: some View, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            icon.frame(width: 15, height: 12)
+            Text(text).truncationMode(.middle)
+        }
+    }
+
+    private func icon(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 11)).foregroundStyle(.tertiary)
+    }
+
+    @ViewBuilder private func brandIcon(_ kind: AgentKind) -> some View {
+        if let resource = BrandIconLoader.agentIcon(for: kind) {
+            BrandIcon(resource: resource, size: 12)
+        } else {
+            icon("terminal")
         }
     }
 
@@ -263,7 +248,8 @@ private struct Meter: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: systemImage).imageScale(.medium).foregroundStyle(.secondary)
+            // Fixed box so the context and hourglass glyphs read the same size.
+            Image(systemName: systemImage).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 15)
             Capsule().fill(.quaternary)
                 .frame(width: 56, height: 6)
                 .overlay(alignment: .leading) {
