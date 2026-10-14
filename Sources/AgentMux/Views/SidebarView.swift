@@ -510,8 +510,7 @@ private struct StatusFooter: View {
         }
         .padding(.leading, 9)
         .padding(.trailing, 8)
-        .padding(.vertical, 4)
-        .background(.bar)
+        .statusStripChrome()
     }
 
     private var dotColor: Color {

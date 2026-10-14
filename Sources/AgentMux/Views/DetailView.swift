@@ -126,8 +126,7 @@ private struct StatusBar: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.bar)
+            .statusStripChrome()
             .help(content?.tooltip ?? "")
         }
     }
