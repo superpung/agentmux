@@ -109,9 +109,26 @@ import Testing
         for title in ["________DDL________ | dashboard", "usage-monitor", ""] {
             #expect(ActivityDetector.attentionVerdict(kind: .codex, title: title) == nil)
         }
-        // A non-attention title leaves the log/screen verdict intact.
+    }
+
+    @Test func codexWorkingNeedsSpinnerNotJustLog() {
+        // Codex animates a Braille spinner in its title while a turn runs.
+        #expect(ActivityDetector.codexTitleIsWorking("⠸ demo-dev-v5 | demo"))
+        #expect(!ActivityDetector.codexTitleIsWorking("demo-paper-v2 | demo"))
+        // A spinner means working even with no log/screen signal.
         #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: nil,
-                                         logState: "working", title: "usage-monitor").activity == .working)
+                                         logState: nil, title: "⠸ dev-v5").activity == .working)
+        // No spinner + logState "working" → idle: the rollout log can be
+        // cross-attributed between codex agents sharing a directory, so it is
+        // not trusted to assert working without the per-pane spinner/screen.
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: nil,
+                                         logState: "working", title: "paper-v2").activity == .idle)
+        // A real per-pane screen "working" verdict still counts without a spinner.
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "working",
+                                         logState: nil, title: "dev-v5").activity == .working)
+        // Idle signals → idle.
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: nil,
+                                         logState: "idle", title: "dev-v5").activity == .idle)
     }
 
     @Test func claudeTitleNeverClaimsAttention() {

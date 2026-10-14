@@ -259,6 +259,12 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                         let ev = detection.pid.flatMap { snapshot.agents[$0] }
                         let activity = ActivityDetector.resolve(kind: detection.kind, logEvent: ev?.logEvent, logAgeSeconds: ev?.logAgeSeconds, screenState: snapshot.screenStates[pane.id], logState: snapshot.logStates[pane.id], title: pane.title)
                         line += " {\(activity.activity.rawValue)/\(activity.confidence.rawValue)}"
+                        let logEventStr = String(describing: ev?.logEvent)
+                        let logAgeStr = String(describing: ev?.logAgeSeconds)
+                        let screenStr = String(describing: snapshot.screenStates[pane.id])
+                        let logStateStr = String(describing: snapshot.logStates[pane.id])
+                        let titleStr = String(describing: pane.title)
+                        line += " <in logEvent=\(logEventStr) logAge=\(logAgeStr) screen=\(screenStr) logState=\(logStateStr) title=\(titleStr)>"
                         if let u = snapshot.usage[pane.id] {
                             var parts: [String] = []
                             if let c = u.contextTokens { parts.append("ctx \(c)\(u.contextWindow.map { "/\($0)" } ?? "")") }

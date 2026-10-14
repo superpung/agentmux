@@ -61,8 +61,26 @@ public enum ActivityDetector {
         if let title, let attention = attentionVerdict(kind: kind, title: title) {
             return attention
         }
-        // Codex: the rollout's last task_* event, already reduced to a verdict
-        // on the server (task_started = working, task_complete = idle).
+        // Codex animates a Braille spinner in its window title while a turn
+        // runs — a reliable, per-pane, real-time signal. Two codex agents in the
+        // same directory can have their rollout logs cross-attributed (the log
+        // is matched by cwd), so a lone logState="working" is not trusted for
+        // codex: the title and screen decide, and only their absence falls back
+        // to the log's idle verdict. (Codex with no title falls through below.)
+        if kind == .codex, let title {
+            if codexTitleIsWorking(title) {
+                return ActivityObservation(.working, .high, "title: codex running")
+            }
+            if screenState == "working" {
+                return ActivityObservation(.working, .high, "screen verdict: working")
+            }
+            if screenState == "idle" || logState == "idle" {
+                return ActivityObservation(.idle, .high, "codex idle")
+            }
+            return ActivityObservation(.idle, .medium, "codex: no spinner, no active signal")
+        }
+        // Codex (no title) / Claude: the rollout's last task_* event, already
+        // reduced to a verdict on the server (task_started = working, idle).
         switch logState {
         case "working": return ActivityObservation(.working, .high, "log: task in progress")
         case "idle": return ActivityObservation(.idle, .high, "log: task complete")
@@ -101,6 +119,14 @@ public enum ActivityDetector {
             return ActivityObservation(.waitingInput, .high, "title: Action Required")
         }
         return nil
+    }
+
+    /// Codex animates a Braille-dots spinner (U+2800…U+28FF) in its window title
+    /// while a turn is running, so any Braille scalar means it is actively
+    /// working. The title is per-pane, unlike the rollout log which can be
+    /// cross-attributed between codex agents sharing a directory.
+    public static func codexTitleIsWorking(_ title: String) -> Bool {
+        title.unicodeScalars.contains { (0x2800 ... 0x28FF).contains($0.value) }
     }
 
     /// The screen rule, kept as the reference the server's shell mirrors and
