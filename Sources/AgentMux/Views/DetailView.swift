@@ -5,6 +5,17 @@ import SwiftUI
 struct DetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @State private var pendingSwitch: PendingSwitch?
+    @State private var switchError: String?
+
+    /// A requested account switch awaiting confirmation (it stops and relaunches
+    /// the agent, so it is confirmed first).
+    private struct PendingSwitch: Identifiable {
+        let ref: PaneRef
+        let account: String
+        var id: String { account }
+        var label: String { (account as NSString).lastPathComponent }
+    }
 
     /// The selected terminal's palette, so the letterbox margins behind it
     /// match; the dashboard / empty state just follows the system.
@@ -47,6 +58,28 @@ struct DetailView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.selection != nil { StatusBar() }
         }
+        .alert(
+            pendingSwitch.map { "Switch to \($0.label)?" } ?? "",
+            isPresented: Binding(get: { pendingSwitch != nil }, set: { if !$0 { pendingSwitch = nil } }),
+            presenting: pendingSwitch
+        ) { pending in
+            Button("Switch", role: .destructive) { performSwitch(pending) }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text("The running Claude will be stopped and relaunched under \(pending.label), resuming this conversation. Any in-progress turn is lost.")
+        }
+        .alert(
+            "Couldn't switch account",
+            isPresented: Binding(get: { switchError != nil }, set: { if !$0 { switchError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(switchError ?? "") }
+    }
+
+    private func performSwitch(_ pending: PendingSwitch) {
+        let ref = pending.ref
+        let account = pending.account
+        Task { if let error = await model.switchAccount(ref, to: account) { switchError = error } }
     }
 
     private var title: String {
@@ -94,6 +127,19 @@ struct DetailView: View {
                         } label: {
                             Label("Terminal Theme", systemImage: "circle.lefthalf.filled")
                         }
+                    }
+                    let switchable = model.switchableAccounts(for: ref)
+                    if !switchable.isEmpty {
+                        Menu {
+                            ForEach(switchable, id: \.self) { account in
+                                Button((account as NSString).lastPathComponent) {
+                                    pendingSwitch = PendingSwitch(ref: ref, account: account)
+                                }
+                            }
+                        } label: {
+                            Label("Switch Account", systemImage: "person.crop.circle.badge.checkmark")
+                        }
+                        .disabled(model.agentEntry(ref)?.activity == .working)
                     }
                     Divider()
                     Button {

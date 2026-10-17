@@ -9,7 +9,7 @@ import SwiftUI
 /// currently has a running agent in that project.
 struct AccountLinksWindow: View {
     @Environment(AppModel.self) private var model
-    @State private var targetID = ""
+    @Binding var targetID: String
     @State private var groups: [ProjectLinkGroup] = []
     @State private var loading = false
     @State private var error: String?
@@ -20,38 +20,41 @@ struct AccountLinksWindow: View {
             Divider()
             content
         }
-        .navigationTitle("Account Links")
-        .onAppear {
-            if targetID.isEmpty { targetID = model.targets.first?.id ?? "" }
+        .onAppear { Task { await load() } }
+        .onChange(of: targetID) { _, _ in
+            groups = [] // a different container's links; don't show stale rows
             Task { await load() }
         }
-        .onChange(of: targetID) { _, _ in Task { await load() } }
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
-            Picker("Container", selection: $targetID) {
-                ForEach(model.targets) { Text($0.device.name).tag($0.id) }
+        HStack(spacing: 8) {
+            if loading {
+                ProgressView().controlSize(.small)
+                Text("Scanning…").font(.caption).foregroundStyle(.secondary)
             }
-            .labelsHidden().fixedSize()
-            if loading { ProgressView().controlSize(.small) }
             Spacer()
             Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }
                 .help("Re-scan this container")
                 .disabled(loading || model.state(targetID) == nil)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 14).padding(.vertical, 8)
     }
 
     @ViewBuilder private var content: some View {
         if let error {
             ContentUnavailableView("Couldn't read accounts", systemImage: "exclamationmark.triangle", description: Text(error))
+        } else if groups.isEmpty, loading {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Scanning accounts…").font(.callout).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if groups.isEmpty {
             ContentUnavailableView(
-                loading ? "Scanning…" : "No Claude accounts",
+                "No Claude accounts",
                 systemImage: "person.2.slash",
-                description: Text(loading ? "" : "No Claude account directories with projects were found in this container.")
+                description: Text("No Claude account directories with projects were found in this container.")
             )
         } else {
             List {
@@ -62,9 +65,18 @@ struct AccountLinksWindow: View {
                         ForEach(shared) { GroupRow(group: $0, running: running(in: $0)) }
                     }
                 }
-                if !independent.isEmpty {
+                let scratch = independent.filter { $0.cwd.hasPrefix("/tmp/") || $0.label.hasPrefix("/tmp/") }
+                let projects = independent.filter { !($0.cwd.hasPrefix("/tmp/") || $0.label.hasPrefix("/tmp/")) }
+                if !projects.isEmpty {
                     Section("Independent") {
-                        ForEach(independent) { GroupRow(group: $0, running: running(in: $0)) }
+                        ForEach(projects) { GroupRow(group: $0, running: running(in: $0)) }
+                    }
+                }
+                if !scratch.isEmpty {
+                    Section {
+                        DisclosureGroup("Temporary (/tmp) — \(scratch.count)") {
+                            ForEach(scratch) { GroupRow(group: $0, running: running(in: $0)) }
+                        }
                     }
                 }
             }

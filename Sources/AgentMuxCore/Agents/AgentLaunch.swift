@@ -277,3 +277,86 @@ public enum AgentLauncher {
         return (await RemoteScript.run("\(script) 2>&1", host: host, target: target, timeoutSeconds: 15)).map { _ in () }
     }
 }
+
+/// Switches the Claude agent running in a tmux pane to a different account
+/// (CLAUDE_CONFIG_DIR) while continuing the same conversation. Only valid when
+/// the two accounts share the project's sessions (a symlinked `projects/<cwd>`),
+/// which the caller verifies via `ProjectLinkGroup`. Destructive: it stops the
+/// running Claude (SIGTERM, then SIGKILL as a fallback) and relaunches it in the
+/// same pane with `--resume`, so any in-flight turn is lost (the transcript on
+/// disk is not — it is what the new account resumes from).
+public enum AgentAccountSwitch {
+    /// Config dirs are container paths like `/root/.claude-2`; reject anything
+    /// with shell-unsafe characters before it is typed into a pane.
+    public static func isSafeConfigDir(_ path: String) -> Bool {
+        path.hasPrefix("/") && path.count < 256 && path.allSatisfy { $0.isLetter || $0.isNumber || "/._-".contains($0) }
+    }
+
+    /// `claudePID` is the detected Claude process for `paneID`; the script
+    /// refuses to kill it unless it is still that pane's Claude, so a stale pid
+    /// can never take down an unrelated process.
+    public static func switchClaudeAccount(
+        host: HostConfig, target: TargetConfig,
+        paneID: String, claudePID: Int, cwd: String, newConfigDir: String
+    ) async -> Result<String, RemoteFailure> {
+        guard TmuxQuote.id(paneID) != nil else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "invalid pane id"))
+        }
+        guard isSafeConfigDir(newConfigDir) else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "unsafe config dir"))
+        }
+        guard claudePID > 1 else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "invalid pid"))
+        }
+        let tmux: TmuxInvocation
+        do { tmux = try target.executionContext().tmux }
+        catch { return .failure(RemoteFailure(.remoteCommandFailed, detail: "\(error)")) }
+        let tm = ShellQuote.command(tmux.argv)
+        let script = """
+        pane=\(ShellQuote.word(paneID))
+        pid=\(ShellQuote.word(String(claudePID)))
+        newcfg=\(ShellQuote.word(newConfigDir))
+        cwd=\(ShellQuote.word(cwd))
+        # Refuse to touch a pid that is not this pane's Claude (guards a stale pid).
+        tp=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+        cl=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+        case "$tp" in "$pane") ;; *) echo "ERR: process $pid is not in $pane any more (stale); refusing"; exit 1;; esac
+        case "$cl" in *claude*) ;; *) echo "ERR: process $pid is not Claude any more (stale); refusing"; exit 1;; esac
+        # Session id to resume: the --resume on the cmdline, else the newest
+        # transcript in this account's project dir for this cwd.
+        sid=$(printf '%s' "$cl" | grep -oE -- '--resume [0-9a-fA-F-]{36}' | awk '{print $2}' | head -1)
+        if [ -z "$sid" ]; then
+          ccfg=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1)
+          ccfg=${ccfg:-$HOME/.claude}
+          enc=$(printf '%s' "$cwd" | sed 's#/#-#g')
+          nf=$(ls -t "$ccfg/projects/$enc"/*.jsonl 2>/dev/null | head -1)
+          [ -n "$nf" ] && sid=$(basename "$nf" .jsonl)
+        fi
+        case "$sid" in ""|*[!0-9a-fA-F-]*) echo "ERR: could not determine the session id to resume"; exit 1;; esac
+        # Stop gracefully, then hard.
+        kill -TERM "$pid" 2>/dev/null
+        i=0
+        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.25; i=$((i+1)); done
+        if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; sleep 0.3; fi
+        sleep 0.4
+        cmd="CLAUDE_CONFIG_DIR=$newcfg claude --resume $sid"
+        \(tm) send-keys -t "$pane" -l "$cmd" || { echo "ERR: could not type the relaunch command"; exit 1; }
+        \(tm) send-keys -t "$pane" Enter
+        echo "OK: $sid"
+        """
+        let result = await RemoteScript.run(script, host: host, target: target, timeoutSeconds: 30)
+        switch result {
+        case let .success(output):
+            let lines = output.split(whereSeparator: \.isNewline).map(String.init)
+            guard let status = lines.last(where: { $0.hasPrefix("OK:") || $0.hasPrefix("ERR:") }) else {
+                return .failure(RemoteFailure(.remoteCommandFailed, detail: output.isEmpty ? "no output" : output))
+            }
+            if status.hasPrefix("OK:") {
+                return .success(status.dropFirst(3).trimmingCharacters(in: .whitespaces))
+            }
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: status.dropFirst(4).trimmingCharacters(in: .whitespaces)))
+        case let .failure(failure):
+            return .failure(failure)
+        }
+    }
+}

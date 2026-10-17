@@ -26,8 +26,8 @@ struct AgentMuxApp: App {
                     .keyboardShortcut("k", modifiers: .command)
                 Button("Dashboard") { model.selection = nil }
                     .keyboardShortcut("0", modifiers: .command)
-                OpenSessionsButton()
-                OpenAccountLinksButton()
+                OpenSessionsButton(model: model)
+                OpenAccountsButton(model: model)
                 NewTerminalButton(model: model)
                 Button("Refresh") { model.refreshAll() }
                     .keyboardShortcut("r", modifiers: .command)
@@ -60,18 +60,11 @@ struct AgentMuxApp: App {
         .defaultSize(width: 820, height: 520)
 
         Window("Sessions", id: "sessions") {
-            SessionsWindow()
+            ContainerWindow()
                 .environment(model)
-                .frame(minWidth: 460, minHeight: 360)
+                .frame(minWidth: 480, minHeight: 380)
         }
-        .defaultSize(width: 620, height: 640)
-
-        Window("Account Links", id: "account-links") {
-            AccountLinksWindow()
-                .environment(model)
-                .frame(minWidth: 480, minHeight: 360)
-        }
-        .defaultSize(width: 620, height: 560)
+        .defaultSize(width: 640, height: 640)
 
         Window("Files", id: "files") {
             FileBrowserWindow()
@@ -94,24 +87,32 @@ struct AgentMuxApp: App {
     }
 }
 
-/// Menu command that opens the dedicated Sessions window (the only place tmux
-/// sessions are created or killed). Lives in a view so it can read `openWindow`.
+/// Menu command that opens the combined container window on the Sessions tab
+/// (the only place tmux sessions are created or killed).
 private struct OpenSessionsButton: View {
     @Environment(\.openWindow) private var openWindow
+    let model: AppModel
 
     var body: some View {
-        Button("Sessions") { openWindow(id: "sessions") }
-            .keyboardShortcut("s", modifiers: [.command, .shift])
+        Button("Sessions") {
+            model.containerTab = .sessions
+            openWindow(id: "sessions")
+        }
+        .keyboardShortcut("s", modifiers: [.command, .shift])
     }
 }
 
-/// Opens the Account Links window (read-only map of which Claude accounts share
-/// a project's sessions, and so can be switched between).
-private struct OpenAccountLinksButton: View {
+/// Opens the combined container window on the Accounts tab (read-only map of
+/// which Claude accounts share a project's sessions, and so can be switched).
+private struct OpenAccountsButton: View {
     @Environment(\.openWindow) private var openWindow
+    let model: AppModel
 
     var body: some View {
-        Button("Account Links") { openWindow(id: "account-links") }
+        Button("Accounts") {
+            model.containerTab = .accounts
+            openWindow(id: "sessions")
+        }
     }
 }
 

@@ -207,6 +207,60 @@ final class AppModel {
         return terminalTheme
     }
 
+    // MARK: Account links & switching
+
+    /// Which tab the combined container window (Sessions / Accounts) shows.
+    var containerTab: ContainerTab = .sessions
+
+    /// Claude account link groups per target, populated lazily when a terminal
+    /// opens so the "Switch Account" menu knows which accounts share a project.
+    private(set) var linkGroupsByTarget: [String: [ProjectLinkGroup]] = [:]
+
+    func refreshLinks(_ targetID: String) {
+        guard let state = state(targetID) else { return }
+        Task { [weak self] in
+            let result = await AgentSessionProbe.projectLinks(host: state.host, target: state.target)
+            guard case let .success(entries) = result else { return }
+            let groups = AgentSessionProbe.linkGroups(from: entries)
+            await MainActor.run { self?.linkGroupsByTarget[targetID] = groups }
+        }
+    }
+
+    /// The other accounts this agent's project is linked to, so its session can
+    /// be resumed under them. Empty unless it is a Claude agent in a shared
+    /// project (and the link scan for its container has completed).
+    func switchableAccounts(for ref: PaneRef) -> [String] {
+        guard let agent = agentEntry(ref), agent.kind == .claudeCode,
+              let groups = linkGroupsByTarget[ref.targetID],
+              let group = groups.first(where: { $0.cwd == agent.space.path && $0.isShared })
+        else { return [] }
+        // An agent on the default account has no CLAUDE_CONFIG_DIR, so no
+        // configDir is reported; it is the ".claude" entry in the group.
+        let current = agent.configDir ?? group.accounts.first { ($0 as NSString).lastPathComponent == ".claude" }
+        return group.accounts.filter { $0 != current }
+    }
+
+    /// Switches the Claude agent to another linked account, resuming the same
+    /// conversation in place. Returns nil on success (and requests a refresh),
+    /// else an error string. Destructive — the caller confirms first.
+    func switchAccount(_ ref: PaneRef, to configDir: String) async -> String? {
+        guard let state = state(ref.targetID), let agent = agentEntry(ref),
+              let pid = state.detections[ref.paneID]?.pid
+        else { return "This agent is no longer available." }
+        let result = await AgentAccountSwitch.switchClaudeAccount(
+            host: state.host, target: state.target,
+            paneID: ref.paneID, claudePID: pid, cwd: agent.space.path, newConfigDir: configDir
+        )
+        switch result {
+        case .success:
+            state.refreshRequested = true
+            refreshLinks(ref.targetID)
+            return nil
+        case let .failure(failure):
+            return failure.detail.isEmpty ? failure.kind.rawValue : failure.detail
+        }
+    }
+
     var hosts: [HostConfig] { settings.hosts }
 
     /// AGENTMUX_OPEN=<target-id>/<pane-id>: select and open that pane once it
@@ -929,6 +983,8 @@ final class AppModel {
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
             terminal.applyTheme(effectiveTerminalTheme(for: ref))
             terminals[ref] = terminal
+            // Populate the account-link map so "Switch Account" is ready.
+            if linkGroupsByTarget[ref.targetID] == nil { refreshLinks(ref.targetID) }
         } catch {
             state.lastFailure = RemoteFailure(.remoteCommandFailed, detail: "\(error)")
         }

@@ -10,7 +10,7 @@ import SwiftUI
 /// kills tmux objects on the user's own server, and every kill is confirmed.
 struct SessionsWindow: View {
     @Environment(AppModel.self) private var model
-    @State private var targetID = ""
+    @Binding var targetID: String
     @State private var confirm: KillRequest?
     @State private var newSessionName = ""
     @State private var showNewSession = false
@@ -24,8 +24,6 @@ struct SessionsWindow: View {
             Divider()
             content
         }
-        .navigationTitle("Sessions")
-        .onAppear(perform: pickDefaultTarget)
         .alert("Couldn't complete the operation", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(error ?? "") }
@@ -49,14 +47,6 @@ struct SessionsWindow: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "shippingbox.fill").foregroundStyle(.secondary)
-            Picker("Container", selection: $targetID) {
-                ForEach(model.targets) { state in
-                    Text(state.device.name).tag(state.id)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
             if busy {
                 HStack(spacing: 5) {
                     ProgressView().controlSize(.small)
@@ -248,12 +238,6 @@ struct SessionsWindow: View {
         let sessions = s.sessions.map(\.id).sorted().joined(separator: ",")
         let panes = s.memberships.map(\.paneID).sorted().joined(separator: ",")
         return "\(sessions)|\(panes)"
-    }
-
-    private func pickDefaultTarget() {
-        if model.state(targetID) == nil {
-            targetID = model.selection?.targetID ?? model.targets.first?.id ?? ""
-        }
     }
 
     // MARK: Tree model
