@@ -6,9 +6,18 @@ struct DetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
+    /// The selected terminal's palette, so the letterbox margins behind it
+    /// match; the dashboard / empty state just follows the system.
+    private var backgroundTheme: TerminalThemePreference {
+        if let ref = model.selection, model.terminal(for: ref) != nil {
+            return model.effectiveTerminalTheme(for: ref)
+        }
+        return .system
+    }
+
     var body: some View {
         ZStack {
-            GhosttyRuntime.terminalBackgroundColor
+            GhosttyRuntime.terminalBackground(for: backgroundTheme)
             // Every open terminal stays mounted so its screen survives
             // switching; only the selected one is visible and live. A mirror
             // shown in its own window is not rendered here, so its single
@@ -68,6 +77,23 @@ struct DetailView: View {
                         terminal.resync()
                     } label: {
                         Label("Redraw", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    if let key = model.agentEntry(ref)?.identityKey {
+                        Menu {
+                            Picker("Theme", selection: Binding(
+                                get: { model.terminalThemeOverride(key) },
+                                set: { model.setTerminalThemeOverride(key, $0) }
+                            )) {
+                                Text("Use Default (\(model.terminalTheme.label))")
+                                    .tag(TerminalThemePreference?.none)
+                                ForEach(TerminalThemePreference.allCases, id: \.self) { preference in
+                                    Text(preference.label).tag(TerminalThemePreference?.some(preference))
+                                }
+                            }
+                            .pickerStyle(.inline)
+                        } label: {
+                            Label("Terminal Theme", systemImage: "circle.lefthalf.filled")
+                        }
                     }
                     Divider()
                     Button {

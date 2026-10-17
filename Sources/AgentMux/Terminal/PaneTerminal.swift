@@ -36,8 +36,20 @@ final class PaneTerminal {
     private let gate: InputGate
     private let host: HostConfig
     private let target: TargetConfig
+    /// The surface's forced palette; Ghostty reads the view's appearance to pick
+    /// light vs dark, so this just sets that appearance.
+    private var themePreference: TerminalThemePreference = .system
+    private weak var surfaceView: PasteInterceptingTerminalView?
 
     var clientTag: String { mirror.clientTag }
+
+    /// Pins this terminal's palette (follow-system / light / dark). Applied to
+    /// the live surface immediately and remembered for the surface if it has not
+    /// been created yet.
+    func applyTheme(_ preference: TerminalThemePreference) {
+        themePreference = preference
+        surfaceView?.appearance = preference.appearance
+    }
 
     init(ref: PaneRef, sessionID: String, host: HostConfig, target: TargetConfig) throws {
         let mirror = try PaneMirror(host: host, target: target, session: sessionID, paneID: ref.paneID)
@@ -68,6 +80,10 @@ final class PaneTerminal {
             view.onPreviewPath = { raw in self?.onPreviewRequest?(raw) }
             view.onShiftEnter = { [weak self] in _ = self?.sendNewline() }
             view.onPasteImage = { [weak self] png in self?.pasteImage(png) }
+            // Ghostty picks its palette from the view's appearance; honour the
+            // terminal's theme preference (set before this runs via applyTheme).
+            view.appearance = self?.themePreference.appearance
+            self?.surfaceView = view
             return view
         }
         var options = TerminalSurfaceOptions(backend: .inMemory(session))

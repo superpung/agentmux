@@ -99,4 +99,42 @@ enum GhosttyRuntime {
     private static func hex(_ color: (Int, Int, Int)) -> String {
         String(format: "#%02X%02X%02X", color.0, color.1, color.2)
     }
+
+    /// The terminal background for a given theme preference, used behind the
+    /// surface so the letterbox margins match the forced palette.
+    static func terminalBackground(for preference: TerminalThemePreference) -> Color {
+        switch preference {
+        case .system: terminalBackgroundColor
+        case .light: Color(nsColor: .white)
+        case .dark: Color(nsColor: NSColor(srgbRed: 0x10 / 255, green: 0x10 / 255, blue: 0x12 / 255, alpha: 1))
+        }
+    }
+}
+
+/// How an embedded terminal picks its light/dark palette. `.system` follows the
+/// Mac; `.light`/`.dark` pin it — which matters because an agent's TUI renders
+/// for the terminal it was started in (usually dark), so a mirror shown under a
+/// mismatched appearance looks wrong (e.g. Codex's dark input box on a white
+/// surface).
+enum TerminalThemePreference: String, CaseIterable, Sendable {
+    case system, light, dark
+
+    var label: String {
+        switch self {
+        case .system: "Follow System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    /// The AppKit appearance to force on a terminal surface; nil follows the
+    /// inherited (system) appearance, which is what Ghostty reads to pick a
+    /// light vs dark palette.
+    var appearance: NSAppearance? {
+        switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
 }

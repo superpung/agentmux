@@ -19,6 +19,7 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettings: View {
+    @Environment(AppModel.self) private var model
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
 
     var body: some View {
@@ -27,6 +28,19 @@ private struct GeneralSettings: View {
                 Toggle("Notify when an agent finishes or needs you", isOn: $notificationsEnabled)
             } footer: {
                 Text("A banner appears when a monitored agent finishes its turn or starts waiting for input, unless you are already viewing it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Terminal theme", selection: Binding(
+                    get: { model.terminalTheme },
+                    set: { model.setTerminalTheme($0) }
+                )) {
+                    ForEach(TerminalThemePreference.allCases, id: \.self) { preference in
+                        Text(preference.label).tag(preference)
+                    }
+                }
+            } footer: {
+                Text("Agent terminals are drawn for the terminal they run in, which is usually dark. If a terminal shows a dark input box or unreadable colors on a light background, pin this to Dark.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

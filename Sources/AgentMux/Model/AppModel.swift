@@ -165,6 +165,48 @@ final class AppModel {
         UserDefaults.standard.set(customNames, forKey: "customNames")
     }
 
+    /// The global default palette for embedded terminals. Agents render for the
+    /// terminal they were started in (usually dark), so a mismatched mirror can
+    /// look wrong (e.g. Codex's dark input box on a white surface); this pins it.
+    private(set) var terminalTheme: TerminalThemePreference =
+        UserDefaults.standard.string(forKey: "terminalTheme")
+            .flatMap(TerminalThemePreference.init(rawValue:)) ?? .system
+
+    func setTerminalTheme(_ preference: TerminalThemePreference) {
+        terminalTheme = preference
+        UserDefaults.standard.set(preference.rawValue, forKey: "terminalTheme")
+        for terminal in terminals.values {
+            terminal.applyTheme(effectiveTerminalTheme(for: terminal.ref))
+        }
+    }
+
+    /// Per-agent palette overrides keyed by `AgentEntry.identityKey`; an absent
+    /// entry means the agent follows the global `terminalTheme`.
+    private(set) var terminalThemeOverrides: [String: TerminalThemePreference] =
+        (UserDefaults.standard.dictionary(forKey: "terminalThemeOverrides") as? [String: String] ?? [:])
+            .compactMapValues(TerminalThemePreference.init(rawValue:))
+
+    func terminalThemeOverride(_ key: String) -> TerminalThemePreference? { terminalThemeOverrides[key] }
+
+    /// Sets (or, with nil, clears) one agent's override and repaints its live
+    /// terminals.
+    func setTerminalThemeOverride(_ key: String, _ preference: TerminalThemePreference?) {
+        terminalThemeOverrides[key] = preference
+        UserDefaults.standard.set(terminalThemeOverrides.mapValues(\.rawValue), forKey: "terminalThemeOverrides")
+        for terminal in terminals.values where agentEntry(terminal.ref)?.identityKey == key {
+            terminal.applyTheme(effectiveTerminalTheme(for: terminal.ref))
+        }
+    }
+
+    /// The palette a terminal should use: the agent's per-agent override if set,
+    /// otherwise the global default.
+    func effectiveTerminalTheme(for ref: PaneRef) -> TerminalThemePreference {
+        if let key = agentEntry(ref)?.identityKey, let override = terminalThemeOverrides[key] {
+            return override
+        }
+        return terminalTheme
+    }
+
     var hosts: [HostConfig] { settings.hosts }
 
     /// AGENTMUX_OPEN=<target-id>/<pane-id>: select and open that pane once it
@@ -885,6 +927,7 @@ final class AppModel {
             let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
             terminal.onActivity = { [weak self] in self?.nudge(ref.targetID) }
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
+            terminal.applyTheme(effectiveTerminalTheme(for: ref))
             terminals[ref] = terminal
         } catch {
             state.lastFailure = RemoteFailure(.remoteCommandFailed, detail: "\(error)")
