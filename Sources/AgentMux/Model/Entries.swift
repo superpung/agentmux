@@ -46,6 +46,8 @@ struct AgentEntry: Identifiable, Hashable {
     var lastActiveSeconds: Int?
     /// CLAUDE_CONFIG_DIR / CODEX_HOME for this agent, if set (else the default).
     var configDir: String?
+    /// The agent CLI version (e.g. "0.159.3"), when detected.
+    var version: String?
     var id: PaneRef { ref }
 
     /// The config dir shown in place of the generic kind label, e.g.
@@ -150,7 +152,8 @@ extension AppModel {
                     session: sessionName(of: pane.id, in: snapshot),
                     windowID: snapshot.primaryMembership(of: pane.id)?.windowID ?? "",
                     lastActiveSeconds: snapshot.lastActiveSeconds[pane.id],
-                    configDir: detection.configDirectory
+                    configDir: detection.configDirectory,
+                    version: detection.version
                 )
             }
         }

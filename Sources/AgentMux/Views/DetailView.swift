@@ -209,6 +209,7 @@ private struct StatusBar: View {
         HStack(spacing: 10) {
             if let agent = model.agentEntry(ref) {
                 chip(brandIcon(agent.kind), agent.configLabel)
+                if let version = agent.version { chip(icon("tag"), version) }
                 chip(icon("server.rack"), agent.device.server)
                 chip(icon("shippingbox"), agent.device.name)
                 chip(icon("folder"), agent.space.path)
