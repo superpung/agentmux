@@ -76,6 +76,20 @@ public enum InventoryProbe {
           qch=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
           echo "${qch:-$HOME/.codex}|$qcwd|$qpane"
         done | sort -u)
+        # Rollouts held open by shared Codex app-servers, as "home|cwd|mtime|path".
+        # Newer Codex keeps the live session's rollout in a shared app-server the
+        # TUI does not hold, so a pane with no fd of its own still finds its
+        # session here by (CODEX_HOME, cwd). Only session_meta.cwd is read.
+        codexsrv=$(for q in $(printf '%s\\n' "$procs" | awk '$6=="codex"{print $3}'); do
+          case "$(tr '\\0' ' ' < "/proc/$q/cmdline" 2>/dev/null)" in *app-server*) ;; *) continue ;; esac
+          qch=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
+          qch=${qch:-$HOME/.codex}
+          ls -l "/proc/$q/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | sort -u | while read -r rf; do
+            [ -f "$rf" ] || continue
+            mc=$(head -n 1 "$rf" 2>/dev/null | jq -r '.payload.cwd // .cwd // empty' 2>/dev/null)
+            [ -n "$mc" ] && echo "$qch|$mc|$(stat -c %Y "$rf" 2>/dev/null)|$rf"
+          done
+        done)
         for pid in $(printf '%s\\n' "$procs" | awk '$5 !~ /^Z/ && $6 ~ /^(codex|claude|node|bun|deno)$/ { print $3 }' | head -n \(maxAgentCandidates)); do
           echo "@@agent $pid"
           echo "exe $(readlink "/proc/$pid/exe" 2>/dev/null)"
@@ -147,6 +161,12 @@ public enum InventoryProbe {
                 mcwd=$(head -n 1 "$rf" 2>/dev/null | jq -r '.payload.cwd // .cwd // empty' 2>/dev/null)
                 [ "$mcwd" = "$pcwd" ] && stat -c '%Y %n' "$rf" 2>/dev/null
               done | sort -rn | head -n 1 | cut -d' ' -f2-)
+              # The TUI holds no rollout fd (newer Codex): find the live session
+              # in a shared app-server by (CODEX_HOME, cwd). Unambiguous here
+              # because nsib<=1 means only this pane uses that home+cwd.
+              if [ -z "$crf" ]; then
+                crf=$(printf '%s\\n' "$codexsrv" | awk -F'|' -v h="${pch:-$HOME/.codex}" -v c="$pcwd" '$1==h && $2==c {print $3" "$4}' | sort -rn | head -n 1 | cut -d' ' -f2-)
+              fi
             fi
             # No matching rollout fd (e.g. the TUI process holds none): locate
             # the file by the `resume <id>` on its cmdline — accurate per pane,
