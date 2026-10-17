@@ -135,6 +135,109 @@ public enum AgentSessionProbe {
     }
 }
 
+/// One account's entry for a project directory and the real directory it
+/// physically resolves to. Entries that share a `realPath` share their chat
+/// sessions (via a symlink between the accounts' `projects/<cwd>` dirs), so an
+/// agent in that project can be resumed under any of those accounts. Read-only
+/// metadata only — never message text.
+public struct ProjectLinkEntry: Sendable, Equatable {
+    public let configDir: String
+    public let projectDir: String
+    public let realPath: String
+    public let cwd: String
+    public let sessionCount: Int
+    public let lastActiveEpoch: Int
+
+    public init(configDir: String, projectDir: String, realPath: String, cwd: String, sessionCount: Int, lastActiveEpoch: Int) {
+        self.configDir = configDir
+        self.projectDir = projectDir
+        self.realPath = realPath
+        self.cwd = cwd
+        self.sessionCount = sessionCount
+        self.lastActiveEpoch = lastActiveEpoch
+    }
+}
+
+/// A set of accounts that share one real project directory, so their sessions
+/// are interchangeable. `isShared` when more than one account links to it —
+/// those are the accounts an agent in this project can be switched between.
+public struct ProjectLinkGroup: Identifiable, Sendable, Equatable {
+    public let realPath: String
+    public let cwd: String
+    public let accounts: [String]
+    public let sessionCount: Int
+    public let lastActiveEpoch: Int
+
+    public var id: String { realPath }
+    public var isShared: Bool { accounts.count > 1 }
+    /// The real cwd when known, else the project dir basename.
+    public var label: String { cwd.isEmpty ? (realPath as NSString).lastPathComponent : cwd }
+
+    public init(realPath: String, cwd: String, accounts: [String], sessionCount: Int, lastActiveEpoch: Int) {
+        self.realPath = realPath
+        self.cwd = cwd
+        self.accounts = accounts
+        self.sessionCount = sessionCount
+        self.lastActiveEpoch = lastActiveEpoch
+    }
+}
+
+public extension AgentSessionProbe {
+    /// Maps every Claude account's project dirs to the real directory they
+    /// resolve to (`readlink -f`), so callers can see which accounts share a
+    /// project's sessions. Read-only: dir structure, symlink targets and a
+    /// session's `cwd`/count/mtime — never message text.
+    static func projectLinks(host: HostConfig, target: TargetConfig) async -> Result<[ProjectLinkEntry], RemoteFailure> {
+        let script = """
+        for d in "$HOME"/.claude "$HOME"/.claude-*; do
+          [ -d "$d/projects" ] || continue
+          for p in "$d/projects"/*; do
+            [ -e "$p" ] || continue
+            name=$(basename "$p")
+            rp=$(readlink -f "$p" 2>/dev/null)
+            [ -n "$rp" ] || continue
+            nf=$(ls -t "$rp"/*.jsonl 2>/dev/null | head -1)
+            n=$(ls "$rp"/*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+            mt=0; [ -n "$nf" ] && mt=$(stat -c %Y "$nf" 2>/dev/null)
+            cwd=""; [ -n "$nf" ] && cwd=$(grep -m1 -o '"cwd":"[^"]*"' "$nf" 2>/dev/null | sed 's/.*"cwd":"//;s/"$//')
+            echo "$d|$name|$rp|$cwd|$n|$mt"
+          done
+        done
+        """
+        return (await RemoteScript.run(script, host: host, target: target, timeoutSeconds: 30)).map(parseProjectLinks)
+    }
+
+    static func parseProjectLinks(_ text: String) -> [ProjectLinkEntry] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            let f = line.split(separator: "|", maxSplits: 5, omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 6, !f[0].isEmpty, !f[2].isEmpty else { return nil }
+            return ProjectLinkEntry(
+                configDir: f[0], projectDir: f[1], realPath: f[2], cwd: f[3],
+                sessionCount: Int(f[4]) ?? 0, lastActiveEpoch: Int(f[5]) ?? 0
+            )
+        }
+    }
+
+    /// Groups entries by the real directory they resolve to; shared groups
+    /// (more than one account) first, then most-recently-active.
+    static func linkGroups(from entries: [ProjectLinkEntry]) -> [ProjectLinkGroup] {
+        var byReal: [String: [ProjectLinkEntry]] = [:]
+        for entry in entries { byReal[entry.realPath, default: []].append(entry) }
+        let groups = byReal.map { realPath, group -> ProjectLinkGroup in
+            ProjectLinkGroup(
+                realPath: realPath,
+                cwd: group.first(where: { !$0.cwd.isEmpty })?.cwd ?? "",
+                accounts: Array(Set(group.map(\.configDir))).sorted(),
+                sessionCount: group.map(\.sessionCount).max() ?? 0,
+                lastActiveEpoch: group.map(\.lastActiveEpoch).max() ?? 0
+            )
+        }
+        return groups.sorted {
+            $0.isShared == $1.isShared ? $0.lastActiveEpoch > $1.lastActiveEpoch : $0.isShared
+        }
+    }
+}
+
 /// Starts or resumes an agent by creating a tmux session/window and typing the
 /// launch command into its interactive shell. Only ever invoked from the
 /// Sessions window.

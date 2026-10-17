@@ -27,6 +27,7 @@ struct AgentMuxApp: App {
                 Button("Dashboard") { model.selection = nil }
                     .keyboardShortcut("0", modifiers: .command)
                 OpenSessionsButton()
+                OpenAccountLinksButton()
                 NewTerminalButton(model: model)
                 Button("Refresh") { model.refreshAll() }
                     .keyboardShortcut("r", modifiers: .command)
@@ -65,6 +66,13 @@ struct AgentMuxApp: App {
         }
         .defaultSize(width: 620, height: 640)
 
+        Window("Account Links", id: "account-links") {
+            AccountLinksWindow()
+                .environment(model)
+                .frame(minWidth: 480, minHeight: 360)
+        }
+        .defaultSize(width: 620, height: 560)
+
         Window("Files", id: "files") {
             FileBrowserWindow()
                 .environment(model)
@@ -94,6 +102,16 @@ private struct OpenSessionsButton: View {
     var body: some View {
         Button("Sessions") { openWindow(id: "sessions") }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+    }
+}
+
+/// Opens the Account Links window (read-only map of which Claude accounts share
+/// a project's sessions, and so can be switched between).
+private struct OpenAccountLinksButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Account Links") { openWindow(id: "account-links") }
     }
 }
 

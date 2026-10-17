@@ -59,4 +59,27 @@ import Testing
         // Empty cwd falls back to ~.
         #expect(sessions[1].cwd == "~")
     }
+
+    @Test func linkGroupsShareAccountsByRealPath() {
+        let out = """
+        /root/.claude|-srv-app-demo|/root/.claude-2/projects/-srv-app-demo|/srv/app/demo|22|1792211040
+        /root/.claude-2|-srv-app-demo|/root/.claude-2/projects/-srv-app-demo|/srv/app/demo|22|1792211040
+        /root/.claude-3|-srv-app-demo|/root/.claude-2/projects/-srv-app-demo|/srv/app/demo|22|1792211040
+        /root/.claude|-data-ra-ra-v2|/root/.claude/projects/-data-ra-ra-v2||0|0
+        /root/.claude-2|-data-ra-ra-v2|/root/.claude-2/projects/-data-ra-ra-v2||0|0
+        bad line without enough fields
+        """
+        let entries = AgentSessionProbe.parseProjectLinks(out)
+        #expect(entries.count == 5) // bad line skipped
+        let groups = AgentSessionProbe.linkGroups(from: entries)
+        let shared = groups.filter(\.isShared)
+        #expect(shared.count == 1)
+        #expect(shared[0].cwd == "/srv/app/demo")
+        #expect(shared[0].accounts == ["/root/.claude", "/root/.claude-2", "/root/.claude-3"])
+        #expect(shared[0].sessionCount == 22)
+        // The shared group sorts ahead of the independent ones.
+        #expect(groups.first?.isShared == true)
+        // ra-v2 is two separate real dirs, so neither is shared.
+        #expect(groups.filter { $0.realPath.hasSuffix("ra-v2") }.allSatisfy { !$0.isShared })
+    }
 }
