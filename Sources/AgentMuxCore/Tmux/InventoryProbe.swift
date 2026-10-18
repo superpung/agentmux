@@ -111,18 +111,33 @@ public enum InventoryProbe {
             # active one as the newest .jsonl in the pane's project dir.
             { [ -z "$res" ] || [ ! -f "$lf" ]; } && lf=$(ls -t "$ccfg/projects/$cenc/"*.jsonl 2>/dev/null | head -n 1)
             if [ -n "$lf" ] && [ -f "$lf" ]; then
+              clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+              # Follow Claude's continuation chain. When a resumed session is
+              # compacted it writes {"type":"continued-in","continuedInSessionId":
+              # "<next>"} right after its last real turn and moves new turns to
+              # <next>, while the old file keeps only bookkeeping and the --resume
+              # id on the cmdline stays stale. Read the file once (reversed) to get
+              # the last real turn AND any continuation pointer (the awk stops at
+              # the first turn from the end, so idle/non-continued files cost the
+              # same as before), hopping to the live successor so active/usage/
+              # model are not read from the stale file. Timestamps/ids only.
+              rts=""; re=""; hop=0
+              while [ -f "$lf" ] && [ "$hop" -lt 10 ]; do
+                chain=$(tac "$lf" 2>/dev/null | jq -rc 'if .type=="continued-in" then "C "+(.continuedInSessionId // "") elif (.type=="assistant" or .type=="user") then "T "+(.timestamp // "") else empty end' 2>/dev/null | awk '/^C /{c=$2} /^T /{print "T "$2; print "C "c; exit}')
+                rts=$(echo "$chain" | sed -n 's/^T //p')
+                re=$(date -d "$rts" +%s 2>/dev/null)
+                { [ -n "$re" ] && [ $(( $(date +%s) - re )) -lt 3600 ]; } && break
+                nxt=$(echo "$chain" | sed -n 's/^C //p')
+                [ -n "$nxt" ] || break
+                nf="$ccfg/projects/$cenc/$nxt.jsonl"
+                { [ -f "$nf" ] && [ "$nf" != "$lf" ]; } || break
+                lf="$nf"; hop=$((hop+1))
+              done
               lage=$(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))
               ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
               echo "log $ev $lage"
-              clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
               # A definitive Claude log event means we need no screen fallback.
               case "$ev" in */turn_duration|assistant/*|user/*) [ -n "$clpane" ] && logpanes="$logpanes$clpane " ;; esac
-              # Last active = the last real turn (assistant/user), NOT the file
-              # mtime: Claude Code keeps touching the transcript with bookkeeping
-              # (modes, hooks, latches) long after the agent went idle. Only the
-              # timestamp is read. tac stops at the first match from the end.
-              rts=$(tac "$lf" 2>/dev/null | jq -r 'select(.type=="assistant" or .type=="user") | .timestamp // empty' 2>/dev/null | head -n 1)
-              re=$(date -d "$rts" +%s 2>/dev/null)
               [ -n "$clpane" ] && [ -n "$re" ] && echo "@@active $clpane $(( $(date +%s) - re ))"
               # Context size = the last assistant turn's prompt (input + cached +
               # cache-creation tokens), from a bounded tail. Numbers only.
