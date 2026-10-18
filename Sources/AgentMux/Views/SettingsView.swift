@@ -43,6 +43,19 @@ private struct GeneralSettings: View {
                 Text("Agent terminals are drawn for the terminal they run in, which is usually dark. If a terminal shows a dark input box or unreadable colors on a light background, pin this to Dark.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                ForEach(StatusBarField.allCases, id: \.self) { field in
+                    Toggle(field.label, isOn: Binding(
+                        get: { model.showsStatusField(field) },
+                        set: { model.setStatusField(field, $0) }
+                    ))
+                }
+            } header: {
+                Text("Status bar")
+            } footer: {
+                Text("Choose which chips the bottom status bar shows for the selected agent. The agent version is always in the hover tooltip.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

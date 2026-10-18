@@ -207,6 +207,20 @@ final class AppModel {
         return terminalTheme
     }
 
+    /// Which chips the bottom status bar shows. Version is off by default (it is
+    /// always available in the hover tooltip); the rest are on.
+    private(set) var statusBarFields: Set<StatusBarField> =
+        (UserDefaults.standard.array(forKey: "statusBarFields") as? [String])
+            .map { Set($0.compactMap(StatusBarField.init(rawValue:))) }
+        ?? StatusBarField.defaultVisible
+
+    func showsStatusField(_ field: StatusBarField) -> Bool { statusBarFields.contains(field) }
+
+    func setStatusField(_ field: StatusBarField, _ on: Bool) {
+        if on { statusBarFields.insert(field) } else { statusBarFields.remove(field) }
+        UserDefaults.standard.set(statusBarFields.map(\.rawValue), forKey: "statusBarFields")
+    }
+
     // MARK: Account links & switching
 
     /// Which tab the combined container window (Sessions / Accounts) shows.

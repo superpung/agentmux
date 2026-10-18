@@ -137,6 +137,11 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var logStates: [String: String] = [:]
     /// Token usage per agent pane, read from the session log (numbers only).
     public var usage: [String: AgentUsage] = [:]
+    /// Model id per agent pane (e.g. "claude-opus-5-5", "gpt-6-astra"), read
+    /// from the session log (metadata only).
+    public var models: [String: String] = [:]
+    /// Reasoning effort per agent pane ("medium"/"high"/"xhigh"), when known.
+    public var efforts: [String: String] = [:]
     /// Seconds since each agent pane's session log was last written — a proxy
     /// for when the agent was last active.
     public var lastActiveSeconds: [String: Int] = [:]

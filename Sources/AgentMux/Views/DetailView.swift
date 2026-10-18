@@ -190,7 +190,7 @@ private struct StatusBar: View {
                     Circle().fill(problem.color).frame(width: 7, height: 7)
                     Text(problem.text).lineLimit(1).layoutPriority(1)
                 }
-                if let usage = content?.usage {
+                if model.showsStatusField(.usage), let usage = content?.usage {
                     UsageView(usage: usage).layoutPriority(1)
                 }
             }
@@ -208,11 +208,12 @@ private struct StatusBar: View {
     @ViewBuilder private func metadata(_ ref: PaneRef) -> some View {
         HStack(spacing: 10) {
             if let agent = model.agentEntry(ref) {
-                chip(brandIcon(agent.kind), agent.configLabel)
-                if let version = agent.version { chip(icon("tag"), version) }
-                chip(icon("server.rack"), agent.device.server)
-                chip(icon("shippingbox"), agent.device.name)
-                chip(icon("folder"), agent.space.path)
+                if model.showsStatusField(.model), let label = agent.modelLabel { chip(brandIcon(agent.kind), label) }
+                if model.showsStatusField(.account) { chip(icon("person.crop.circle"), agent.configLabel) }
+                if model.showsStatusField(.version), let version = agent.version { chip(icon("tag"), version) }
+                if model.showsStatusField(.server) { chip(icon("server.rack"), agent.device.server) }
+                if model.showsStatusField(.container) { chip(icon("shippingbox"), agent.device.name) }
+                if model.showsStatusField(.folder) { chip(icon("folder"), agent.space.path) }
             } else if let pane = model.paneEntry(ref) {
                 chip(icon("terminal"), pane.command)
                 chip(icon("shippingbox"), pane.device.name)

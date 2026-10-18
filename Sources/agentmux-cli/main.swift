@@ -256,6 +256,7 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                         line += "  -> \(detection.kind.rawValue)"
                         if let version = detection.version { line += " \(version)" }
                         if let directory = detection.configDirectory { line += " [\(directory)]" }
+                        if let m = snapshot.models[pane.id] { line += " model=\(m)"; if let e = snapshot.efforts[pane.id] { line += "/\(e)" } }
                         let ev = detection.pid.flatMap { snapshot.agents[$0] }
                         let activity = ActivityDetector.resolve(kind: detection.kind, logEvent: ev?.logEvent, logAgeSeconds: ev?.logAgeSeconds, screenState: snapshot.screenStates[pane.id], logState: snapshot.logStates[pane.id], title: pane.title)
                         line += " {\(activity.activity.rawValue)/\(activity.confidence.rawValue)}"

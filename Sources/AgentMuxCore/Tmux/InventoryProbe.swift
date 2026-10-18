@@ -128,6 +128,10 @@ public enum InventoryProbe {
               # cache-creation tokens), from a bounded tail. Numbers only.
               cctx=$(tail -n 200 "$lf" 2>/dev/null | jq -r 'select(.type=="assistant") | ((.message.usage.input_tokens // 0)+(.message.usage.cache_read_input_tokens // 0)+(.message.usage.cache_creation_input_tokens // 0))' 2>/dev/null | grep -E '^[0-9]+$' | tail -n 1)
               [ -n "$clpane" ] && [ -n "$cctx" ] && [ "$cctx" -gt 0 ] && echo "@@usage $clpane $cctx - -"
+              # Current model + reasoning effort = the last assistant turn's
+              # fields (metadata only), emitted as "<model> <effort>".
+              cmodel=$(tail -n 200 "$lf" 2>/dev/null | jq -r 'select(.type=="assistant") | (.message.model // "-")+" "+(.perTurnEffort // .effort // "-")' 2>/dev/null | grep -v '^- ' | tail -n 1)
+              [ -n "$clpane" ] && [ -n "$cmodel" ] && echo "@@model $clpane $cmodel"
             fi
           fi
           # Codex session log — structural only. The process keeps its rollout
@@ -190,6 +194,14 @@ public enum InventoryProbe {
               [ -n "$cst" ] && { echo "@@logstate $cpane $cst $cage"; logpanes="$logpanes$cpane "; }
               uvals=$(printf '%s\\n' "$recent" | grep '^U ' | tail -n 1 | cut -d' ' -f2-)
               [ -n "$uvals" ] && echo "@@usage $cpane $uvals"
+              # Model: session_meta first line is cheapest; fall back to the most
+              # recent turn_context in a bounded tail for sessions whose model
+              # changed mid-run. Metadata only.
+              cmodel=$(head -n 1 "$crf" 2>/dev/null | jq -r '.payload.model? // .payload.base_instructions.provenance.model? // empty' 2>/dev/null)
+              [ -z "$cmodel" ] && cmodel=$(tail -n 3000 "$crf" 2>/dev/null | jq -r 'select((.payload.type?)=="turn_context") | .payload.model? // empty' 2>/dev/null | grep -v '^$' | tail -n 1)
+              # Effort = the configured reasoning effort for this CODEX_HOME.
+              ceffort=$(grep -E '^[[:space:]]*model_reasoning_effort' "${pch:-$HOME/.codex}/config.toml" 2>/dev/null | head -n 1 | sed 's/.*=[[:space:]]*//; s/["[:space:]]//g')
+              [ -n "$cmodel" ] && echo "@@model $cpane $cmodel ${ceffort:--}"
             fi
           fi
         done
@@ -283,6 +295,12 @@ public enum InventoryProbe {
                         contextWindow: Int(f[2]).flatMap { $0 > 0 ? $0 : nil },
                         rateLimitPercent: Double(f[3])
                     )
+                }
+            } else if let rest = line.dropPrefix("@@model ") {
+                let f = rest.split(separator: " ")
+                if f.count >= 2, isID(f[0], "%") {
+                    snapshot.models[String(f[0])] = String(f[1])
+                    if f.count >= 3, f[2] != "-" { snapshot.efforts[String(f[0])] = String(f[2]) }
                 }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
