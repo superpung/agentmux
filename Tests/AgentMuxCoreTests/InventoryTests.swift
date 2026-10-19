@@ -184,6 +184,39 @@ arg -p
         #expect(s.usage["%7"]?.contextWindow == nil)
     }
 
+    @Test func parsesLimits() throws {
+        let out = """
+        @@begin 1 n0nce
+        @@uid 0
+        @@tmux tmux 3.4
+        @@server 1 2 /tmp/tmux-0/default
+        @@section agents
+        @@usage %2 84000 200000 -
+        @@limits %2 42 97 45
+        @@limits %6 - 30 -
+        @@limits %8 55 10 20
+        @@usage %8 90000 - -
+        @@end n0nce
+        """
+        let s = try InventoryProbe.parse(out, nonce: nonce)
+        // Claude sidecar: context% + 5h + 7d, merged onto the @@usage tokens.
+        #expect(s.usage["%2"]?.contextTokens == 84000)
+        #expect(s.usage["%2"]?.contextPercent == 42)
+        #expect(s.usage["%2"]?.fiveHourPercent == 97)
+        #expect(s.usage["%2"]?.sevenDayPercent == 45)
+        #expect(abs((s.usage["%2"]?.contextUsedFraction ?? 0) - 0.42) < 1e-9)
+        // Absent fields ("-" or negative) stay nil; a limits-only pane parses.
+        #expect(s.usage["%6"]?.contextPercent == nil)
+        #expect(s.usage["%6"]?.fiveHourPercent == 30)
+        #expect(s.usage["%6"]?.sevenDayPercent == nil)
+        // Real probe order for Claude: @@limits (sidecar) first, then @@usage
+        // (transcript tokens). @@usage must MERGE, not clobber the limits.
+        #expect(s.usage["%8"]?.contextPercent == 55)
+        #expect(s.usage["%8"]?.fiveHourPercent == 10)
+        #expect(s.usage["%8"]?.sevenDayPercent == 20)
+        #expect(s.usage["%8"]?.contextTokens == 90000)
+    }
+
     @Test func inferredWindowForClaude() {
         // Over 200k must be a 1M window.
         let big = InventorySnapshot.AgentUsage(contextTokens: 668_716, contextWindow: nil).withInferredWindow()

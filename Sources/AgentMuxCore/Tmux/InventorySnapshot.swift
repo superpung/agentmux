@@ -89,17 +89,34 @@ public struct InventorySnapshot: Sendable, Equatable {
         public var contextWindow: Int?
         /// Rate-limit used percent, when the log records it (Codex weekly).
         public var rateLimitPercent: Double?
+        /// Context window used percent, reported directly (Claude status line).
+        public var contextPercent: Double?
+        /// 5-hour rolling limit used percent (Claude status line; Codex primary).
+        public var fiveHourPercent: Double?
+        /// 7-day / weekly limit used percent (Claude status line; Codex secondary).
+        public var sevenDayPercent: Double?
 
-        public init(contextTokens: Int? = nil, contextWindow: Int? = nil, rateLimitPercent: Double? = nil) {
+        public init(contextTokens: Int? = nil, contextWindow: Int? = nil, rateLimitPercent: Double? = nil,
+                    contextPercent: Double? = nil, fiveHourPercent: Double? = nil, sevenDayPercent: Double? = nil) {
             self.contextTokens = contextTokens
             self.contextWindow = contextWindow
             self.rateLimitPercent = rateLimitPercent
+            self.contextPercent = contextPercent
+            self.fiveHourPercent = fiveHourPercent
+            self.sevenDayPercent = sevenDayPercent
         }
 
         /// Fraction of the context window in use, when both are known.
         public var contextFraction: Double? {
             guard let contextTokens, let contextWindow, contextWindow > 0 else { return nil }
             return Double(contextTokens) / Double(contextWindow)
+        }
+
+        /// Context fill as a fraction (0-1): the directly-reported percent when
+        /// present (Claude status line), else computed from tokens/window.
+        public var contextUsedFraction: Double? {
+            if let contextPercent { return contextPercent / 100 }
+            return contextFraction
         }
 
         /// Claude's session log omits the context window; Claude Code uses

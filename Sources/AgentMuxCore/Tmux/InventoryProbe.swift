@@ -101,6 +101,31 @@ public enum InventoryProbe {
           # (the pane's own session file; the newest file in the dir is wrong
           # when agents share a project dir).
           if [ "$(cat /proc/$pid/comm 2>/dev/null)" = claude ] && command -v jq >/dev/null 2>&1; then
+            clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+            # Locate this pane's AgentMux status-line sidecar (our own file,
+            # matched by tmux pane; freshest wins). It carries the rate-limit
+            # windows and context% that the transcript cannot — and nothing else
+            # we trust (see the note at the consumer below). Only our own status
+            # files are read here, never the conversation.
+            scdir="${AGENTMUX_STATUS_DIR:-$HOME/.agentmux/status}"
+            sc=""
+            [ -n "$clpane" ] && [ -d "$scdir" ] && sc=$(for j in "$scdir"/*.json; do
+              [ -f "$j" ] || continue
+              [ "$(jq -r '.tmux_pane // empty' "$j" 2>/dev/null)" = "$clpane" ] && echo "$(jq -r '.updated_at // 0' "$j" 2>/dev/null) $j"
+            done 2>/dev/null | sort -rn | head -n 1 | sed 's/^[0-9][0-9]* //')
+            # Status-line sidecar (our own file, never the conversation): the
+            # ONLY source of Claude's rate-limit windows (5h/7d) and its own
+            # context%, which the transcript does not record. Last-active,
+            # activity and model come from the transcript below, NOT from here:
+            # the sidecar's updated_at tracks status-line *renders*, and a config
+            # change (e.g. installing this very script) renders once with no real
+            # turn, which would wrongly reset every idle agent's "last active" to
+            # deploy time.
+            if [ -n "$sc" ] && [ -f "$sc" ]; then
+              row=$(jq -r '[(.context.used_percentage // -1 | floor),(.rate_limits.five_hour.used_percentage // -1 | floor),(.rate_limits.seven_day.used_percentage // -1 | floor)] | @tsv' "$sc" 2>/dev/null)
+              sctx=$(printf '%s' "$row" | cut -f1); s5=$(printf '%s' "$row" | cut -f2); s7=$(printf '%s' "$row" | cut -f3)
+              echo "@@limits $clpane ${sctx:--1} ${s5:--1} ${s7:--1}"
+            fi
             res=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE -- '--resume [0-9a-f-]{36}' | head -1 | awk '{print $2}')
             ccfg=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1)
             ccfg=${ccfg:-$HOME/.claude}
@@ -209,6 +234,16 @@ public enum InventoryProbe {
               [ -n "$cst" ] && { echo "@@logstate $cpane $cst $cage"; logpanes="$logpanes$cpane "; }
               uvals=$(printf '%s\\n' "$recent" | grep '^U ' | tail -n 1 | cut -d' ' -f2-)
               [ -n "$uvals" ] && echo "@@usage $cpane $uvals"
+              # Rate-limit windows for the status bar, bucketed by window length:
+              # Codex's primary/secondary are not fixed to 5h/7d (e.g. a weekly-
+              # only plan carries the 7-day window in primary), so classify by
+              # window_minutes — <= 1 day is the 5-hour bar, longer is weekly.
+              rl=$(tail -n 500 "$crf" 2>/dev/null | jq -rc 'select((.payload.type?)=="token_count") | .payload.rate_limits' 2>/dev/null | grep -v '^null$' | tail -n 1)
+              if [ -n "$rl" ]; then
+                h5=$(printf '%s' "$rl" | jq -r '[.primary,.secondary]|map(select(.!=null and .window_minutes!=null and .window_minutes<=1440))|last|.used_percent // empty' 2>/dev/null)
+                d7=$(printf '%s' "$rl" | jq -r '[.primary,.secondary]|map(select(.!=null and .window_minutes!=null and .window_minutes>1440))|last|.used_percent // empty' 2>/dev/null)
+                { [ -n "$h5" ] || [ -n "$d7" ]; } && echo "@@limits $cpane - ${h5:--} ${d7:--}"
+              fi
               # Model: session_meta first line is cheapest; fall back to the most
               # recent turn_context in a bounded tail for sessions whose model
               # changed mid-run. Metadata only.
@@ -305,17 +340,31 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@usage ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 4, isID(f[0], "%") {
-                    snapshot.usage[String(f[0])] = InventorySnapshot.AgentUsage(
-                        contextTokens: Int(f[1]).flatMap { $0 > 0 ? $0 : nil },
-                        contextWindow: Int(f[2]).flatMap { $0 > 0 ? $0 : nil },
-                        rateLimitPercent: Double(f[3])
-                    )
+                    // Merge, don't replace: @@limits (context%/5h/7d) may have
+                    // already populated this pane's usage, and a "-" field here
+                    // means "unknown", which must not clobber what is there.
+                    let pane = String(f[0])
+                    var u = snapshot.usage[pane] ?? InventorySnapshot.AgentUsage()
+                    if let t = Int(f[1]), t > 0 { u.contextTokens = t }
+                    if let w = Int(f[2]), w > 0 { u.contextWindow = w }
+                    if let r = Double(f[3]) { u.rateLimitPercent = r }
+                    snapshot.usage[pane] = u
                 }
             } else if let rest = line.dropPrefix("@@model ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 2, isID(f[0], "%") {
                     snapshot.models[String(f[0])] = String(f[1])
                     if f.count >= 3, f[2] != "-" { snapshot.efforts[String(f[0])] = String(f[2]) }
+                }
+            } else if let rest = line.dropPrefix("@@limits ") {
+                let f = rest.split(separator: " ")
+                if f.count >= 4, isID(f[0], "%") {
+                    let pane = String(f[0])
+                    var u = snapshot.usage[pane] ?? InventorySnapshot.AgentUsage()
+                    if let c = Double(f[1]), c >= 0 { u.contextPercent = c }
+                    if let h = Double(f[2]), h >= 0 { u.fiveHourPercent = h }
+                    if let d = Double(f[3]), d >= 0 { u.sevenDayPercent = d }
+                    snapshot.usage[pane] = u
                 }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)

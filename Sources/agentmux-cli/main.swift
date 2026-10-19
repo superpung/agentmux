@@ -269,7 +269,10 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                         if let u = snapshot.usage[pane.id] {
                             var parts: [String] = []
                             if let c = u.contextTokens { parts.append("ctx \(c)\(u.contextWindow.map { "/\($0)" } ?? "")") }
+                            if let cp = u.contextPercent { parts.append("ctx% \(cp)") }
                             if let r = u.rateLimitPercent { parts.append("limit \(r)%") }
+                            if let h = u.fiveHourPercent { parts.append("5h \(h)%") }
+                            if let d = u.sevenDayPercent { parts.append("7d \(d)%") }
                             if !parts.isEmpty { line += " usage[\(parts.joined(separator: " "))]" }
                         }
                         if let a = snapshot.lastActiveSeconds[pane.id] { line += " active[\(a)s]" }
