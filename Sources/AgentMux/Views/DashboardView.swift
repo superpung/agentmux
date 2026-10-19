@@ -49,7 +49,9 @@ struct DashboardView: View {
         agents.sorted { a, b in
             let ra = rank(a.activity), rb = rank(b.activity)
             if ra != rb { return ra < rb }
-            return (a.lastActiveSeconds ?? .max) < (b.lastActiveSeconds ?? .max)
+            let la = a.lastActiveSeconds ?? .max, lb = b.lastActiveSeconds ?? .max
+            if la != lb { return la < lb }
+            return a.identityKey < b.identityKey   // stable tiebreaker: no reshuffle on refresh
         }
     }
 
@@ -166,10 +168,16 @@ private struct UsageBadges: View {
         // say what each ring is. The ring (fill + colour) carries the value, so
         // there is no wall of percentages; the exact figure is in the tooltip.
         HStack(spacing: 9) {
-            if let fraction = usage.contextFraction {
-                gauge("Ctx", fraction, help: "Context window used: \(percent(fraction))")
+            if let fraction = usage.contextUsedFraction {
+                gauge("Ctx", fraction, help: "Context used: \(percent(fraction))")
             }
-            if let rate = usage.rateLimitPercent {
+            if let h5 = usage.fiveHourPercent {
+                gauge("5h", h5 / 100, help: "5-hour limit used: \(percent(h5 / 100))")
+            }
+            if let d7 = usage.sevenDayPercent {
+                gauge("7d", d7 / 100, help: "Weekly limit used: \(percent(d7 / 100))")
+            }
+            if usage.fiveHourPercent == nil, usage.sevenDayPercent == nil, let rate = usage.rateLimitPercent {
                 gauge("Rate", rate / 100, help: "Rate limit used: \(percent(rate / 100))")
             }
         }

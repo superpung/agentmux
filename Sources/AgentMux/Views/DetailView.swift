@@ -281,17 +281,17 @@ private struct StatusBar: View {
     }
 }
 
-/// Mostly-graphical usage readout: a context meter and (Codex) a rate-limit
-/// meter, each a bar + percent. Claude's log records neither the window nor a
-/// rate limit, so it shows the absolute context size instead.
+/// Mostly-graphical usage readout: a labelled bar + percent for context fill
+/// and, when the status line reports them, the 5-hour and 7-day (weekly) limit
+/// windows. When only an absolute context size is known (no window / percent),
+/// it shows that number instead.
 private struct UsageView: View {
     let usage: InventorySnapshot.AgentUsage
 
     var body: some View {
-        HStack(spacing: 14) {
-            if let fraction = usage.contextFraction {
-                Meter(systemImage: "square.stack.3d.up.fill", fraction: fraction,
-                      tooltip: "Context: \(short(usage.contextTokens)) / \(short(usage.contextWindow)) tokens")
+        HStack(spacing: 12) {
+            if let fraction = usage.contextUsedFraction {
+                Meter(label: "ctx", fraction: fraction, tooltip: contextTooltip)
             } else if let context = usage.contextTokens {
                 HStack(spacing: 5) {
                     Image(systemName: "square.stack.3d.up.fill").imageScale(.medium).foregroundStyle(.secondary)
@@ -300,34 +300,45 @@ private struct UsageView: View {
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                 .help("Context: \(context) tokens (the model's window is not in the log)")
             }
-            if let rate = usage.rateLimitPercent {
-                Meter(systemImage: "hourglass", fraction: rate / 100, tooltip: "Rate limit used: \(rate)%")
+            if let h5 = usage.fiveHourPercent {
+                Meter(label: "5h", fraction: h5 / 100, tooltip: "5-hour limit used: \(Int(h5.rounded()))%")
+            }
+            if let d7 = usage.sevenDayPercent {
+                Meter(label: "7d", fraction: d7 / 100, tooltip: "Weekly (7-day) limit used: \(Int(d7.rounded()))%")
+            }
+            if usage.fiveHourPercent == nil, usage.sevenDayPercent == nil, let rate = usage.rateLimitPercent {
+                Meter(label: "rate", fraction: rate / 100, tooltip: "Rate limit used: \(Int(rate.rounded()))%")
             }
         }
     }
 
-    private func short(_ n: Int?) -> String { n.map(Self.short) ?? "?" }
+    private var contextTooltip: String {
+        if let t = usage.contextTokens, let w = usage.contextWindow {
+            return "Context: \(Self.short(t)) / \(Self.short(w)) tokens"
+        }
+        if let p = usage.contextPercent { return "Context used: \(Int(p.rounded()))%" }
+        return "Context"
+    }
 
     static func short(_ n: Int) -> String {
         n >= 1000 ? "\(n / 1000)k" : "\(n)"
     }
 }
 
-/// An icon, a bar, and a trailing percentage.
+/// A short text label, a bar, and a trailing percentage.
 private struct Meter: View {
-    let systemImage: String
+    let label: String
     let fraction: Double
     let tooltip: String
 
     var body: some View {
         HStack(spacing: 6) {
-            // Fixed box so the context and hourglass glyphs read the same size.
-            Image(systemName: systemImage).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 15)
+            Text(label).font(.footnote).foregroundStyle(.tertiary)
             Capsule().fill(.quaternary)
-                .frame(width: 56, height: 6)
+                .frame(width: 44, height: 6)
                 .overlay(alignment: .leading) {
                     Capsule().fill(color)
-                        .frame(width: 56 * max(0, min(1, fraction)), height: 6)
+                        .frame(width: 44 * max(0, min(1, fraction)), height: 6)
                 }
             Text("\(Int((fraction * 100).rounded()))%")
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()

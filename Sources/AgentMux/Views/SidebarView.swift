@@ -263,9 +263,11 @@ struct SidebarView: View {
     }
 
     /// Sort key: pinned, then activity (attention / working / other), then
-    /// most-recently-active.
-    private func rank(_ agent: AgentEntry) -> (Int, Int, Int) {
-        (model.isPinned(agent.identityKey) ? 0 : 1, Self.activityRank(agent.activity), agent.lastActiveSeconds ?? .max)
+    /// most-recently-active, then identityKey as a stable tiebreaker so equal
+    /// keys (e.g. several agents sharing a last-active second) keep a fixed
+    /// order instead of reshuffling on every refresh.
+    private func rank(_ agent: AgentEntry) -> (Int, Int, Int, String) {
+        (model.isPinned(agent.identityKey) ? 0 : 1, Self.activityRank(agent.activity), agent.lastActiveSeconds ?? .max, agent.identityKey)
     }
 
     static func activityRank(_ activity: AgentActivity) -> Int {
