@@ -6,7 +6,7 @@ user-facing overview see [README.md](../README.md).
 ## Toolchain
 
 AgentMux builds with the swift.org **Swift 6.4** toolchain, installed per-user
-at `~/Library/Developer/Toolchains/swift-6.4-RELEASE.xctoolchain`. Xcode is not
+at `~/Library/Developer/Toolchains/swift-6.4.0-RELEASE.xctoolchain`. Xcode is not
 required. `scripts/env.sh` points `SWIFT` at that toolchain by path (CommandLine
 Tools' `xcrun` ignores `TOOLCHAINS`), and defines a `swiftpm` helper that runs
 the native build engine. Override the location with `AGENTMUX_TOOLCHAIN`.

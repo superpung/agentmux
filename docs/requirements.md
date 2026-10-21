@@ -5,7 +5,7 @@ Translated from the original Chinese handoff document (v1.0, 2026-10-09). The or
 The following user decisions override the corresponding text in the translated document below.
 
 - **Terminal engine:** use the terminal engine (https://github.com/Lakr233/the terminal engine, the `the terminal engine` product) instead of a terminal component. a terminal component is no longer evaluated. (Affects sections 3.2, 8.2, 17.9, 20.)
-- **Personal use only:** the app is for the user's personal use only and will not be distributed. Code from the reference projects (a Mac agent console, a reference project, a reference project, etc.) may be referenced or reused regardless of their licenses; sources should still be recorded. (Affects sections 17 and 18.)
+- **Public distribution** (updated 2026-10-21, supersedes the original "personal use only" scope): the app is published as a prebuilt macOS release on GitHub. Third-party components are used under their own licenses and recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md); reused or adapted code records its source there. (Affects sections 17 and 18.)
 - **No Xcode:** the project builds with a per-user swift.org Swift toolchain plus Command Line Tools; see [docs/decisions/0001-toolchain-terminal-packaging.md](decisions/0001-toolchain-terminal-packaging.md).
 - **Disk budget:** disk usage on the user's Mac must stay small; any new local install needs a storage budget approved by the user first.
 - **Observe-only early phase:** the early phase is observe-only on the remote server: no changes to the server, containers or tmux without the user's prior approval.
@@ -19,9 +19,9 @@ The following user decisions override the corresponding text in the translated d
 **Written and sources verified on:** 2026-10-09  
 **Audience:** the development agent responsible for designing, implementing, testing and delivering this app  
 **Tentative project codename:** Remote Agent Console (a working name only; it is not required to be the product name)  
-**Delivery goal:** a graphical application used on the Mac that directly observes and operates tmux and coding agents inside existing Docker containers on remote servers, without depending on backend and without migrating the existing runtime environment.
+**Delivery goal:** a graphical application used on the Mac that directly observes and operates tmux and coding agents inside existing Docker containers on remote servers, without depending on a separate agent backend and without migrating the existing runtime environment.
 
-> **The requirement in one sentence: I want the a Mac agent console-style Mac App experience of "all agents visible in one place, click to enter the real terminal", but the underlying stack is still my existing SSH → Docker → tmux → Codex / Claude Code. The app is a client of this environment, not a new agent runtime.**
+> **The requirement in one sentence: I want a unified Mac App experience of "all agents visible in one place, click to enter the real terminal", but the underlying stack is still my existing SSH → Docker → tmux → Codex / Claude Code. The app is a client of this environment, not a new agent runtime.**
 
 ## Reading guide and factual boundaries
 
@@ -68,7 +68,7 @@ The user starts containers, enters containers, creates tmux sessions and starts 
 | Agent invocation relationships | There is a workflow where Codex makes decisions and invokes the Claude Code CLI to execute | Distinguish standalone terminal agents from child processes; do not fake a standalone interactive terminal for a child agent |
 | Performance | Considers VS Code Remote heavy; has experienced container / experiment high load making `docker exec` or SSH unavailable | Remote collection must be lightweight, with timeouts, rate limiting and backoff; it must not amplify load |
 | Change preference | Prefers incremental changes that do not break existing configuration and tasks | Attach-only by default; any installation, configuration write or restart requires explicit authorization |
-| UI reference | Likes the Mac App UI of `a Mac agent console` | Borrow the unified sidebar, status display and terminal switching; do not inherit the backend dependency |
+| UI reference | Likes a unified Mac agent-console UI | Borrow the unified sidebar, status display and terminal switching; do not inherit any such tool's backend |
 
 Do not hard-code past container names, IPs, or CPU / memory quotas into the program, and do not infer the user's actual Mac chip or OS version. Historical server specs only indicate that the setup is "resource-sensitive"; they must not be used as a reason to relax the client budget without limit.
 
@@ -118,7 +118,7 @@ These four items take priority over visual animations, a file browser, automatic
 
 | ID | Constraint |
 |---|---|
-| C-01 | Do not depend on backend; installing or starting backend must not be required on the Mac, the host or the containers. |
+| C-01 | Do not depend on any separate agent backend; installing or starting such a backend must not be required on the Mac, the host or the containers. |
 | C-02 | Keep the remote Docker + tmux way of running and keeping tasks alive; do not migrate tasks into a new multiplexer or runtime. |
 | C-03 | Must support Mac → SSH host → `docker exec` container → tmux; must not require an SSH service in the container, directly exposed ports or an additional public entry point. |
 | C-04 | Must discover sessions that already existed before the app started and that were created manually in other terminals. |
@@ -307,7 +307,7 @@ Use "unified list + real terminal" as the main layout, not multiple chat windows
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-This mockup shows the information structure, not a pixel-level design. a Mac agent console's overall interaction may be used as a reference, but do not copy its branding, icon assets or unlicensed code.
+This mockup shows the information structure, not a pixel-level design. Existing Mac agent consoles may be used as interaction references, but do not copy any branding, icon assets or unlicensed code.
 
 ### 6.2 Agent row
 
@@ -443,7 +443,7 @@ macOS App
 
 **The most important architectural principle: DockerTargetAdapter must be shared by all remote operations.** There must never be two separate paths where "the terminal goes into the container, but state scanning / log lookup still runs on the host".
 
-The domain model depends neither on a specific terminal engine nor on backend data structures. Detectors must not manipulate the UI directly, let alone hold permission to send user input automatically.
+The domain model depends neither on a specific terminal engine nor on any external backend's data structures. Detectors must not manipulate the UI directly, let alone hold permission to send user input automatically.
 
 ### 8.2 Terminal engine choice
 
@@ -898,7 +898,6 @@ All of the following projects are technical references, **not finished products 
 
 | Project | Parts to reference first | Relationship to this project | License / reuse notes |
 |---|---|---|---|
-| `a Mac agent console` | Mac unified sidebar, search, state, real terminal interaction, separation of UI and data layer | The primary product experience reference; the backend backend is not adopted | a noncommercial license; do not copy it over as if it were MIT code. [R01][R01L] |
 | `org/a reference project` | tmux-first Mac app, embedded terminal, session / window / pane tree | Conceptually very close; reference its object relationships and terminal navigation | The README currently lists the License as TBD; by default reference the design only, and resolve licensing before reusing any code. [R02] |
 | `org/a reference project` | Layered agent detection, incremental logs, rules and state merging | Key reference for the recognition engine; not a mandatory runtime dependency | MIT; notices must still be kept and specific dependencies checked. [R03][R03L] |
 | `org/a reference project` | Remote tmux Mirroring, control protocol and native pane rendering | Important reference for the control-mode approach | Project code is GPL-3.0-or-later by default; a designated server directory uses BUSL-1.1 instead; do not reuse it on the assumption that it is MIT. [R04L] |
@@ -908,13 +907,13 @@ All of the following projects are technical references, **not finished products 
 | `org/a terminal component` | Swift / AppKit embeddable terminal and examples | Terminal component to evaluate first by default | MIT; pin the actual API version. [R08][R08L] |
 | `org/the terminal engine` | the terminal engine, terminal embedding examples and rendering | Alternative terminal engine candidate | The repository states MIT; verify dependency / bridging components separately. [R09] |
 
-### 17.2 a Mac agent console: mainly learn from the interaction, do not inherit the backend model
+### 17.2 Unified Mac agent consoles: learn from the interaction, not the backend
 
-The project puts multi-device agents, terminals, search and state into a native Mac interface; its architecture explicitly separates `Packages/UIKit` and `Sources/App` into layers, and the backend works through backend RPC / attach. [R01]
+Such tools put multi-device agents, terminals, search and state into a native Mac interface, typically separating the UI layer from a backend that works through its own RPC / attach.
 
-This project should learn from the experience of "click an agent to enter the real terminal", "location is clear" and "state is right in the sidebar", rather than simply replacing `agent attach` with a single tmux command. The underlying objects, discovery method, lifecycle and event protocol are all different.
+This project should learn from the experience of "click an agent to enter the real terminal", "location is clear" and "state is right in the sidebar", rather than simply replacing a proprietary `agent attach` command with a single tmux command. The underlying objects, discovery method, lifecycle and event protocol are all different.
 
-**Source reading entry points:** the Architecture section of the README, `Packages/UIKit`, `Sources/App`. First confirm the current terminal engine and migration status, then borrow its way of decoupling the UI from transport. Where code, assets or derivative versions are involved, handle them according to its license first; whether the user will release commercially in the future has not been decided, so by default do not fork it directly as the base of this project. [R01L]
+**Approach:** borrow the way such tools decouple the UI from transport, but do not adopt a bundled backend. Where any reference project's code, assets or derivative versions are involved, handle them according to its license first, and do not fork one directly as the base of this project.
 
 ### 17.3 a reference project: the closest tmux-first product model
 
@@ -966,7 +965,7 @@ a terminal component provides a Swift terminal engine and an AppKit frontend, an
 
 the terminal engine provides the terminal engine and embedding examples and can be a candidate on performance and features. Both should be tested in practice with the user's Chinese input, the Codex / Claude TUIs, multi-line paste and the SSH / Docker resize chain, rather than chosen on the basis of marketing or screenshots. [R09]
 
-**Recommended selection conclusion:** first build your own domain model and TargetAdapter; use an existing library for the terminal; borrow state detection from a reference project / a reference project; borrow the UI from a Mac agent console; borrow the control protocol from the official documentation and the designs of a reference project / a reference terminal. Do not bring in an entire mismatched backend just to save code in the first step.
+**Recommended selection conclusion:** first build your own domain model and TargetAdapter; use an existing library for the terminal; borrow state detection from a reference project / a reference project; borrow the UI from existing Mac agent consoles; borrow the control protocol from the official documentation and the designs of a reference project / a reference terminal. Do not bring in an entire mismatched backend just to save code in the first step.
 
 ---
 
@@ -982,7 +981,7 @@ the terminal engine provides the terminal engine and embedding examples and can 
 | Existing tmux hooks / options | May change attach / detach behavior | Detect and explain; do not rewrite silently |
 | Native single-pane mirroring | Technically more complex than plain attach | Prototype first; do not claim full TUI support with an incomplete parser |
 | Precise state with no remote helper at all | Not guaranteed to be achievable for every agent | Basic recognition + unknown; enhancements authorized separately |
-| Reference code licenses | a Mac agent console noncommercial, a reference project TBD, a reference project split licensing | Avoid direct copying by default; maintain an inventory of dependencies and provenance |
+| Reference code licenses | a reference project TBD, a reference project split licensing | Avoid direct copying by default; maintain an inventory of dependencies and provenance |
 | Commercialization / open source / App Store | Not specified by the user | Do not decide on the user's behalf; for now keep dependency choices and packaging strategy adjustable |
 
 There is no need to halt all development because of the open items above. Architecture, tests and local prototypes that do not depend on real credentials can be completed first; only parameters that genuinely affect permissions, security or real connections need to be provided by the user before the corresponding acceptance step.
@@ -1024,11 +1023,11 @@ The delivery report maps features and tests by F-xx / T-xx, stating which featur
 
 > You will develop a macOS remote agent console for me. Please read this entire document, treat C-01 through C-10 as inviolable hard constraints, and treat the P0 requirements and the acceptance matrix as the completion criteria for the first version.
 >
-> My existing workflow is Mac → SSH host → docker exec into an existing container → existing tmux → Codex / Claude Code. I want a Mac agent console-style centralized display and real terminal interaction; I do not want backend, I do not want tmux migrated, and I do not want something that only manages tasks newly created by the app.
+> My existing workflow is Mac → SSH host → docker exec into an existing container → existing tmux → Codex / Claude Code. I want a unified centralized display and real terminal interaction; I do not want a separate agent backend, I do not want tmux migrated, and I do not want something that only manages tasks newly created by the app.
 >
 > First inspect the current workspace and the available build environment; give a short implementation plan, then start on the minimal vertical slice: native Mac window → system SSH → DockerTargetAdapter → list existing tmux → attach inside the app. Do not start by piling up lots of mock UI, and do not just produce yet another design document.
 >
-> For UI and module layering, reference a Mac agent console; for the tmux-first model, a reference project; for recognition logic, a reference project / a reference project; for control mode, the official tmux documentation, a reference project and a reference terminal; for the terminal component, evaluate a terminal component first and compare with the terminal engine if necessary. Check the current license and commit of any code you intend to reuse first. a Mac agent console's noncommercial license, a reference project's TBD license and a reference project's GPL / split licensing must not be ignored.
+> For UI and module layering, reference existing Mac agent consoles; for the tmux-first model, a reference project; for recognition logic, a reference project / a reference project; for control mode, the official tmux documentation, a reference project and a reference terminal; for the terminal component, evaluate a terminal component first and compare with the terminal engine if necessary. Check the current license and commit of any code you intend to reuse first. a reference project's TBD license and a reference project's GPL / split licensing must not be ignored.
 >
 > Base mode does not install resident remote services, does not rewrite my SSH, shell, tmux or agent configuration, does not restart containers / Docker / agents, does not automatically add permission-bypass flags, and does not add a Docker virtual machine on the Mac. When real connection parameters are needed, use only targets I have explicitly provided or that exist in my trusted SSH configuration; do not guess credentials.
 >
@@ -1046,8 +1045,6 @@ The following are entry points to public projects and official documentation, al
 
 | ID | Source | Scope of use in this document |
 |---|---|---|
-| [R01] | a Mac agent console repository / README | Product positioning, UI, UIKit and backend dependency |
-| [R01L] | a Mac agent console LICENSE.md | a noncommercial license identifier and scope |
 | [R02] | a reference project repository / README | tmux-first architecture, metadata opt-in, License TBD |
 | [R03] | a reference project repository / README | Layered recognition, providers, state, incremental logs |
 | [R03L] | a reference project LICENSE | MIT license |
@@ -1074,8 +1071,6 @@ The following are entry points to public projects and official documentation, al
 | [R19] | Official Claude Code Hooks reference documentation | Structured hooks, Stop and related event semantics |
 | [R20] | Official Linux kernel `/proc` documentation | Process information and access boundaries |
 
-[R01]: a Mac agent console
-[R01L]: a noncommercial license
 [R02]: https://github.com/org/a reference project
 [R03]: https://github.com/org/a reference project
 [R03L]: https://raw.githubusercontent.com/org/a reference project/main/LICENSE
