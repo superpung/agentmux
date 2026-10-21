@@ -1,6 +1,5 @@
-// Theme and font settings adapted from a Mac agent console's GhosttyRuntime
-// (a Mac agent console, an upstream reference, a noncommercial license;
-// reused for personal, non-distributed use).
+// The shared Ghostty terminal runtime: font, cursor and key settings, and a
+// light/dark theme built on Apple Terminal's standard 16-color ANSI palette.
 import AppKit
 import Foundation
 import GhosttyTerminal

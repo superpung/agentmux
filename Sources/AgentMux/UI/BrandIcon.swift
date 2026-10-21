@@ -1,7 +1,6 @@
-// Icon loading and badges adapted from a Mac agent console
-// (a Mac agent console, an upstream reference, a noncommercial license;
-// reused for personal, non-distributed use). The SVGs in Resources/Icons come
-// from a Mac agent console's bundle (LobeHub agent icons, Simple Icons OS icons).
+// Bundled SVG icon loading and the small badges built on it. The SVG assets in
+// Resources/Icons are LobeHub agent icons (MIT) and Simple Icons OS icons (CC0);
+// see THIRD_PARTY_NOTICES.md.
 import AgentMuxCore
 import AppKit
 import SwiftUI
