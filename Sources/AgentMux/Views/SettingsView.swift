@@ -147,7 +147,7 @@ private struct HostEditor: View {
                     .autocorrectionDisabled()
             }
             .textFieldStyle(.roundedBorder)
-            Text("The SSH destination is an alias from ~/.ssh/config or user@host. No passwords or keys — authentication goes through ssh and ssh-agent.")
+            Text("The SSH destination is an alias from ~/.ssh/config or user@host. No passwords or keys; authentication goes through ssh and ssh-agent.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

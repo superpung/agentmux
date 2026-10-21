@@ -61,7 +61,7 @@ struct AccountLinksWindow: View {
                 let shared = groups.filter(\.isShared)
                 let independent = groups.filter { !$0.isShared }
                 if !shared.isEmpty {
-                    Section("Shared — switchable accounts") {
+                    Section("Shared, switchable accounts") {
                         ForEach(shared) { GroupRow(group: $0, running: running(in: $0)) }
                     }
                 }
@@ -74,7 +74,7 @@ struct AccountLinksWindow: View {
                 }
                 if !scratch.isEmpty {
                     Section {
-                        DisclosureGroup("Temporary (/tmp) — \(scratch.count)") {
+                        DisclosureGroup("Temporary (/tmp): \(scratch.count)") {
                             ForEach(scratch) { GroupRow(group: $0, running: running(in: $0)) }
                         }
                     }

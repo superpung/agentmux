@@ -449,7 +449,7 @@ private struct LaunchAgentSheet: View {
                 Button { browsing = true } label: { Image(systemName: "folder") }
                     .help("Browse the container")
             }
-            Text("A new \(kind == .codex ? "Codex" : "Claude Code") agent starts in a tmux session here — created if it doesn't exist.")
+            Text("A new \(kind == .codex ? "Codex" : "Claude Code") agent starts in a tmux session here; created if it doesn't exist.")
                 .font(.caption2).foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
