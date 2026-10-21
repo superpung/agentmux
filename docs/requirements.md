@@ -4,8 +4,8 @@ Translated from the original Chinese handoff document (v1.0, 2026-10-09). The or
 
 The following user decisions override the corresponding text in the translated document below.
 
-- **Terminal engine:** use the terminal engine (https://github.com/Lakr233/the terminal engine, the `the terminal engine` product) instead of a terminal component. a terminal component is no longer evaluated. (Affects sections 3.2, 8.2, 17.9, 20.)
-- **Public distribution** (updated 2026-10-21, supersedes the original "personal use only" scope): the app is published as a prebuilt macOS release on GitHub. Third-party components are used under their own licenses and recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md); reused or adapted code records its source there. (Affects sections 17 and 18.)
+- **Terminal engine:** use an embeddable terminal engine (recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)). (Affects sections 3.2, 8.2, 20.)
+- **Public distribution** (updated 2026-10-21, supersedes the original "personal use only" scope): the app is published as a prebuilt macOS release on GitHub. Third-party components are used under their own licenses and recorded in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md); reused or adapted code records its source there. (Affects section 18.)
 - **No Xcode:** the project builds with a per-user swift.org Swift toolchain plus Command Line Tools; see [docs/decisions/0001-toolchain-terminal-packaging.md](decisions/0001-toolchain-terminal-packaging.md).
 - **Disk budget:** disk usage on the user's Mac must stay small; any new local install needs a storage budget approved by the user first.
 - **Observe-only early phase:** the early phase is observe-only on the remote server: no changes to the server, containers or tmux without the user's prior approval.
@@ -31,7 +31,7 @@ This document contains three kinds of information of different nature, which mus
 
 Dependency APIs, licenses and agent log formats may change. This document records what was visible on the verification date; that does not mean every version installed on the remote side supports it. Before development, record the actual environment versions and pin tags / commits for the dependencies you intend to use. Do not treat the hosts, containers, usernames, paths or versions in this document's examples as real configuration.
 
-Suggested reading order: first read sections 1–5 to establish "what to build"; then read sections 7–12 to understand the main risks; implement and verify according to sections 15–16; section 17 is for researching the reference projects. Section 20 can be used directly as the initial task instruction for the development agent.
+Suggested reading order: first read sections 1–5 to establish "what to build"; then read sections 7–12 to understand the main risks; implement and verify according to sections 15–16. Section 20 can be used directly as the initial task instruction for the development agent.
 
 ---
 
@@ -131,7 +131,7 @@ These four items take priority over visual animations, a file browser, automatic
 
 ### 3.2 Recommended default approach (not to be presented as a technical choice the user has already signed off on)
 
-The default is a native SwiftUI + AppKit shell, evaluating a terminal component first for the embedded terminal, using the system `/usr/bin/ssh`, and communicating on the remote side through the Docker CLI and tmux. the terminal engine is a comparable terminal engine candidate. The final dependencies, minimum macOS version and window structure should be decided through prototyping.
+The default is a native SwiftUI + AppKit shell, with an embeddable terminal component, using the system `/usr/bin/ssh`, and communicating on the remote side through the Docker CLI and tmux. The final dependencies, minimum macOS version and window structure should be decided through prototyping.
 
 Base mode does not install any resident remote service and does not require Node.js, Python, a Rust toolchain or a browser on the remote side. Optional lightweight collectors / hooks are used only to enhance state recognition and must not become a prerequisite for "being able to see and connect to existing tmux".
 
@@ -265,7 +265,7 @@ A Docker container must be an object in the application's data model, not merely
 | F-37 | P1 | Map each remote pane to an independent native terminal view, or provide a local multi-pane mirror; do not fake it by splitting or moving remote panes. |
 | F-38 | P1 | Explicit features to start a new session / window / pane / agent; follow the existing configuration by default and do not add permission-bypass flags. |
 
-The first version may use "native sidebar + embedded full tmux terminal", rather than having to start with a reference terminal-style native per-pane mirroring. But this phasing must not be used to downgrade the final interaction to a read-only snapshot.
+The first version may use "native sidebar + embedded full tmux terminal", rather than having to start with native per-pane mirroring. But this phasing must not be used to downgrade the final interaction to a read-only snapshot.
 
 ### 5.6 Search, notifications and diagnosability
 
@@ -447,9 +447,7 @@ The domain model depends neither on a specific terminal engine nor on any extern
 
 ### 8.2 Terminal engine choice
 
-By default, first build a minimal vertical prototype with a terminal component, because it provides a Swift / AppKit terminal component; verify Chinese input, paste, mouse and TUI behavior on the actual dependency version. [R08]
-
-A comparison with the terminal engine is also allowed, but evaluate build complexity, Swift bridging, release packaging, the embedding API and the license. the terminal engine provides an embeddable library and examples, but whether it suits this project must be tested in practice; it cannot simply be equated with "if the the terminal engine app is installed, its terminal can be embedded". [R09]
+Build a minimal vertical prototype with an embeddable Swift / AppKit terminal component, and verify Chinese input, paste, mouse and TUI behavior on the actual dependency version. When choosing a component, evaluate build complexity, Swift bridging, release packaging, the embedding API and the license, and test in practice rather than assuming a library fits.
 
 Recommended interface: a `TerminalSurface` that receives a byte stream, emits user input bytes and reports character grid changes, decoupled from SSH / Docker / tmux orchestration. Do not write a custom ANSI / VT parser for now.
 
@@ -462,7 +460,7 @@ Recommended interface: a `TerminalSurface` that receives a byte stream, emits us
 
 **It is recommended to first complete a real prototype of A and then decide the scope of B; but A must preserve correct targeting and lifecycle semantics.** Both paths share target adaptation, identity, connection management and the detection layer, to avoid having to tear everything down and rewrite later.
 
-Control mode provides command replies and asynchronous pane / layout notifications; refer to the official protocol and to a reference project's remote tmux mirroring implementation. It is not a JSON API, and it is not enough to feed the output strings directly into a terminal. [R10][R04D]
+Control mode provides command replies and asynchronous pane / layout notifications; refer to the official protocol. It is not a JSON API, and it is not enough to feed the output strings directly into a terminal. [R10]
 
 ### 8.4 Separation of the read channel, the interaction channel and permissions
 
@@ -757,7 +755,7 @@ At minimum, distinguish: `SSH_AUTH_REQUIRED`, `SSH_HOST_KEY_MISMATCH`, `HOST_UNR
 
 Record, per target, the versions of Docker / tmux / the available process tools and the required capabilities. Version numbers can help with the assessment, but before actually using a command / format, verify that it is available.
 
-Do not force the user to upgrade tmux for the sake of the app; when a feature is unsupported, use a safe degradation path or disable it explicitly. The minimum officially supported version is decided by the prototype results; do not copy the version restrictions a reference project applies to its own mirroring feature.
+Do not force the user to upgrade tmux for the sake of the app; when a feature is unsupported, use a safe degradation path or disable it explicitly. The minimum officially supported version is decided by the prototype results; do not copy version restrictions from any single reference implementation's mirroring feature.
 
 The minimum macOS version and Intel / Apple Silicon support are likewise determined by the user's actual devices and the chosen dependencies. macOS 14+ may be used as an initial engineering assumption, but it must be verified before building, rather than guessing the system from a browser UA.
 
@@ -795,7 +793,7 @@ Milestones advance on acceptance results; no time commitments are assumed. Each 
 
 Confirm the user's Mac OS version / architecture, the available Xcode toolchain, as well as the test SSH alias, the test container user, the tmux path and the socket. When real connection parameters have not been provided, start with fixtures and an isolated test environment; do not guess host credentials from old conversations.
 
-Check the licenses of candidate dependencies, pin commits / tags, and record them in `docs/references.md`. Write short architecture decision records for the terminal engine and for plain attach versus control mode.
+Check the licenses of candidate dependencies, pin commits / tags, and record them in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Write short architecture decision records for the terminal engine and for plain attach versus control mode.
 
 **Exit criteria:** a minimal Mac window can connect, through a real SSH → Docker → tmux chain, to a pre-existing test session; Chinese input and multi-line paste can be tested; after the window is closed, the PID of the remote test process is unchanged. Without a real environment, label it truthfully as "passed in simulation, real chain not accepted"; completion of M0 must not be claimed.
 
@@ -890,85 +888,6 @@ For the standard fixtures included in the first version's support scope, all exp
 All hard constraints are satisfied; the P0 requirements and their corresponding tests have actual results; the runnable app, source code, build instructions, test report, dependency license inventory and known issues are all present. Screenshots alone, mock data alone, or a single command that can be run in an external terminal do not count as delivery.
 
 ---
-## 17. Reference projects: what specifically to reference and what not to copy
-
-All of the following projects are technical references, **not finished products verified to directly satisfy the full SSH → Docker → existing tmux chain**. Read first the parts the user actually needs; do not bring in a project's runtime, relay, web service or agent launch model just because the project has many features.
-
-### 17.1 Overview
-
-| Project | Parts to reference first | Relationship to this project | License / reuse notes |
-|---|---|---|---|
-| `org/a reference project` | tmux-first Mac app, embedded terminal, session / window / pane tree | Conceptually very close; reference its object relationships and terminal navigation | The README currently lists the License as TBD; by default reference the design only, and resolve licensing before reusing any code. [R02] |
-| `org/a reference project` | Layered agent detection, incremental logs, rules and state merging | Key reference for the recognition engine; not a mandatory runtime dependency | MIT; notices must still be kept and specific dependencies checked. [R03][R03L] |
-| `org/a reference project` | Remote tmux Mirroring, control protocol and native pane rendering | Important reference for the control-mode approach | Project code is GPL-3.0-or-later by default; a designated server directory uses BUSL-1.1 instead; do not reuse it on the assumption that it is MIT. [R04L] |
-| `org/a reference project` | Discovery of existing tmux, agent log matching, state aggregation | Reference its data and detection flow, not its web product form | MIT; its remote service model is not used as the base architecture. [R05][R05L] |
-| `org/a reference project` | tmux session preservation, desktop state and notification interaction | Supplementary product reference | The website states MIT; re-check specific components before distribution; do not introduce the relay as a required dependency. [R06][R06D] |
-| a reference terminal tmux Integration | Control mode, relationship between remote windows / panes and local windows | Comparison point for interaction and lifecycle semantics | This document cites only the public documentation; copying source code without review is not recommended. [R07] |
-| `org/a terminal component` | Swift / AppKit embeddable terminal and examples | Terminal component to evaluate first by default | MIT; pin the actual API version. [R08][R08L] |
-| `org/the terminal engine` | the terminal engine, terminal embedding examples and rendering | Alternative terminal engine candidate | The repository states MIT; verify dependency / bridging components separately. [R09] |
-
-### 17.2 Unified Mac agent consoles: learn from the interaction, not the backend
-
-Such tools put multi-device agents, terminals, search and state into a native Mac interface, typically separating the UI layer from a backend that works through its own RPC / attach.
-
-This project should learn from the experience of "click an agent to enter the real terminal", "location is clear" and "state is right in the sidebar", rather than simply replacing a proprietary `agent attach` command with a single tmux command. The underlying objects, discovery method, lifecycle and event protocol are all different.
-
-**Approach:** borrow the way such tools decouple the UI from transport, but do not adopt a bundled backend. Where any reference project's code, assets or derivative versions are involved, handle them according to its license first, and do not fork one directly as the base of this project.
-
-### 17.3 a reference project: the closest tmux-first product model
-
-The project combines a SwiftUI sidebar, an embedded the terminal engine terminal and a tmux session tree, and provides SSH targets. Its current README explicitly states that the local agent metadata path is opt-in during the performance rewrite, and the tmux inventory fast path is used by default. [R02]
-
-Its design of "separating session existence from enhanced state" is worth learning from. Do not inherit its optional automatic session creation behavior as this product's default, and do not assume it already handles anything like a DockerTargetAdapter.
-
-**Reading entry points:** `README.md`, `docs/product/`, `docs/decisions/`, `Sources/`, `Tests/`. The `License: TBD` in its README is an explicit obstacle to reuse; being visible on GitHub does not by default grant permission to copy code. [R02]
-
-### 17.4 a reference project: key reference for the recognition and state engine
-
-It combines process / tmux screen heuristics with Claude hooks and Codex / Claude JSONL signals, distinguishes deterministic results from heuristic ones, and uses offset tracking for Codex logs. [R03]
-
-This project can borrow its split into evidence, provider, resolver and source health, and study `crates/`, `providers/` and `fixtures/`. But its daemon is not a prerequisite for the first version; first implement the limited rules and data contracts that are needed, and evaluate later whether to reuse any part of it.
-
-MIT does not remove implementation risk: state inference, log association, multiple CODEX_HOME values, container users and sockets still need to be verified with the tests in this requirements document. [R03L]
-
-### 17.5 a reference project: reference for control mode and native mirroring
-
-Its Remote tmux Mirroring documentation describes the SSH + tmux control connection, session / window / pane mapping, command reply correlation and pane output rendering, and can be used to study this project's path B. [R04D]
-
-The publicly available mirroring entry point targets SSH hosts and must not be regarded as Docker support as-is. The documentation also lists limitations around mirror recovery, history reflow and multi-line paste; these limitations should be turned into tests for this project rather than inherited without judgment. [R04D]
-
-**Code search entry points:** in a pinned version, search for `remote.tmux`, `ssh-tmux`, `%begin` and `%output`, then locate the implementation and tests. Do not guess that some old file path still exists. Verify the license against both the root-level and file-level notices; by default, implement the protocol adapter independently, and do not merge GPL code without attribution into a project under a different license. [R04L]
-
-### 17.6 a reference project: discovery of existing tmux and log matching
-
-a reference project is a tmux web GUI for agent TUIs; it can discover local / SSH-remote tmux and infers state by combining terminal content with logs. [R05]
-
-Focus on the discovery, state classification, session matching and reconnection logic in `src/` and `tests/`. Its WebSocket / web service architecture is not the delivery form the user asked for; "can access a remote over SSH" also does not mean "will read the correct logs in the container user's context".
-
-Its MIT-licensed code may be evaluated for reuse under that license, but this project does not therefore require Node / Bun on the remote or a public web service. [R05L]
-
-### 17.7 a reference project: notifications can be borrowed, the relay route is not adopted
-
-a reference project provides desktop / remote management around tmux; its Remote documentation describes a daemon and a relay, and states explicitly that the relay can read terminal and transmitted content. [R06D]
-
-Its interaction for pending states, notifications and returning to the original session can be used as a reference. Do not use its connection model directly as the foundation of this product, because the user's requirement is the existing SSH + Docker chain, not new pairing, relays or cloud accounts.
-
-### 17.8 a reference terminal: comparison for lifecycle and terminal mapping
-
-The a reference terminal documentation is useful material for understanding native window mapping of tmux and control-mode interaction. Note in particular: some of its "close mapped tab / pane" behaviors act on the remote objects, whereas this app's default close must be detach-only. [R07]
-
-Use a reference terminal as a manual comparison tool; do not install it as a required dependency of this app, and do not require a Royal TSX user to migrate their terminal habits wholesale.
-
-### 17.9 a terminal component and the terminal engine: evaluate terminal components, do not fork them as the product
-
-a terminal component provides a Swift terminal engine and an AppKit frontend, and its repository contains terminal examples; its current README warns that its 2.0 API differs from the 1.x branch, so old code examples must not be mixed in as-is. [R08]
-
-the terminal engine provides the terminal engine and embedding examples and can be a candidate on performance and features. Both should be tested in practice with the user's Chinese input, the Codex / Claude TUIs, multi-line paste and the SSH / Docker resize chain, rather than chosen on the basis of marketing or screenshots. [R09]
-
-**Recommended selection conclusion:** first build your own domain model and TargetAdapter; use an existing library for the terminal; borrow state detection from a reference project / a reference project; borrow the UI from existing Mac agent consoles; borrow the control protocol from the official documentation and the designs of a reference project / a reference terminal. Do not bring in an entire mismatched backend just to save code in the first step.
-
----
-
 ## 18. Risks and open items that must be recorded
 
 | Item | Current boundary | How development should handle it |
@@ -981,7 +900,7 @@ the terminal engine provides the terminal engine and embedding examples and can 
 | Existing tmux hooks / options | May change attach / detach behavior | Detect and explain; do not rewrite silently |
 | Native single-pane mirroring | Technically more complex than plain attach | Prototype first; do not claim full TUI support with an incomplete parser |
 | Precise state with no remote helper at all | Not guaranteed to be achievable for every agent | Basic recognition + unknown; enhancements authorized separately |
-| Reference code licenses | a reference project TBD, a reference project split licensing | Avoid direct copying by default; maintain an inventory of dependencies and provenance |
+| Reference code licenses | Any reused code may carry restrictive or unresolved licenses | Avoid direct copying by default; maintain an inventory of dependencies and provenance |
 | Commercialization / open source / App Store | Not specified by the user | Do not decide on the user's behalf; for now keep dependency choices and packaging strategy adjustable |
 
 There is no need to halt all development because of the open items above. Architecture, tests and local prototypes that do not depend on real credentials can be completed first; only parameters that genuinely affect permissions, security or real connections need to be provided by the user before the corresponding acceptance step.
@@ -1006,7 +925,6 @@ docs/
   requirements.md              # This document and subsequent explicit changes
   architecture.md              # The actual implementation, not an outdated design
   decisions/                   # ADRs for terminal engine, connection mode, identity and security
-  references.md                # Projects actually read / reused, with pinned commits
   compatibility.md             # Versions actually tested and degradation behavior
   test-report.md               # Results per T-xx and how to reproduce them
   performance.md               # CPU, RSS, connection count, network, soak results
@@ -1027,7 +945,7 @@ The delivery report maps features and tests by F-xx / T-xx, stating which featur
 >
 > First inspect the current workspace and the available build environment; give a short implementation plan, then start on the minimal vertical slice: native Mac window → system SSH → DockerTargetAdapter → list existing tmux → attach inside the app. Do not start by piling up lots of mock UI, and do not just produce yet another design document.
 >
-> For UI and module layering, reference existing Mac agent consoles; for the tmux-first model, a reference project; for recognition logic, a reference project / a reference project; for control mode, the official tmux documentation, a reference project and a reference terminal; for the terminal component, evaluate a terminal component first and compare with the terminal engine if necessary. Check the current license and commit of any code you intend to reuse first. a reference project's TBD license and a reference project's GPL / split licensing must not be ignored.
+> For UI, module layering, recognition logic, control mode and the terminal component, you may study existing open-source Mac terminal / agent tools for ideas, but refer to the official tmux, SSH and Docker documentation for the protocols. Check the current license and commit of any code before reusing it, and do not copy code whose license forbids it.
 >
 > Base mode does not install resident remote services, does not rewrite my SSH, shell, tmux or agent configuration, does not restart containers / Docker / agents, does not automatically add permission-bypass flags, and does not add a Docker virtual machine on the Mac. When real connection parameters are needed, use only targets I have explicitly provided or that exist in my trusted SSH configuration; do not guess credentials.
 >
@@ -1041,24 +959,10 @@ The delivery report maps features and tests by F-xx / T-xx, stating which featur
 
 ## 21. Sources and verification entry points
 
-The following are entry points to public projects and official documentation, all checked on **2026-10-09**. The default branches in external links may change; the development agent should separately pin commits for actual code references. The recommended design, acceptance budgets and implementation order in this document are proposals for this project, not claims about capabilities the reference projects have already implemented.
+The following are entry points to official documentation, all checked on **2026-10-09**. The recommended design, acceptance budgets and implementation order in this document are proposals for this project.
 
 | ID | Source | Scope of use in this document |
 |---|---|---|
-| [R02] | a reference project repository / README | tmux-first architecture, metadata opt-in, License TBD |
-| [R03] | a reference project repository / README | Layered recognition, providers, state, incremental logs |
-| [R03L] | a reference project LICENSE | MIT license |
-| [R04] | a reference project repository | macOS terminal project and code entry points |
-| [R04D] | a reference project Remote tmux Mirroring documentation | Control mode, object mapping, known limitations |
-| [R04L] | a reference project LICENSE | Distinction between the default GPL and BUSL for a specific server directory |
-| [R05] | a reference project repository / README | tmux discovery, log matching, web product form |
-| [R05L] | a reference project LICENSE | MIT license |
-| [R06] | a reference project repository | Desktop / tmux-adjacent product reference |
-| [R06D] | a reference project Remote documentation | daemon / relay, data visibility, license statement on the website |
-| [R07] | a reference terminal tmux Integration documentation | Native window mapping and detach / close semantics |
-| [R08] | a terminal component repository / README | Swift / AppKit terminal component, API version notes |
-| [R08L] | a terminal component LICENSE | MIT license |
-| [R09] | the terminal engine repository / README | the terminal engine and embedding examples, repository license identifier |
 | [R10] | Official tmux Control Mode wiki | `-C` / `-CC`, command replies, asynchronous notification protocol |
 | [R11] | OpenBSD tmux manual | Sockets, object IDs, attach, environment and client flags |
 | [R12] | OpenBSD ssh manual | SSH arguments, remote commands and terminal behavior |
@@ -1071,20 +975,6 @@ The following are entry points to public projects and official documentation, al
 | [R19] | Official Claude Code Hooks reference documentation | Structured hooks, Stop and related event semantics |
 | [R20] | Official Linux kernel `/proc` documentation | Process information and access boundaries |
 
-[R02]: https://github.com/org/a reference project
-[R03]: https://github.com/org/a reference project
-[R03L]: https://raw.githubusercontent.com/org/a reference project/main/LICENSE
-[R04]: https://github.com/org/a reference project
-[R04D]: https://a reference project.com/docs/remote-tmux
-[R04L]: https://raw.githubusercontent.com/org/a reference project/main/LICENSE
-[R05]: https://github.com/org/a reference project
-[R05L]: https://raw.githubusercontent.com/org/a reference project/master/LICENSE
-[R06]: https://github.com/org/a reference project
-[R06D]: https://a reference project.cc/remote
-[R07]: https://a reference terminal.com/documentation-tmux-integration.html
-[R08]: https://github.com/org/a terminal component
-[R08L]: https://raw.githubusercontent.com/org/a terminal component/main/LICENSE
-[R09]: https://github.com/org/the terminal engine
 [R10]: https://github.com/tmux/tmux/wiki/Control-Mode
 [R11]: https://man.openbsd.org/tmux
 [R12]: https://man.openbsd.org/ssh
