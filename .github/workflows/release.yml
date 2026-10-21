@@ -19,7 +19,7 @@ env:
 
 jobs:
   release:
-    runs-on: macos-14 # Apple Silicon runner, to build the arm64 app natively
+    runs-on: macos-15 # Apple Silicon; its macOS 15 SDK matches local builds (macos-14's older SDK breaks a dependency under Swift 6 concurrency)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
