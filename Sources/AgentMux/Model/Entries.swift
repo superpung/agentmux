@@ -1,7 +1,7 @@
 import AgentMuxCore
 import Foundation
 
-/// A configured target as the sidebar shows it ("device" in a Mac agent console's terms).
+/// A configured target as the sidebar shows it (a "device" in the UI).
 struct DeviceInfo: Identifiable, Hashable {
     var id: String
     var name: String
@@ -83,9 +83,9 @@ struct AgentEntry: Identifiable, Hashable {
     /// A stable identity for user labels (pin / rename): the container, the
     /// tmux window, and the agent kind. The window id is what makes it unique —
     /// two agents of the same kind can share a session name AND working
-    /// directory (e.g. two Codex panes both in a "demo" session under
-    /// /srv/app/demo), which made the old session+path key collide so
-    /// that pinning or renaming one hit both. It also survives pane-id changes
+    /// directory (e.g. two Codex panes in one session under the same working
+    /// directory), which made the old session+path key collide so that pinning
+    /// or renaming one hit both. It also survives pane-id changes
     /// and the agent cd-ing elsewhere (unlike the mutable current path).
     var identityKey: String {
         let anchor = windowID.isEmpty ? "\(session)|\(space.path)" : windowID

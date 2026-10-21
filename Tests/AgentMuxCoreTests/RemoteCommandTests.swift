@@ -40,7 +40,7 @@ import Testing
 }
 
 @Suite struct RemoteValueTests {
-    @Test(arguments: ["lab-host", "user@lab", "lab-host", "lab.example.com", "user@[::1]"])
+    @Test(arguments: ["lab-host", "user@lab", "server1", "lab.example.com", "user@[::1]"])
     func acceptsDestinations(_ value: String) throws {
         #expect(try SSHDestination(value).value == value)
     }
