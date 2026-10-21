@@ -91,14 +91,26 @@ public final class RemoteTerminal: @unchecked Sendable {
 /// Lookup by client name is avoided on purpose: tmux 3.4 was seen resolving
 /// a stale client's tty name to a different, active client.
 public enum ClientRelease {
+    /// A stable per-install id, set once at launch, prefixed onto every tag
+    /// this install creates. It scopes the orphan sweep (and the grouped-session
+    /// reaper that keys off the tag) to this install's own clients, so a second
+    /// AgentMux on another machine sharing the same tmux server never releases
+    /// clients it did not start — nor we theirs. Empty means no scoping (a lone
+    /// install, or core used directly): the sweep then matches every
+    /// AgentMux-tagged client, exactly as before. Written once before any view
+    /// opens, read-only thereafter.
+    nonisolated(unsafe) public static var ownerPrefix: String = ""
+
     static func makeTag() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        ownerPrefix + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 
     /// `tags` empty means every AgentMux-tagged client except `keeping`
-    /// (orphans from a crash or a lost connection).
+    /// (orphans from a crash or a lost connection); when `ownerPrefix` is set,
+    /// the match is further limited to tags this install created, so another
+    /// install's live clients are left alone.
     static func script(tmux: TmuxInvocation, tags: [String], keeping: [String] = []) -> String {
-        precondition((tags + keeping).allSatisfy { $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) } })
+        precondition((tags + keeping + [ownerPrefix]).allSatisfy { $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) } })
         let binary = ShellQuote.word(tmux.executable ?? "tmux")
         let flags = ShellQuote.command(Array(tmux.argv.dropFirst()))
         let variable = RemoteCommand.clientTagVariable
@@ -106,11 +118,13 @@ public enum ClientRelease {
         tm() { \(binary) \(flags) "$@"; }
         wanted=' \(tags.joined(separator: " ")) '
         keep=' \(keeping.joined(separator: " ")) '
+        owner='\(ownerPrefix)'
         n=0
         for pid in $(tm list-clients -F '#{client_pid}' 2>/dev/null); do
           tag=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^\(variable)=//p' | head -n 1)
           [ -n "$tag" ] || continue
           case "$keep" in *" $tag "*) continue ;; esac
+          [ -z "$owner" ] || case "$tag" in "$owner"*) ;; *) continue ;; esac
           if [ "$wanted" = '  ' ] || case "$wanted" in *" $tag "*) true ;; *) false ;; esac; then
             kill -HUP "$pid" 2>/dev/null && n=$((n+1))
           fi

@@ -116,6 +116,35 @@ import Testing
     }
 }
 
+@Suite(.serialized) struct ClientReleaseTests {
+    private let tmux = try! TmuxInvocation(executable: nil, socket: .name("agentmux-test"))
+
+    /// With no owner prefix set, the sweep keeps its legacy reach: every
+    /// AgentMux-tagged client except `keeping`, the gate disabled.
+    @Test func withoutOwnerReleasesEveryTaggedClient() {
+        let saved = ClientRelease.ownerPrefix
+        defer { ClientRelease.ownerPrefix = saved }
+        ClientRelease.ownerPrefix = ""
+        let script = ClientRelease.script(tmux: tmux, tags: [], keeping: ["abc1"])
+        #expect(script.contains("owner=''"))
+        #expect(script.contains("[ -z \"$owner\" ] || case \"$tag\" in \"$owner\"*)"))
+        #expect(!ClientRelease.makeTag().isEmpty)
+    }
+
+    /// With an owner prefix set, tags carry it and the sweep only touches tags
+    /// that start with it, so another install's clients are skipped.
+    @Test func withOwnerScopesTheSweepAndTags() {
+        let saved = ClientRelease.ownerPrefix
+        defer { ClientRelease.ownerPrefix = saved }
+        ClientRelease.ownerPrefix = "deadbeef0001"
+        #expect(ClientRelease.makeTag().hasPrefix("deadbeef0001"))
+        let script = ClientRelease.script(tmux: tmux, tags: [], keeping: [])
+        #expect(script.contains("owner='deadbeef0001'"))
+        // The gate continues (skips) any tag that does not start with owner.
+        #expect(script.contains("*) continue ;; esac"))
+    }
+}
+
 @Suite struct RemoteFailureTests {
     private func failed(_ stderr: String, status: Int32 = 255) -> CommandResult {
         CommandResult(exitStatus: status, stdout: Data(), stderr: Data(stderr.utf8), timedOut: false, stdoutTruncated: false, stderrTruncated: false)

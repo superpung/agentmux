@@ -290,7 +290,22 @@ final class AppModel {
     }
 
     init() {
+        ClientRelease.ownerPrefix = Self.installID()
         loadSettings()
+    }
+
+    /// A stable per-install id, generated once and persisted, that scopes tmux
+    /// client/session cleanup to this install. Two AgentMux copies on different
+    /// machines can watch the same tmux server; without this, one launching
+    /// would release the other's live mirror clients (and reap its grouped
+    /// sessions), dropping its open terminals. Hex, no dashes, to satisfy the
+    /// client-tag character set.
+    private static func installID() -> String {
+        let key = "installID"
+        if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty { return existing }
+        let id = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12))
+        UserDefaults.standard.set(id, forKey: key)
+        return id
     }
 
     // MARK: Settings
@@ -830,7 +845,7 @@ final class AppModel {
         // We no longer set `destroy-unattached` (it crashes tmux on abrupt
         // teardown), so reap grouped mirror sessions a crashed instance left
         // behind — now unattached after ClientRelease, killed safely here.
-        await PaneMirror.reapOrphanGroupedSessions(prefix: RemoteCommand.groupedSessionPrefix, host: state.host, target: state.target)
+        await PaneMirror.reapOrphanGroupedSessions(prefix: RemoteCommand.groupedSessionPrefix + ClientRelease.ownerPrefix, host: state.host, target: state.target)
     }
 
     /// Closes a mirror once its pane no longer belongs to any real (non-grouped)
