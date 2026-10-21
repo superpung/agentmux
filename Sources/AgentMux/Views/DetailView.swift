@@ -297,7 +297,7 @@ private struct UsageView: View {
                     Image(systemName: "square.stack.3d.up.fill").imageScale(.medium).foregroundStyle(.secondary)
                     Text(Self.short(context)).rollingNumber(context)
                 }
-                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                .font(.footnote).foregroundStyle(Theme.textSecondary).monospacedDigit()
                 .help("Context: \(context) tokens (the model's window is not in the log)")
             }
             if let h5 = usage.fiveHourPercent {
@@ -341,8 +341,9 @@ private struct Meter: View {
                         .frame(width: 44 * max(0, min(1, fraction)), height: 6)
                 }
             Text("\(Int((fraction * 100).rounded()))%")
-                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                .font(.footnote).foregroundStyle(Theme.textSecondary).monospacedDigit()
                 .rollingNumber(Int((fraction * 100).rounded()))
+                .frame(minWidth: 34, alignment: .trailing)   // width pinned AFTER the roll: keeps numericText, just no layout reflow
         }
         .help(tooltip)
     }
@@ -394,7 +395,7 @@ struct EphemeralTerminalWindow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Terminal — \(spec.label)")
+        .navigationTitle("Terminal: \(spec.label)")
         .onAppear { model.ephemeralTerminal(for: spec)?.setActive(true) }
         .onDisappear { model.closeEphemeral(spec.id) }
     }
