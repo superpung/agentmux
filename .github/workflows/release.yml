@@ -1,0 +1,68 @@
+name: Release
+
+# Build the macOS app and publish a GitHub Release when a v* tag is pushed.
+#   git tag v0.2.0 && git push origin v0.2.0
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  SWIFT_VERSION: "6.4"
+
+jobs:
+  release:
+    runs-on: macos-14 # Apple Silicon runner, to build the arm64 app natively
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for the changelog
+
+      - name: Derive version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Swift ${{ env.SWIFT_VERSION }} toolchain
+        run: |
+          set -eux
+          PKG="swift-${SWIFT_VERSION}-RELEASE-osx.pkg"
+          URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/xcode/swift-${SWIFT_VERSION}-RELEASE/${PKG}"
+          curl -fL "$URL" -o "$RUNNER_TEMP/$PKG"
+          sudo installer -pkg "$RUNNER_TEMP/$PKG" -target /
+          echo "AGENTMUX_TOOLCHAIN=/Library/Developer/Toolchains/swift-${SWIFT_VERSION}-RELEASE.xctoolchain" >> "$GITHUB_ENV"
+
+      - name: Build and bundle the app
+        env:
+          AGENTMUX_VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/bundle-app.sh release
+
+      - name: Package
+        run: |
+          set -eux
+          ZIP="AgentMux-${{ steps.version.outputs.version }}-macos-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent build/AgentMux.app "$ZIP"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: ${{ env.ZIP }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
