@@ -290,7 +290,7 @@ extension AppModel {
     }
 
     private func windowName(of paneID: String, in snapshot: InventorySnapshot) -> String? {
-        guard let row = snapshot.memberships.first(where: { $0.paneID == paneID }) else { return nil }
+        guard let row = snapshot.primaryMembership(of: paneID) else { return nil }
         return snapshot.windows.first { $0.id == row.windowID }?.name
     }
 

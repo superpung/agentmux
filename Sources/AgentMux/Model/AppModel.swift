@@ -1003,8 +1003,13 @@ final class AppModel {
     var hasOpenTerminals: Bool { !terminals.isEmpty }
 
     func openTerminal(_ ref: PaneRef) {
+        // Group the mirror onto the pane's REAL session, never a leftover
+        // "agentmux-…" grouped mirror. `list-panes -a` orders rows by session
+        // name, so a grouped mirror (which sorts before real names) would be
+        // `memberships.first`; grouping a new mirror onto it orphans the view
+        // when that mirror is reaped. `primaryMembership` prefers the real one.
         guard terminals[ref] == nil, let state = state(ref.targetID),
-              let sessionID = state.snapshot?.memberships.first(where: { $0.paneID == ref.paneID })?.sessionID
+              let sessionID = state.snapshot?.primaryMembership(of: ref.paneID)?.sessionID
         else { return }
         do {
             let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
