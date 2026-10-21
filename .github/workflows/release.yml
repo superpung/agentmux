@@ -12,7 +12,10 @@ permissions:
   contents: write
 
 env:
-  SWIFT_VERSION: "6.4"
+  # Full three-component version: swift.org publishes 6.4 as swift-6.4.0-RELEASE
+  # (6.1-6.3 used the two-component form). This also names the installed
+  # toolchain dir, which must match scripts/env.sh.
+  SWIFT_VERSION: "6.4.0"
 
 jobs:
   release:
