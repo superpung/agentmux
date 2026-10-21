@@ -122,13 +122,19 @@ public enum InventoryProbe {
             # turn, which would wrongly reset every idle agent's "last active" to
             # deploy time.
             if [ -n "$sc" ] && [ -f "$sc" ]; then
-              row=$(jq -r '[(.context.used_percentage // -1 | floor),(.rate_limits.five_hour.used_percentage // -1 | floor),(.rate_limits.seven_day.used_percentage // -1 | floor)] | @tsv' "$sc" 2>/dev/null)
+              row=$(jq -r '[(.context.used_percentage // -1 | floor),(.rate_limits.five_hour.used_percentage // -1 | floor),(.rate_limits.seven_day.used_percentage // -1 | floor),(.rate_limits.five_hour.resets_at // "-"),(.rate_limits.seven_day.resets_at // "-")] | @tsv' "$sc" 2>/dev/null)
               sctx=$(printf '%s' "$row" | cut -f1); s5=$(printf '%s' "$row" | cut -f2); s7=$(printf '%s' "$row" | cut -f3)
-              echo "@@limits $clpane ${sctx:--1} ${s5:--1} ${s7:--1}"
+              r5=$(printf '%s' "$row" | cut -f4); r7=$(printf '%s' "$row" | cut -f5)
+              echo "@@limits $clpane ${sctx:--1} ${s5:--1} ${s7:--1} ${r5:--} ${r7:--}"
             fi
             res=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE -- '--resume [0-9a-f-]{36}' | head -1 | awk '{print $2}')
             ccfg=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1)
             ccfg=${ccfg:-$HOME/.claude}
+            # Non-secret account identity (oauthAccount.accountUuid, never the
+            # token) to merge the same login across config dirs; absent for many
+            # dirs, which then fall back to (container + dir) in the dashboard.
+            cacct=$(jq -r '.oauthAccount.accountUuid // empty' "$ccfg/.claude.json" 2>/dev/null)
+            [ -n "$clpane" ] && [ -n "$cacct" ] && echo "@@account $clpane claude:$cacct"
             cenc=$(readlink "/proc/$pid/cwd" 2>/dev/null | sed 's#/#-#g')
             lf="$ccfg/projects/$cenc/$res.jsonl"
             # Resumed via the picker (no --resume id on the cmdline) or started
@@ -197,6 +203,10 @@ public enum InventoryProbe {
             # cwd field is read, never content.
             pcwd=$(readlink "/proc/$pid/cwd" 2>/dev/null)
             pch=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
+            # Non-secret account id (tokens.account_id, never the token itself)
+            # to merge the same Codex login across homes/containers.
+            cacct=$(jq -r '.tokens.account_id // empty' "${pch:-$HOME/.codex}/auth.json" 2>/dev/null)
+            [ -n "$cpane" ] && [ -n "$cacct" ] && echo "@@account $cpane codex:$cacct"
             nsib=$(printf '%s\\n' "$codextui" | awk -F'|' -v h="${pch:-$HOME/.codex}" -v c="$pcwd" '$1==h && $2==c{print $3}' | sort -u | wc -l)
             crf=""
             if [ "${nsib:-0}" -le 1 ]; then
@@ -242,7 +252,9 @@ public enum InventoryProbe {
               if [ -n "$rl" ]; then
                 h5=$(printf '%s' "$rl" | jq -r '[.primary,.secondary]|map(select(.!=null and .window_minutes!=null and .window_minutes<=1440))|last|.used_percent // empty' 2>/dev/null)
                 d7=$(printf '%s' "$rl" | jq -r '[.primary,.secondary]|map(select(.!=null and .window_minutes!=null and .window_minutes>1440))|last|.used_percent // empty' 2>/dev/null)
-                { [ -n "$h5" ] || [ -n "$d7" ]; } && echo "@@limits $cpane - ${h5:--} ${d7:--}"
+                r5=$(printf '%s' "$rl" | jq -r '[.primary,.secondary]|map(select(.!=null and .window_minutes!=null and .window_minutes<=1440))|last|.resets_at // empty' 2>/dev/null)
+                r7=$(printf '%s' "$rl" | jq -r '[.primary,.secondary]|map(select(.!=null and .window_minutes!=null and .window_minutes>1440))|last|.resets_at // empty' 2>/dev/null)
+                { [ -n "$h5" ] || [ -n "$d7" ]; } && echo "@@limits $cpane - ${h5:--} ${d7:--} ${r5:--} ${r7:--}"
               fi
               # Model: session_meta first line is cheapest; fall back to the most
               # recent turn_context in a bounded tail for sessions whose model
@@ -364,8 +376,15 @@ public enum InventoryProbe {
                     if let c = Double(f[1]), c >= 0 { u.contextPercent = c }
                     if let h = Double(f[2]), h >= 0 { u.fiveHourPercent = h }
                     if let d = Double(f[3]), d >= 0 { u.sevenDayPercent = d }
+                    if f.count >= 6 {
+                        if let r5 = Int(f[4]), r5 > 0 { u.fiveHourResetsAt = r5 }
+                        if let r7 = Int(f[5]), r7 > 0 { u.sevenDayResetsAt = r7 }
+                    }
                     snapshot.usage[pane] = u
                 }
+            } else if let rest = line.dropPrefix("@@account ") {
+                let f = rest.split(separator: " ")
+                if f.count >= 2, isID(f[0], "%") { snapshot.accounts[String(f[0])] = String(f[1]) }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
                 if let pid = currentAgent {

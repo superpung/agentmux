@@ -192,10 +192,12 @@ arg -p
         @@server 1 2 /tmp/tmux-0/default
         @@section agents
         @@usage %2 84000 200000 -
-        @@limits %2 42 97 45
+        @@limits %2 42 97 45 1792700000 1792720800
         @@limits %6 - 30 -
         @@limits %8 55 10 20
         @@usage %8 90000 - -
+        @@account %2 claude:abc-123
+        @@account %8 codex:acct-9
         @@end n0nce
         """
         let s = try InventoryProbe.parse(out, nonce: nonce)
@@ -204,7 +206,12 @@ arg -p
         #expect(s.usage["%2"]?.contextPercent == 42)
         #expect(s.usage["%2"]?.fiveHourPercent == 97)
         #expect(s.usage["%2"]?.sevenDayPercent == 45)
+        #expect(s.usage["%2"]?.fiveHourResetsAt == 1792700000)
+        #expect(s.usage["%2"]?.sevenDayResetsAt == 1792720800)
         #expect(abs((s.usage["%2"]?.contextUsedFraction ?? 0) - 0.42) < 1e-9)
+        // A 4-field @@limits line (no resets) leaves the reset epochs nil.
+        #expect(s.usage["%6"]?.fiveHourResetsAt == nil)
+        #expect(s.usage["%6"]?.sevenDayResetsAt == nil)
         // Absent fields ("-" or negative) stay nil; a limits-only pane parses.
         #expect(s.usage["%6"]?.contextPercent == nil)
         #expect(s.usage["%6"]?.fiveHourPercent == 30)
@@ -215,6 +222,9 @@ arg -p
         #expect(s.usage["%8"]?.fiveHourPercent == 10)
         #expect(s.usage["%8"]?.sevenDayPercent == 20)
         #expect(s.usage["%8"]?.contextTokens == 90000)
+        // @@account carries the non-secret login id used to merge accounts.
+        #expect(s.accounts["%2"] == "claude:abc-123")
+        #expect(s.accounts["%8"] == "codex:acct-9")
     }
 
     @Test func inferredWindowForClaude() {

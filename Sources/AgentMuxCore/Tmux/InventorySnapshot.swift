@@ -95,15 +95,22 @@ public struct InventorySnapshot: Sendable, Equatable {
         public var fiveHourPercent: Double?
         /// 7-day / weekly limit used percent (Claude status line; Codex secondary).
         public var sevenDayPercent: Double?
+        /// Unix epoch when the 5-hour window resets, when reported.
+        public var fiveHourResetsAt: Int?
+        /// Unix epoch when the 7-day/weekly window resets, when reported.
+        public var sevenDayResetsAt: Int?
 
         public init(contextTokens: Int? = nil, contextWindow: Int? = nil, rateLimitPercent: Double? = nil,
-                    contextPercent: Double? = nil, fiveHourPercent: Double? = nil, sevenDayPercent: Double? = nil) {
+                    contextPercent: Double? = nil, fiveHourPercent: Double? = nil, sevenDayPercent: Double? = nil,
+                    fiveHourResetsAt: Int? = nil, sevenDayResetsAt: Int? = nil) {
             self.contextTokens = contextTokens
             self.contextWindow = contextWindow
             self.rateLimitPercent = rateLimitPercent
             self.contextPercent = contextPercent
             self.fiveHourPercent = fiveHourPercent
             self.sevenDayPercent = sevenDayPercent
+            self.fiveHourResetsAt = fiveHourResetsAt
+            self.sevenDayResetsAt = sevenDayResetsAt
         }
 
         /// Fraction of the context window in use, when both are known.
@@ -159,6 +166,10 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var models: [String: String] = [:]
     /// Reasoning effort per agent pane ("medium"/"high"/"xhigh"), when known.
     public var efforts: [String: String] = [:]
+    /// Non-secret account identity per agent pane ("claude:<uuid>" /
+    /// "codex:<id>"), when a readable account id exists — used only to merge the
+    /// same login across config dirs/containers in the dashboard. Never a token.
+    public var accounts: [String: String] = [:]
     /// Seconds since each agent pane's session log was last written — a proxy
     /// for when the agent was last active.
     public var lastActiveSeconds: [String: Int] = [:]
