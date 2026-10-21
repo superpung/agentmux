@@ -53,6 +53,9 @@ struct AgentEntry: Identifiable, Hashable {
     var model: String?
     /// The reasoning effort ("medium"/"high"/"xhigh"), when known.
     var effort: String?
+    /// Non-secret account identity for dedup ("claude:<uuid>" / "codex:<id>"),
+    /// when a readable account id exists; nil falls back to container + dir.
+    var accountKey: String?
     var id: PaneRef { ref }
 
     /// The config dir shown in place of the generic kind label, e.g.
@@ -214,7 +217,8 @@ extension AppModel {
                     configDir: detection.configDirectory,
                     version: detection.version,
                     model: snapshot.models[pane.id],
-                    effort: snapshot.efforts[pane.id]
+                    effort: snapshot.efforts[pane.id],
+                    accountKey: snapshot.accounts[pane.id]
                 )
             }
         }

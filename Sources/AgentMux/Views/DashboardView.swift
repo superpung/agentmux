@@ -23,9 +23,10 @@ struct DashboardView: View {
                                valueTint: idleCount == 0 ? Theme.textTertiary : Theme.success, fillHeight: true)
                 }
                 containersSection
-                if !agents.isEmpty {
-                    AgentListSection(title: "All agents", systemImage: "square.stack.3d.up",
-                                     tint: Theme.textSecondary, agents: sortedAgents)
+                if !accounts.isEmpty { AccountsSection(accounts: accounts) }
+                if !actionableAgents.isEmpty {
+                    AgentListSection(title: "Needs you & working", systemImage: "bolt.fill",
+                                     agents: actionableAgents)
                 }
             }
             .padding(20)
@@ -59,6 +60,60 @@ struct DashboardView: View {
         activity.needsAttention ? 0 : (activity == .working ? 1 : 2)
     }
 
+    /// The actionable subset for the overview: agents that need attention or are
+    /// working. The full roster is the sidebar's job; re-listing every idle agent
+    /// here only duplicated it.
+    private var actionableAgents: [AgentEntry] {
+        sortedAgents.filter { $0.activity.needsAttention || $0.activity == .working }
+    }
+
+    /// Rate limits are per-account (one login, shared by every agent on it), not
+    /// per-agent, so roll them up by account. The key includes the container
+    /// because the same dir name on two containers is two different accounts.
+    /// 5h/7d take the max across the account's agents — usage only climbs within
+    /// a window, so the highest reading is the freshest.
+    private var accounts: [AccountUsage] {
+        var order: [String] = []
+        var map: [String: AccountUsage] = [:]
+        for agent in sortedAgents {
+            // Merge by the real login when its id is readable; otherwise keep
+            // per container + dir (same dir name on two containers stays split).
+            let key = agent.accountKey ?? "\(agent.ref.targetID)|\(agent.kind)|\(agent.configLabel)"
+            if map[key] == nil { order.append(key) }
+            var acc = map[key] ?? AccountUsage(id: key, label: agent.configLabel,
+                                               kind: agent.kind, containers: [],
+                                               fiveHour: nil, sevenDay: nil,
+                                               fiveHourResetsAt: nil, sevenDayResetsAt: nil,
+                                               agentCount: 0, lastActiveSeconds: nil)
+            let usage = model.usage(for: agent.ref)
+            acc.agentCount += 1
+            acc.containers.insert(agent.device.name)
+            acc.fiveHour = maxOpt(acc.fiveHour, usage?.fiveHourPercent)
+            acc.sevenDay = maxOpt(acc.sevenDay, usage?.sevenDayPercent)
+            acc.fiveHourResetsAt = acc.fiveHourResetsAt ?? usage?.fiveHourResetsAt
+            acc.sevenDayResetsAt = acc.sevenDayResetsAt ?? usage?.sevenDayResetsAt
+            acc.lastActiveSeconds = minOpt(acc.lastActiveSeconds, agent.lastActiveSeconds)
+            map[key] = acc
+        }
+        return order.compactMap { map[$0] }   // every in-use account, even without rate data
+    }
+
+    private func maxOpt(_ a: Double?, _ b: Double?) -> Double? {
+        switch (a, b) {
+        case (nil, _): return b
+        case (_, nil): return a
+        case let (x?, y?): return Swift.max(x, y)
+        }
+    }
+
+    private func minOpt(_ a: Int?, _ b: Int?) -> Int? {
+        switch (a, b) {
+        case (nil, _): return b
+        case (_, nil): return a
+        case let (x?, y?): return Swift.min(x, y)
+        }
+    }
+
     // MARK: Sections
 
     private var header: some View {
@@ -84,8 +139,7 @@ struct DashboardView: View {
     @ViewBuilder private var containersSection: some View {
         if !model.targets.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Label("Servers & containers", systemImage: "server.rack")
-                    .font(.headline).foregroundStyle(.secondary)
+                SectionHeader(title: "Servers & containers", systemImage: "server.rack")
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 380), spacing: 12)], spacing: 12) {
                     ForEach(model.targets) { state in
                         ContainerSummaryCard(state: state, agents: agents.filter { $0.ref.targetID == state.id })
@@ -96,17 +150,34 @@ struct DashboardView: View {
     }
 }
 
+/// A lightweight section header: a fixed-width icon box (so every section's
+/// title starts at the same x and the icons line up down the page) plus a
+/// smaller, less heavy title than the old bold headline.
+private struct SectionHeader: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption2)
+                .frame(width: 16, alignment: .center)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+        }
+        .foregroundStyle(.secondary)   // icon + title share one balanced tone, not pale-icon/dark-text
+    }
+}
+
 /// A titled list of agents; each row jumps to that agent when clicked.
 private struct AgentListSection: View {
     let title: String
     let systemImage: String
-    let tint: Color
     let agents: [AgentEntry]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: systemImage)
-                .font(.headline).foregroundStyle(tint)
+            SectionHeader(title: title, systemImage: systemImage)
             VStack(spacing: 0) {
                 ForEach(Array(agents.enumerated()), id: \.element.id) { index, agent in
                     if index > 0 { Divider() }
@@ -208,6 +279,139 @@ private struct UsageRing: View {
         }
         .frame(width: 14, height: 14)
         .animation(.easeOut(duration: 0.3), value: f)
+    }
+}
+
+/// A per-account usage rollup for the dashboard. Rate limits belong to the
+/// account (login), not the individual agent, so every agent that shares a
+/// (container + config dir) is merged into one entry.
+private struct AccountUsage: Identifiable {
+    let id: String
+    let label: String
+    let kind: AgentKind
+    var containers: Set<String>
+    var fiveHour: Double?
+    var sevenDay: Double?
+    var fiveHourResetsAt: Int?
+    var sevenDayResetsAt: Int?
+    var agentCount: Int
+    var lastActiveSeconds: Int?
+
+    /// One container's name, or "N containers" when a login spans several.
+    var containerText: String {
+        containers.count == 1 ? (containers.first ?? "") : "\(containers.count) containers"
+    }
+}
+
+/// Per-account rate-limit rollup, as a grid of compact cards: the 5-hour and
+/// weekly windows every agent on a login shares, so an account near its cap
+/// stands out without repeating the figures on each agent.
+private struct AccountsSection: View {
+    let accounts: [AccountUsage]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(title: "Accounts", systemImage: "person.2.badge.key")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
+                ForEach(accounts) { AccountCard(account: $0) }
+            }
+        }
+    }
+}
+
+/// A compact account card: identity + agent count and last-active, then a short
+/// 5-hour and weekly bar, each with its reset countdown.
+private struct AccountCard: View {
+    let account: AccountUsage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                brandIcon.frame(width: 15)
+                Text(account.label).font(.callout.weight(.semibold)).lineLimit(1)
+                Spacer(minLength: 4)
+                Text(account.containerText).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    .help(account.containers.sorted().joined(separator: ", "))
+            }
+            HStack(spacing: 5) {
+                (Text("\(account.agentCount)").monospacedDigit()
+                    + Text(account.agentCount == 1 ? " agent" : " agents"))
+                if let active = RelativeTime.short(account.lastActiveSeconds) {
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(active).monospacedDigit()
+                }
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+            LimitBar(label: "5h", percent: account.fiveHour, resetsAt: account.fiveHourResetsAt)
+            LimitBar(label: "7d", percent: account.sevenDay, resetsAt: account.sevenDayResetsAt)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.itemWash, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder private var brandIcon: some View {
+        if let resource = BrandIconLoader.agentIcon(for: account.kind) {
+            BrandIcon(resource: resource, size: 14)
+        } else {
+            Image(systemName: "person.crop.circle")
+        }
+    }
+}
+
+/// A short labelled usage bar: name, a colour-ramped fill, the percent, and a
+/// reset countdown. An empty track (no words) when the window has no reading.
+private struct LimitBar: View {
+    let label: String
+    let percent: Double?
+    let resetsAt: Int?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                .frame(width: 18, alignment: .leading)
+            Capsule().fill(Color.primary.opacity(0.08))
+                .frame(height: 5)
+                .overlay(alignment: .leading) {
+                    if let percent {
+                        GeometryReader { geo in
+                            Capsule().fill(Theme.meterColor(min(1, max(0, percent / 100))))
+                                .frame(width: geo.size.width * min(1, max(0, percent / 100)))
+                        }
+                    }
+                }
+            if let percent {
+                Text("\(Int(percent.rounded()))%")
+                    .font(.caption2).monospacedDigit().foregroundStyle(Theme.textSecondary)
+                    .frame(width: 32, alignment: .trailing)
+            } else {
+                Color.clear.frame(width: 32, height: 1)
+            }
+            if let reset = resetText {
+                Text(reset).font(.caption2).monospacedDigit().foregroundStyle(.tertiary)
+                    .frame(width: 26, alignment: .trailing)
+            } else {
+                Color.clear.frame(width: 26, height: 1)
+            }
+        }
+        .help(helpText)
+    }
+
+    private var resetText: String? {
+        guard let resetsAt else { return nil }
+        let delta = resetsAt - Int(Date().timeIntervalSince1970)
+        guard delta > 0 else { return nil }
+        if delta < 3600 { return "\(max(1, delta / 60))m" }
+        if delta < 86400 { return "\(delta / 3600)h" }
+        return "\(delta / 86400)d"
+    }
+
+    private var helpText: String {
+        guard let percent else { return "\(label): no reading yet" }
+        var text = "\(label): \(Int(percent.rounded()))% used"
+        if let reset = resetText { text += ", resets in \(reset)" }
+        return text
     }
 }
 
