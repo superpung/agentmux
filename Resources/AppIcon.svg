@@ -1,0 +1,36 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- AgentMux app icon: a command-prompt mark on a graphite squircle with a
+       soft static glass finish (layered gradients, no filters so it rasterizes
+       cleanly). Single source of truth; scripts/make-icon.sh builds AppIcon.icns. -->
+  <defs>
+    <linearGradient id="fill" x1="0" y1="80" x2="0" y2="912" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#55555b"/>
+      <stop offset="1" stop-color="#1c1c1e"/>
+    </linearGradient>
+    <linearGradient id="highlight" x1="0" y1="80" x2="0" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".20"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="80" x2="0" y2="912" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".22"/>
+      <stop offset=".5" stop-color="#ffffff" stop-opacity=".026"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="912" x2="0" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".05"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="squircle"><rect x="96" y="80" width="832" height="832" rx="190"/></clipPath>
+  </defs>
+  <rect x="96" y="80" width="832" height="832" rx="190" fill="url(#fill)"/>
+  <g clip-path="url(#squircle)">
+    <path d="M96,912 H928 V700 Q512,642 96,700 Z" fill="url(#glow)"/>
+    <g transform="translate(-6,-12)" fill="none" stroke="#ffffff" stroke-width="64"
+       stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="356,392 500,512 356,632"/>
+    </g>
+    <rect x="548" y="604" width="156" height="56" rx="28" fill="#ffffff"/>
+    <path d="M96,80 H928 V462 Q512,550 96,462 Z" fill="url(#highlight)"/>
+  </g>
+  <rect x="100" y="84" width="824" height="824" rx="186" fill="none" stroke="url(#rim)" stroke-width="5"/>
+</svg>

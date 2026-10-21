@@ -22,6 +22,7 @@ for bundle in "$BIN"/*.bundle; do
   [ -e "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"
 done
 cp Resources/Icons/*.svg "$APP/Contents/Resources/"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -30,6 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleExecutable</key><string>AgentMux</string>
   <key>CFBundleIdentifier</key><string>local.agentmux</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleName</key><string>AgentMux</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
