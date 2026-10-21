@@ -4,6 +4,9 @@
 # Usage: scripts/bundle-app.sh [debug|release]
 set -eu
 CONFIG="${1:-debug}"
+# Marketing version baked into Info.plist; the release workflow sets this from
+# the git tag, dev builds get the default.
+VERSION="${AGENTMUX_VERSION:-0.1.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 . scripts/env.sh
@@ -29,8 +32,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>local.agentmux</string>
   <key>CFBundleName</key><string>AgentMux</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
