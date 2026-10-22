@@ -51,11 +51,7 @@ struct AccountLinksWindow: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if groups.isEmpty {
-            ContentUnavailableView(
-                "No Claude accounts",
-                systemImage: "person.2.slash",
-                description: Text("No Claude account directories with projects were found in this container.")
-            )
+            ContentUnavailableView("No Claude accounts", systemImage: "person.2.slash")
         } else {
             List {
                 let shared = groups.filter(\.isShared)

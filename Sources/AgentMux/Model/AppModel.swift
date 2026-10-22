@@ -708,7 +708,7 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(100))
         }
         guard let terminal = terminal(for: ref), terminal.canSend else {
-            return "The agent isn't connected yet — try again in a moment."
+            return "The agent isn't connected yet. Try again in a moment."
         }
         return terminal.send(text, submit: true) ? nil : "Couldn't send input to this pane."
     }

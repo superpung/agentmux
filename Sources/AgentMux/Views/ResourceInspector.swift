@@ -34,7 +34,7 @@ struct ResourceInspector: View {
                 } else {
                     VStack(spacing: 6) {
                         Image(systemName: "sidebar.right").font(.title3).foregroundStyle(.tertiary)
-                        Text("Select an agent to see its container and host resources.")
+                        Text("Select an agent.")
                             .font(.caption).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }

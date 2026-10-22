@@ -417,8 +417,6 @@ private struct PoppedInfoView: View {
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
             Text("Open in a separate window").font(.headline)
-            Text("Close that window to bring this agent back here.")
-                .font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -439,9 +437,6 @@ private struct PanePlaceholderView: View {
                         .font(.largeTitle)
                         .foregroundStyle(.secondary)
                     Text("View only")
-                    Text("This target is configured as observe-only.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -467,8 +462,6 @@ private struct EmptyStateView: View {
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
                 Text("No hosts yet").font(.headline)
-                Text("Add an SSH host in Settings to discover its containers.")
-                    .font(.caption).foregroundStyle(.secondary)
                 SettingsLink { Text("Open Settings…") }
                     .padding(.top, 2)
             } else {

@@ -18,7 +18,7 @@ struct FileBrowserWindow: View {
         } else {
             VStack(spacing: 10) {
                 Image(systemName: "folder").font(.largeTitle).foregroundStyle(.tertiary)
-                Text("Select an agent in the main window to browse its files.")
+                Text("Select an agent.")
                     .foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding()

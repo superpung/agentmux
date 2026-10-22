@@ -97,7 +97,7 @@ struct SessionsWindow: View {
             } description: {
                 Text(model.state(targetID) == nil
                     ? "This container isn't connected yet."
-                    : "This container has no running tmux server. Create a session to start one.")
+                    : "This container has no running tmux server.")
             } actions: {
                 if model.state(targetID) != nil { newMenu }
             }
@@ -299,7 +299,7 @@ private struct NewSessionSheet: View {
             TextField("Name", text: $name, prompt: Text("work"))
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(create)
-            Text("A detached tmux session; names with spaces, “.” or “:” are not allowed.")
+            Text("Names with spaces, “.” or “:” are not allowed.")
                 .font(.caption2).foregroundStyle(.tertiary)
             HStack {
                 Spacer()
@@ -449,8 +449,6 @@ private struct LaunchAgentSheet: View {
                 Button { browsing = true } label: { Image(systemName: "folder") }
                     .help("Browse the container")
             }
-            Text("A new \(kind == .codex ? "Codex" : "Claude Code") agent starts in a tmux session here; created if it doesn't exist.")
-                .font(.caption2).foregroundStyle(.tertiary)
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
