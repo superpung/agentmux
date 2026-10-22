@@ -10,17 +10,28 @@ import SwiftUI
 @MainActor
 enum GhosttyRuntime {
     static let controller = TerminalController(
-        configuration: makeConfiguration(fontFamily: currentFontFamily),
+        configuration: makeConfiguration(fontFamily: currentFontFamily, fontSize: currentFontSize),
         theme: theme
     )
 
     // MARK: - Font
 
     static let fontFamilyKey = "terminalFontFamily"
+    static let fontSizeKey = "terminalFontSize"
+    static let defaultFontSize: Double = 13
+    static let minFontSize: Double = 8
+    static let maxFontSize: Double = 32
 
     /// The terminal font family in use, from the Settings choice or the default.
     static var currentFontFamily: String {
         UserDefaults.standard.string(forKey: fontFamilyKey) ?? defaultFontFamily
+    }
+
+    /// The terminal font size in use, from the Settings choice / a remembered
+    /// zoom, or the default. Persisted so it survives a restart.
+    static var currentFontSize: Double {
+        let v = UserDefaults.standard.object(forKey: fontSizeKey) as? Double ?? defaultFontSize
+        return min(maxFontSize, max(minFontSize, v))
     }
 
     /// SF Mono when this Mac can resolve it by name, else Menlo. An unresolved
@@ -49,7 +60,12 @@ enum GhosttyRuntime {
 
     /// Applies a font family to every open surface, live.
     static func applyFontFamily(_ family: String) {
-        _ = controller.setTerminalConfiguration(makeConfiguration(fontFamily: family))
+        _ = controller.setTerminalConfiguration(makeConfiguration(fontFamily: family, fontSize: currentFontSize))
+    }
+
+    /// Applies a font size to every open surface, live.
+    static func applyFontSize(_ size: Double) {
+        _ = controller.setTerminalConfiguration(makeConfiguration(fontFamily: currentFontFamily, fontSize: size))
     }
 
     /// Forces the shared controller's one global color scheme. Every embedded
@@ -66,10 +82,10 @@ enum GhosttyRuntime {
         controller.setColorScheme(dark ? .dark : .light)
     }
 
-    private static func makeConfiguration(fontFamily: String) -> TerminalConfiguration {
+    private static func makeConfiguration(fontFamily: String, fontSize: Double) -> TerminalConfiguration {
         TerminalConfiguration(startingFrom: .default) { builder in
             builder.withFontFamily(fontFamily)
-            builder.withFontSize(12.5)
+            builder.withFontSize(Float(fontSize))
             builder.withFontThicken(false)
             builder.withCursorStyle(.block)
             builder.withCursorStyleBlink(true)

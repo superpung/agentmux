@@ -197,6 +197,27 @@ final class AppModel {
         GhosttyRuntime.applyFontFamily(family)
     }
 
+    /// The terminal font size, persisted so a chosen size (or a zoom) survives a
+    /// restart. Applied live to every open surface.
+    private(set) var terminalFontSize: Double =
+        (UserDefaults.standard.object(forKey: GhosttyRuntime.fontSizeKey) as? Double) ?? GhosttyRuntime.defaultFontSize
+
+    func setTerminalFontSize(_ size: Double) {
+        let clamped = min(GhosttyRuntime.maxFontSize, max(GhosttyRuntime.minFontSize, size))
+        terminalFontSize = clamped
+        UserDefaults.standard.set(clamped, forKey: GhosttyRuntime.fontSizeKey)
+        GhosttyRuntime.applyFontSize(clamped)
+    }
+
+    /// Remembers a size the user reached by zooming a terminal (⌘ +/−), so new
+    /// terminals and the next launch use it. Does not resize other open terminals.
+    func rememberTerminalFontSize(_ size: Double) {
+        let clamped = min(GhosttyRuntime.maxFontSize, max(GhosttyRuntime.minFontSize, size))
+        guard abs(clamped - terminalFontSize) > 0.01 else { return }
+        terminalFontSize = clamped
+        UserDefaults.standard.set(clamped, forKey: GhosttyRuntime.fontSizeKey)
+    }
+
     /// Which chips the bottom status bar shows. Version is off by default (it is
     /// always available in the hover tooltip); the rest are on.
     private(set) var statusBarFields: Set<StatusBarField> =
@@ -1005,6 +1026,7 @@ final class AppModel {
             let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
             terminal.onActivity = { [weak self] in self?.nudge(ref.targetID) }
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
+            terminal.onFontSizeChanged = { [weak self] size in self?.rememberTerminalFontSize(size) }
             terminal.applyTheme(terminalTheme)
             terminals[ref] = terminal
             // Populate the account-link map so "Switch Account" is ready.

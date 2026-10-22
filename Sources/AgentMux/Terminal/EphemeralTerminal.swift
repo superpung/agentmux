@@ -56,7 +56,7 @@ final class EphemeralTerminal {
             return view
         }
         var options = TerminalSurfaceOptions(backend: .inMemory(session))
-        options.fontSize = Float(PaneTerminal.fontSize)
+        options.fontSize = Float(GhosttyRuntime.currentFontSize)
         state.configuration = options
 
         pty.start(

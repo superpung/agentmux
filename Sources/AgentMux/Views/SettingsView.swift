@@ -55,6 +55,15 @@ private struct GeneralSettings: View {
                         Text(family).tag(family)
                     }
                 }
+                LabeledContent("Terminal font size") {
+                    HStack(spacing: 8) {
+                        Text("\(Int(model.terminalFontSize)) pt").monospacedDigit().foregroundStyle(.primary)
+                        Stepper("", value: Binding(
+                            get: { model.terminalFontSize },
+                            set: { model.setTerminalFontSize($0) }
+                        ), in: 8 ... 32).labelsHidden()
+                    }
+                }
             }
             Section {
                 ForEach(StatusBarField.allCases, id: \.self) { field in

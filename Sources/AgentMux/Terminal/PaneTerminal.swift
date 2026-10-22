@@ -1,5 +1,6 @@
 import AgentMuxCore
 import AppKit
+import Combine
 import Foundation
 import GhosttyTerminal
 import Observation
@@ -17,7 +18,10 @@ final class PaneTerminal {
         case stale(String)
     }
 
-    static let fontSize: CGFloat = 13
+    /// Called on the main actor when the user zooms this terminal (⌘ +/−), so
+    /// the model can remember the new size for next time. Set by the model.
+    @ObservationIgnored var onFontSizeChanged: (@MainActor (Double) -> Void)?
+    @ObservationIgnored private var fontSizeObserver: AnyCancellable?
 
     let ref: PaneRef
     let state = TerminalViewState(controller: GhosttyRuntime.controller)
@@ -87,8 +91,17 @@ final class PaneTerminal {
             return view
         }
         var options = TerminalSurfaceOptions(backend: .inMemory(session))
-        options.fontSize = Float(PaneTerminal.fontSize)
+        options.fontSize = Float(GhosttyRuntime.currentFontSize)
         state.configuration = options
+
+        // Remember a size reached by zooming (⌘ +/−): the published fontSize
+        // changes, we drop the initial configured value and report the rest.
+        fontSizeObserver = state.$fontSize
+            .compactMap { $0 }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] size in self?.onFontSizeChanged?(Double(size)) }
 
         try mirror.start(
             onTerminalBytes: { [weak self] data in
