@@ -52,6 +52,20 @@ enum GhosttyRuntime {
         _ = controller.setTerminalConfiguration(makeConfiguration(fontFamily: family))
     }
 
+    /// Forces the shared controller's one global color scheme. Every embedded
+    /// surface shares this controller, so only one scheme can show at a time;
+    /// the app points it at the selected terminal's theme. `.system` follows the
+    /// app's current appearance.
+    static func applyColorScheme(for preference: TerminalThemePreference) {
+        let dark: Bool
+        switch preference {
+        case .dark: dark = true
+        case .light: dark = false
+        case .system: dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        }
+        controller.setColorScheme(dark ? .dark : .light)
+    }
+
     private static func makeConfiguration(fontFamily: String) -> TerminalConfiguration {
         TerminalConfiguration(startingFrom: .default) { builder in
             builder.withFontFamily(fontFamily)

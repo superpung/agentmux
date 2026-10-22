@@ -165,9 +165,10 @@ final class AppModel {
         UserDefaults.standard.set(customNames, forKey: "customNames")
     }
 
-    /// The global default palette for embedded terminals. Agents render for the
-    /// terminal they were started in (usually dark), so a mismatched mirror can
-    /// look wrong (e.g. Codex's dark input box on a white surface); this pins it.
+    /// The palette for embedded terminals: one global setting, since every
+    /// mirror shares the terminal engine's single color scheme. `.system`
+    /// follows the Mac; pin `.dark`/`.light` when agents render for a fixed theme
+    /// (their TUIs usually assume dark).
     private(set) var terminalTheme: TerminalThemePreference =
         UserDefaults.standard.string(forKey: "terminalTheme")
             .flatMap(TerminalThemePreference.init(rawValue:)) ?? .system
@@ -175,9 +176,14 @@ final class AppModel {
     func setTerminalTheme(_ preference: TerminalThemePreference) {
         terminalTheme = preference
         UserDefaults.standard.set(preference.rawValue, forKey: "terminalTheme")
-        for terminal in terminals.values {
-            terminal.applyTheme(effectiveTerminalTheme(for: terminal.ref))
-        }
+        applyTerminalTheme()
+    }
+
+    /// Applies the one global theme to every open terminal and the shared
+    /// controller. All surfaces use the same scheme, so switching never flips it.
+    func applyTerminalTheme() {
+        for terminal in terminals.values { terminal.applyTheme(terminalTheme) }
+        GhosttyRuntime.applyColorScheme(for: terminalTheme)
     }
 
     /// The font family for embedded terminals. Applied live to every open
@@ -189,43 +195,6 @@ final class AppModel {
         terminalFontFamily = family
         UserDefaults.standard.set(family, forKey: GhosttyRuntime.fontFamilyKey)
         GhosttyRuntime.applyFontFamily(family)
-    }
-
-    /// Per-agent palette overrides keyed by `AgentEntry.identityKey`; an absent
-    /// entry means the agent follows the global `terminalTheme`.
-    private(set) var terminalThemeOverrides: [String: TerminalThemePreference] =
-        (UserDefaults.standard.dictionary(forKey: "terminalThemeOverrides") as? [String: String] ?? [:])
-            .compactMapValues(TerminalThemePreference.init(rawValue:))
-
-    func terminalThemeOverride(_ key: String) -> TerminalThemePreference? { terminalThemeOverrides[key] }
-
-    /// Sets (or, with nil, clears) one agent's override and repaints its live
-    /// terminals.
-    func setTerminalThemeOverride(_ key: String, _ preference: TerminalThemePreference?) {
-        terminalThemeOverrides[key] = preference
-        UserDefaults.standard.set(terminalThemeOverrides.mapValues(\.rawValue), forKey: "terminalThemeOverrides")
-        for terminal in terminals.values where agentEntry(terminal.ref)?.identityKey == key {
-            terminal.applyTheme(effectiveTerminalTheme(for: terminal.ref))
-        }
-    }
-
-    /// The palette a terminal should use: the agent's per-agent override if set,
-    /// otherwise the global default.
-    func effectiveTerminalTheme(for ref: PaneRef) -> TerminalThemePreference {
-        if let key = agentEntry(ref)?.identityKey, let override = terminalThemeOverrides[key] {
-            return override
-        }
-        return terminalTheme
-    }
-
-    /// Re-applies the effective per-agent theme to a target's open terminals. A
-    /// terminal opened before its agent appeared in the snapshot resolves to the
-    /// global default; once the agent (and any override) is known, this corrects
-    /// it. Idempotent: re-applying the same appearance is a no-op.
-    private func reapplyTerminalThemes(of state: TargetState) {
-        for (ref, terminal) in terminals where ref.targetID == state.id {
-            terminal.applyTheme(effectiveTerminalTheme(for: ref))
-        }
     }
 
     /// Which chips the bottom status bar shows. Version is off by default (it is
@@ -826,7 +795,6 @@ final class AppModel {
             let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
             notifyActivityTransitions(state, old: state.activities, new: newActivities)
             state.activities = newActivities
-            reapplyTerminalThemes(of: state)
             state.lastSuccess = Date()
             state.lastFailure = nil
             state.interval = TargetState.baseInterval
@@ -1037,7 +1005,7 @@ final class AppModel {
             let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
             terminal.onActivity = { [weak self] in self?.nudge(ref.targetID) }
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
-            terminal.applyTheme(effectiveTerminalTheme(for: ref))
+            terminal.applyTheme(terminalTheme)
             terminals[ref] = terminal
             // Populate the account-link map so "Switch Account" is ready.
             if linkGroupsByTarget[ref.targetID] == nil { refreshLinks(ref.targetID) }
