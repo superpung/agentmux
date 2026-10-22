@@ -22,13 +22,19 @@ private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
 
+    /// Installed monospaced families, with the current choice always present.
+    private var fontFamilies: [String] {
+        var families = GhosttyRuntime.monospacedFamilies()
+        if !families.contains(model.terminalFontFamily) {
+            families.insert(model.terminalFontFamily, at: 0)
+        }
+        return families
+    }
+
     var body: some View {
         Form {
             Section {
                 Toggle("Notify when an agent finishes or needs you", isOn: $notificationsEnabled)
-            } footer: {
-                Text("A banner appears when a monitored agent finishes its turn or starts waiting for input, unless you are already viewing it.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Picker("Terminal theme", selection: Binding(
@@ -39,9 +45,16 @@ private struct GeneralSettings: View {
                         Text(preference.label).tag(preference)
                     }
                 }
-            } footer: {
-                Text("Agent terminals are drawn for the terminal they run in, which is usually dark. If a terminal shows a dark input box or unreadable colors on a light background, pin this to Dark.")
-                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Terminal font", selection: Binding(
+                    get: { model.terminalFontFamily },
+                    set: { model.setTerminalFontFamily($0) }
+                )) {
+                    ForEach(fontFamilies, id: \.self) { family in
+                        Text(family).tag(family)
+                    }
+                }
             }
             Section {
                 ForEach(StatusBarField.allCases, id: \.self) { field in
@@ -52,9 +65,6 @@ private struct GeneralSettings: View {
                 }
             } header: {
                 Text("Status bar")
-            } footer: {
-                Text("Choose which chips the bottom status bar shows for the selected agent. The agent version is always in the hover tooltip.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -88,10 +98,7 @@ private struct HostsSettings: View {
             }
             .overlay {
                 if model.hosts.isEmpty {
-                    ContentUnavailableView(
-                        "No hosts", systemImage: "server.rack",
-                        description: Text("Add an SSH host to discover its containers.")
-                    )
+                    ContentUnavailableView("No hosts", systemImage: "server.rack")
                 }
             }
             Divider()
@@ -147,9 +154,6 @@ private struct HostEditor: View {
                     .autocorrectionDisabled()
             }
             .textFieldStyle(.roundedBorder)
-            Text("The SSH destination is an alias from ~/.ssh/config or user@host. No passwords or keys; authentication goes through ssh and ssh-agent.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)

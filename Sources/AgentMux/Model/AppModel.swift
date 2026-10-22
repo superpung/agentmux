@@ -180,6 +180,17 @@ final class AppModel {
         }
     }
 
+    /// The font family for embedded terminals. Applied live to every open
+    /// surface; defaults to SF Mono when this Mac can resolve it, else Menlo.
+    private(set) var terminalFontFamily: String =
+        UserDefaults.standard.string(forKey: GhosttyRuntime.fontFamilyKey) ?? GhosttyRuntime.defaultFontFamily
+
+    func setTerminalFontFamily(_ family: String) {
+        terminalFontFamily = family
+        UserDefaults.standard.set(family, forKey: GhosttyRuntime.fontFamilyKey)
+        GhosttyRuntime.applyFontFamily(family)
+    }
+
     /// Per-agent palette overrides keyed by `AgentEntry.identityKey`; an absent
     /// entry means the agent follows the global `terminalTheme`.
     private(set) var terminalThemeOverrides: [String: TerminalThemePreference] =

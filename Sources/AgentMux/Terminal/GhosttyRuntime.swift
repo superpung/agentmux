@@ -10,8 +10,51 @@ import SwiftUI
 @MainActor
 enum GhosttyRuntime {
     static let controller = TerminalController(
-        configuration: TerminalConfiguration(startingFrom: .default) { builder in
-            builder.withFontFamily("SF Mono")
+        configuration: makeConfiguration(fontFamily: currentFontFamily),
+        theme: theme
+    )
+
+    // MARK: - Font
+
+    static let fontFamilyKey = "terminalFontFamily"
+
+    /// The terminal font family in use, from the Settings choice or the default.
+    static var currentFontFamily: String {
+        UserDefaults.standard.string(forKey: fontFamilyKey) ?? defaultFontFamily
+    }
+
+    /// SF Mono when this Mac can resolve it by name, else Menlo. An unresolved
+    /// family silently falls back (to a proportional font that looks wrong in a
+    /// terminal), and SF Mono is not installed by name on every Mac.
+    nonisolated static var defaultFontFamily: String {
+        isResolvable("SF Mono") ? "SF Mono" : "Menlo"
+    }
+
+    /// Monospaced font families installed on this Mac, for the Settings picker.
+    nonisolated static func monospacedFamilies() -> [String] {
+        NSFontManager.shared.availableFontFamilies.filter(isMonospaced).sorted()
+    }
+
+    nonisolated static func isMonospaced(_ family: String) -> Bool {
+        let descriptor = NSFontDescriptor(fontAttributes: [.family: family])
+        guard let font = NSFont(descriptor: descriptor, size: 12) else { return false }
+        return font.fontDescriptor.symbolicTraits.contains(.monoSpace)
+    }
+
+    /// Whether a family name resolves to that family (not a silent fallback).
+    nonisolated static func isResolvable(_ family: String) -> Bool {
+        NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: family]), size: 12)?
+            .familyName == family
+    }
+
+    /// Applies a font family to every open surface, live.
+    static func applyFontFamily(_ family: String) {
+        _ = controller.setTerminalConfiguration(makeConfiguration(fontFamily: family))
+    }
+
+    private static func makeConfiguration(fontFamily: String) -> TerminalConfiguration {
+        TerminalConfiguration(startingFrom: .default) { builder in
+            builder.withFontFamily(fontFamily)
             builder.withFontSize(12.5)
             builder.withFontThicken(false)
             builder.withCursorStyle(.block)
@@ -27,9 +70,8 @@ enum GhosttyRuntime {
             builder.withCustom("copy-on-select", "clipboard")
             // Shift always selects locally, even when the remote app captures the mouse.
             builder.withCustom("mouse-shift-capture", "never")
-        },
-        theme: theme
-    )
+        }
+    }
 
     static let darkBackground = "#101012"
     static let lightBackground = "#FFFFFF"
