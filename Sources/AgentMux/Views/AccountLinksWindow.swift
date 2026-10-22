@@ -54,15 +54,18 @@ struct AccountLinksWindow: View {
             ContentUnavailableView("No Claude accounts", systemImage: "person.2.slash")
         } else {
             List {
-                let shared = groups.filter(\.isShared)
-                let independent = groups.filter { !$0.isShared }
+                // Temporary (/tmp) scratchpad projects are folded away regardless
+                // of whether they are shared across accounts, so account-linked
+                // scratch dirs don't clutter the top sections.
+                let scratch = groups.filter { $0.cwd.hasPrefix("/tmp/") || $0.label.hasPrefix("/tmp/") }
+                let rest = groups.filter { !($0.cwd.hasPrefix("/tmp/") || $0.label.hasPrefix("/tmp/")) }
+                let shared = rest.filter(\.isShared)
+                let projects = rest.filter { !$0.isShared }
                 if !shared.isEmpty {
                     Section("Shared, switchable accounts") {
                         ForEach(shared) { GroupRow(group: $0, running: running(in: $0)) }
                     }
                 }
-                let scratch = independent.filter { $0.cwd.hasPrefix("/tmp/") || $0.label.hasPrefix("/tmp/") }
-                let projects = independent.filter { !($0.cwd.hasPrefix("/tmp/") || $0.label.hasPrefix("/tmp/")) }
                 if !projects.isEmpty {
                     Section("Independent") {
                         ForEach(projects) { GroupRow(group: $0, running: running(in: $0)) }
