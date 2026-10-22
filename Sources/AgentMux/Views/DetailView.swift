@@ -284,10 +284,10 @@ private struct UsageView: View {
                 .help("Context: \(context) tokens (the model's window is not in the log)")
             }
             if let h5 = usage.fiveHourPercent {
-                Meter(label: "5h", fraction: h5 / 100, tooltip: "5-hour limit used: \(Int(h5.rounded()))%")
+                Meter(label: "5h", fraction: h5 / 100, tooltip: "5-hour limit used: \(Int(h5.rounded()))%", resetsAt: usage.fiveHourResetsAt)
             }
             if let d7 = usage.sevenDayPercent {
-                Meter(label: "7d", fraction: d7 / 100, tooltip: "Weekly (7-day) limit used: \(Int(d7.rounded()))%")
+                Meter(label: "7d", fraction: d7 / 100, tooltip: "Weekly (7-day) limit used: \(Int(d7.rounded()))%", resetsAt: usage.sevenDayResetsAt)
             }
             if usage.fiveHourPercent == nil, usage.sevenDayPercent == nil, let rate = usage.rateLimitPercent {
                 Meter(label: "rate", fraction: rate / 100, tooltip: "Rate limit used: \(Int(rate.rounded()))%")
@@ -313,10 +313,15 @@ private struct Meter: View {
     let label: String
     let fraction: Double
     let tooltip: String
+    var resetsAt: Int? = nil
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(label).font(.footnote).foregroundStyle(.tertiary)
+            Text(label)
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
             Capsule().fill(.quaternary)
                 .frame(width: 44, height: 6)
                 .overlay(alignment: .leading) {
@@ -326,9 +331,23 @@ private struct Meter: View {
             Text("\(Int((fraction * 100).rounded()))%")
                 .font(.footnote).foregroundStyle(Theme.textSecondary).monospacedDigit()
                 .rollingNumber(Int((fraction * 100).rounded()))
-                .frame(minWidth: 34, alignment: .trailing)   // width pinned AFTER the roll: keeps numericText, just no layout reflow
+            if let reset = Self.resetText(resetsAt) {
+                Text(reset).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
+            }
         }
-        .help(tooltip)
+        .help(Self.resetText(resetsAt).map { "\(tooltip) · resets in \($0)" } ?? tooltip)
+    }
+
+    /// Compact time until the limit resets ("2d5h", "3h12m", "45m"); nil if
+    /// unknown or already past.
+    static func resetText(_ resetsAt: Int?) -> String? {
+        guard let resetsAt else { return nil }
+        let remaining = resetsAt - Int(Date().timeIntervalSince1970)
+        guard remaining > 0 else { return nil }
+        let d = remaining / 86400, h = (remaining % 86400) / 3600, m = (remaining % 3600) / 60
+        if d > 0 { return "\(d)d\(h)h" }
+        if h > 0 { return "\(h)h\(m)m" }
+        return "\(m)m"
     }
 
     private var color: Color {

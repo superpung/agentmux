@@ -54,7 +54,7 @@ fi
 # ---------- render the pretty status line ----------
 [ -n "$OBJ" ] || { printf 'claude\n'; exit 0; }
 
-IFS=$'\t' read -r MODEL EFFORT FAST CFG PROJ CTX FIVEH SEVEND <<EOF
+IFS=$'\t' read -r MODEL EFFORT FAST CFG PROJ CTX FIVEH SEVEND R5 R7 <<EOF
 $(printf '%s' "$OBJ" | jq -r '[
     (.model.name // .model.id // "claude"),
     (.effort // "-"),
@@ -63,7 +63,9 @@ $(printf '%s' "$OBJ" | jq -r '[
     (.project_dir // .cwd // "-"),
     (.context.used_percentage // -1 | floor | tostring),
     (.rate_limits.five_hour.used_percentage // -1 | floor | tostring),
-    (.rate_limits.seven_day.used_percentage // -1 | floor | tostring)
+    (.rate_limits.seven_day.used_percentage // -1 | floor | tostring),
+    (.rate_limits.five_hour.resets_at // -1 | floor | tostring),
+    (.rate_limits.seven_day.resets_at // -1 | floor | tostring)
   ] | @tsv' 2>/dev/null)
 EOF
 
@@ -73,13 +75,22 @@ R=$(esc 0); DIM=$(esc 2); BOLD=$(esc 1)
 # Muted, low-saturation palette (easy on the eye on a dark background).
 C_MODEL=$(fg '124;163;179')   # soft teal
 C_FAST=$(fg '170;138;180')    # soft mauve
-C_OK=$(fg '140;170;118')      # muted green  (< 70%)
+C_OK=$(fg '116;194;124')      # muted green  (< 70%)
 C_WARN=$(fg '200;168;104')    # muted amber  (70-90%)
 C_HIGH=$(fg '203;118;110')    # muted red    (>= 90%)
 C_TRACK=$(fg '92;96;104')     # dim gray (unfilled bar track)
 SEP="${DIM} │ ${R}"
 pct_color() { if [ "$1" -ge 90 ]; then printf '%s' "$C_HIGH"; elif [ "$1" -ge 70 ]; then printf '%s' "$C_WARN"; else printf '%s' "$C_OK"; fi; }
 base() { b=${1##*/}; printf '%s' "${b:-$1}"; }
+# Compact time until a limit resets ("2d5h", "3h12m", "45m"); empty if unknown.
+fmt_reset() {
+  [ "${1:--1}" -ge 0 ] 2>/dev/null || return 0
+  r=$(( $1 - $(date +%s) )); [ "$r" -gt 0 ] || return 0
+  d=$((r / 86400)); h=$(( (r % 86400) / 3600 )); m=$(( (r % 3600) / 60 ))
+  if [ "$d" -gt 0 ]; then printf '%dd%dh' "$d" "$h"
+  elif [ "$h" -gt 0 ]; then printf '%dh%dm' "$h" "$m"
+  else printf '%dm' "$m"; fi
+}
 
 bar() { # $1=pct $2=width $3=fill-color -> colored filled blocks + dim track
   p=$1; w=$2; fc=$3; f=$(( (p * w + 50) / 100 ))
@@ -92,6 +103,7 @@ bar() { # $1=pct $2=width $3=fill-color -> colored filled blocks + dim track
 }
 
 CFGB=$(base "$CFG"); PROJB=$(base "$PROJ")
+RST5=$(fmt_reset "$R5"); RST7=$(fmt_reset "$R7")
 
 # Terminal width: Claude Code captures stdout (so tput/stty fail) but exports
 # COLUMNS. Keep the rendered line within it so Claude Code never truncates us
@@ -106,8 +118,8 @@ budget=$(( cols - ${AGENTMUX_SL_MARGIN:-2} ))
 # (with a plain space you can't tell which number belongs to which label).
 # BARW (global, >= 0) is the bar length in columns; 0 means no bar. Every glyph
 # we emit (ASCII, block bar, box-drawing) is exactly one terminal column.
-addmetric() { # $1=label $2=pct ; globals: BARW OUT WIDTH
-  lbl=$1; p=$2
+addmetric() { # $1=label $2=pct $3=reset-suffix ; globals: BARW OUT WIDTH
+  lbl=$1; p=$2; rst=${3:-}
   [ -n "$OUT" ] && { OUT="$OUT$SEP"; WIDTH=$((WIDTH + 3)); }
   if [ "${p:--1}" -ge 0 ] 2>/dev/null; then
     col=$(pct_color "$p")
@@ -118,6 +130,7 @@ addmetric() { # $1=label $2=pct ; globals: BARW OUT WIDTH
       OUT="$OUT${DIM}${lbl}${R} ${col}${p}%${R}"
       WIDTH=$((WIDTH + ${#lbl} + ${#p} + 2))
     fi
+    if [ -n "$rst" ]; then OUT="$OUT ${DIM}${rst}${R}"; WIDTH=$((WIDTH + 1 + ${#rst})); fi
   else
     OUT="$OUT${DIM}${lbl} —${R}"
     WIDTH=$((WIDTH + ${#lbl} + 2))
@@ -142,8 +155,8 @@ build() { # globals: BARW FAST_ EFFORT_ CFG_ PROJ_ CTX_ MODEL_
   if [ "$CFG_" = 1 ] && [ "${CFG:--}" != "-" ]; then OUT="$OUT${SEP}${DIM}${CFGB}${R}"; WIDTH=$((WIDTH + 3 + ${#CFGB})); fi
   if [ "$PROJ_" = 1 ] && [ "${PROJ:--}" != "-" ]; then OUT="$OUT${SEP}${BOLD}${PROJB}${R}"; WIDTH=$((WIDTH + 3 + ${#PROJB})); fi
   [ "$CTX_" = 1 ] && addmetric ctx "$CTX"
-  addmetric 5h "$FIVEH"
-  addmetric 7d "$SEVEND"
+  addmetric 5h "$FIVEH" "$RST5"
+  addmetric 7d "$SEVEND" "$RST7"
 }
 
 # Fit strategy: keep every field and shrink the BARS first (adaptive length,
