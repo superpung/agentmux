@@ -218,6 +218,16 @@ final class AppModel {
         return terminalTheme
     }
 
+    /// Re-applies the effective per-agent theme to a target's open terminals. A
+    /// terminal opened before its agent appeared in the snapshot resolves to the
+    /// global default; once the agent (and any override) is known, this corrects
+    /// it. Idempotent: re-applying the same appearance is a no-op.
+    private func reapplyTerminalThemes(of state: TargetState) {
+        for (ref, terminal) in terminals where ref.targetID == state.id {
+            terminal.applyTheme(effectiveTerminalTheme(for: ref))
+        }
+    }
+
     /// Which chips the bottom status bar shows. Version is off by default (it is
     /// always available in the hover tooltip); the rest are on.
     private(set) var statusBarFields: Set<StatusBarField> =
@@ -816,6 +826,7 @@ final class AppModel {
             let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
             notifyActivityTransitions(state, old: state.activities, new: newActivities)
             state.activities = newActivities
+            reapplyTerminalThemes(of: state)
             state.lastSuccess = Date()
             state.lastFailure = nil
             state.interval = TargetState.baseInterval
