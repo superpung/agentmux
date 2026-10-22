@@ -2,8 +2,14 @@ import SwiftUI
 
 /// Which view the combined container window shows.
 enum ContainerTab: String, CaseIterable, Sendable {
-    case sessions, accounts
-    var label: String { self == .sessions ? "Sessions" : "Accounts" }
+    case sessions, launch, accounts
+    var label: String {
+        switch self {
+        case .sessions: return "Sessions"
+        case .launch: return "Launch"
+        case .accounts: return "Accounts"
+        }
+    }
 }
 
 /// One window for per-container management, sharing a single container picker:
@@ -32,6 +38,7 @@ struct ContainerWindow: View {
             Divider()
             switch model.containerTab {
             case .sessions: SessionsWindow(targetID: $targetID)
+            case .launch: LaunchWindow(targetID: $targetID)
             case .accounts: AccountLinksWindow(targetID: $targetID)
             }
         }
