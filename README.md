@@ -44,7 +44,7 @@ What makes it different:
 - 🎛️ **Usage at a glance.** Context window %, 5h / 7d limits, and the model and reasoning effort each agent is using, in a status bar whose fields you choose.
 - 🖥️ **Live terminal mirror.** Open the actual tmux pane an agent runs in, softly resized to a readable font, or pop it out into its own window. Your keystrokes go to that pane only; your own tmux clients stay untouched.
 - ⌨️ **Command palette.** Press ⌘K to jump to any agent, or send a prompt straight into one.
-- 🚀 **Launch, resume & switch.** Start or resume a Claude Code or Codex agent in any directory, and switch a Claude account in place, resuming the same conversation.
+- 🚀 **Launch, resume & switch.** Start or resume a Claude Code or Codex agent in any directory, and switch a Claude or Codex account in place, resuming the same conversation.
 - 🧭 **Activity & alerts.** Working, waiting for input, or idle, read from structural session-log fields, with desktop notifications when an agent finishes or needs you.
 - 🔬 **Resource inspector.** Per-agent CPU, memory and uptime, git working-tree status (branch, diff, ahead/behind), and host load, memory, disk and GPU.
 - 📁 **Files.** Browse the remote working directory with rich previews (syntax-highlighted code, Markdown, CSV/TSV, SVG, PDF, images), and upload, download, delete or create.
@@ -62,7 +62,7 @@ Every similar tool *launches* agents for you (in local git worktrees, or on its 
 | Remote over SSH | ✅ | 🔶 | ❌ | ❌ | ❌ | ❌ | 🔶 | 🔶 | ❌ |
 | Auto-discover Docker containers | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Host/container metrics, incl. GPU | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Switch Claude account in place | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Switch Claude/Codex account in place | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Native Mac app (no Electron/TUI) | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
 
 <sub>🔶 partial: remote over the tool's own runtime or daemon, not SSH; herdrm also requires adopting herdr.</sub>

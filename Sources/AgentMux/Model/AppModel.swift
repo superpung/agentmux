@@ -240,14 +240,19 @@ final class AppModel {
     /// Claude account link groups per target, populated lazily when a terminal
     /// opens so the "Switch Account" menu knows which accounts share a project.
     private(set) var linkGroupsByTarget: [String: [ProjectLinkGroup]] = [:]
+    /// Codex account dirs + non-secret account ids per target, for switching.
+    private(set) var codexAccountsByTarget: [String: [AgentSessionProbe.CodexAccount]] = [:]
 
     func refreshLinks(_ targetID: String) {
         guard let state = state(targetID) else { return }
         Task { [weak self] in
-            let result = await AgentSessionProbe.projectLinks(host: state.host, target: state.target)
-            guard case let .success(entries) = result else { return }
-            let groups = AgentSessionProbe.linkGroups(from: entries)
-            await MainActor.run { self?.linkGroupsByTarget[targetID] = groups }
+            if case let .success(entries) = await AgentSessionProbe.projectLinks(host: state.host, target: state.target) {
+                let groups = AgentSessionProbe.linkGroups(from: entries)
+                await MainActor.run { self?.linkGroupsByTarget[targetID] = groups }
+            }
+            if case let .success(accts) = await AgentSessionProbe.codexAccounts(host: state.host, target: state.target) {
+                await MainActor.run { self?.codexAccountsByTarget[targetID] = accts }
+            }
         }
     }
 
@@ -255,14 +260,29 @@ final class AppModel {
     /// be resumed under them. Empty unless it is a Claude agent in a shared
     /// project (and the link scan for its container has completed).
     func switchableAccounts(for ref: PaneRef) -> [String] {
-        guard let agent = agentEntry(ref), agent.kind == .claudeCode,
-              let groups = linkGroupsByTarget[ref.targetID],
-              let group = groups.first(where: { $0.cwd == agent.space.path && $0.isShared })
-        else { return [] }
-        // An agent on the default account has no CLAUDE_CONFIG_DIR, so no
-        // configDir is reported; it is the ".claude" entry in the group.
-        let current = agent.configDir ?? group.accounts.first { ($0 as NSString).lastPathComponent == ".claude" }
-        return group.accounts.filter { $0 != current }
+        guard let agent = agentEntry(ref) else { return [] }
+        switch agent.kind {
+        case .claudeCode:
+            guard let groups = linkGroupsByTarget[ref.targetID],
+                  let group = groups.first(where: { $0.cwd == agent.space.path && $0.isShared })
+            else { return [] }
+            // An agent on the default account has no CLAUDE_CONFIG_DIR, so no
+            // configDir is reported; it is the ".claude" entry in the group.
+            let current = agent.configDir ?? group.accounts.first { ($0 as NSString).lastPathComponent == ".claude" }
+            return group.accounts.filter { $0 != current }
+        case .codex:
+            // Codex sessions are linked to one canonical copy, so any other codex
+            // account dir can resume the session. Offer the ones whose account
+            // differs from this agent's current one.
+            guard let accounts = codexAccountsByTarget[ref.targetID] else { return [] }
+            let currentAccount = state(ref.targetID)?.snapshot?.accounts[ref.paneID]
+            let currentID = currentAccount.flatMap { $0.hasPrefix("codex:") ? String($0.dropFirst(6)) : nil }
+            return accounts
+                .filter { $0.accountID != currentID && $0.path != agent.configDir }
+                .map(\.path)
+        default:
+            return []
+        }
     }
 
     /// Switches the Claude agent to another linked account, resuming the same
@@ -272,10 +292,21 @@ final class AppModel {
         guard let state = state(ref.targetID), let agent = agentEntry(ref),
               let pid = state.detections[ref.paneID]?.pid
         else { return "This agent is no longer available." }
-        let result = await AgentAccountSwitch.switchClaudeAccount(
-            host: state.host, target: state.target,
-            paneID: ref.paneID, claudePID: pid, cwd: agent.space.path, newConfigDir: configDir
-        )
+        let result: Result<String, RemoteFailure>
+        switch agent.kind {
+        case .claudeCode:
+            result = await AgentAccountSwitch.switchClaudeAccount(
+                host: state.host, target: state.target,
+                paneID: ref.paneID, claudePID: pid, cwd: agent.space.path, newConfigDir: configDir
+            )
+        case .codex:
+            result = await AgentAccountSwitch.switchCodexAccount(
+                host: state.host, target: state.target,
+                paneID: ref.paneID, codexPID: pid, cwd: agent.space.path, newConfigDir: configDir
+            )
+        default:
+            return "Account switching is not supported for this agent."
+        }
         switch result {
         case .success:
             state.refreshRequested = true

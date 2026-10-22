@@ -66,7 +66,7 @@ struct DetailView: View {
             Button("Switch", role: .destructive) { performSwitch(pending) }
             Button("Cancel", role: .cancel) {}
         } message: { pending in
-            Text("The running Claude will be stopped and relaunched under \(pending.label), resuming this conversation. Any in-progress turn is lost.")
+            Text("The running agent will be stopped and relaunched under \(pending.label), resuming this conversation. Any in-progress turn is lost.")
         }
         .alert(
             "Couldn't switch account",

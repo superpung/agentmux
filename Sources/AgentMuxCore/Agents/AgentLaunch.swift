@@ -13,9 +13,11 @@ public struct AgentConfigDir: Identifiable, Sendable, Equatable, Hashable {
     }
 }
 
-/// A resumable past session for one account. Metadata only — never any message
-/// text (see the agent-data-privacy convention): id, project dir, last-active
-/// time and a line count used as a size proxy.
+/// A resumable past session for one account: id, project dir, last-active time,
+/// a line count used as a size proxy, and `preview` — the last message's text,
+/// truncated to one short line. The preview is the one place message text is
+/// read, and only by the Launch page the user explicitly opens; the background
+/// auto-refresh never reads it (it stays status-only per agent-data-privacy).
 public struct AgentSessionInfo: Identifiable, Sendable, Equatable, Hashable {
     public let kind: AgentKind
     public let configDir: String
@@ -23,14 +25,16 @@ public struct AgentSessionInfo: Identifiable, Sendable, Equatable, Hashable {
     public let cwd: String
     public let lastActiveEpoch: Int
     public let eventCount: Int
+    public let preview: String
 
-    public init(kind: AgentKind, configDir: String, id: String, cwd: String, lastActiveEpoch: Int, eventCount: Int) {
+    public init(kind: AgentKind, configDir: String, id: String, cwd: String, lastActiveEpoch: Int, eventCount: Int, preview: String = "") {
         self.kind = kind
         self.configDir = configDir
         self.id = id
         self.cwd = cwd
         self.lastActiveEpoch = lastActiveEpoch
         self.eventCount = eventCount
+        self.preview = preview
     }
 }
 
@@ -87,7 +91,8 @@ public enum AgentSessionProbe {
               mt=$(stat -c %Y "$f" 2>/dev/null)
               n=$(wc -l < "$f" 2>/dev/null)
               cwd=$(grep -m1 -o '"cwd":"[^"]*"' "$f" 2>/dev/null | head -1 | sed 's/.*"cwd":"//;s/"$//')
-              echo "$id|$mt|$n|$cwd"
+              pv=$(tail -n 40 "$f" 2>/dev/null | jq -r '(.message.content // empty) | (if type=="string" then . elif type=="array" then (map(select(.type=="text").text // empty)|join(" ")) else empty end) | gsub("\\n";" ")' 2>/dev/null | grep -v '^[[:space:]]*$' | tail -1 | tr -d '|' | cut -c1-200)
+              echo "$id|$mt|$n|$cwd|$pv"
             done
             """
         case .codex:
@@ -97,7 +102,8 @@ public enum AgentSessionProbe {
               id=$(printf '%s' "$meta" | jq -r '.payload.id // empty' 2>/dev/null)
               cwd=$(printf '%s' "$meta" | jq -r '.payload.cwd // empty' 2>/dev/null)
               n=$(wc -l < "$f" 2>/dev/null)
-              echo "$id|${mt%.*}|$n|$cwd"
+              pv=$(tail -n 60 "$f" 2>/dev/null | jq -r '([.. | (.text? // .output_text? // empty)] | map(select(type=="string" and . != "")) | last // "") | gsub("\\n";" ")' 2>/dev/null | grep -v '^[[:space:]]*$' | tail -1 | tr -d '|' | cut -c1-200)
+              echo "$id|${mt%.*}|$n|$cwd|$pv"
             done
             """
         default:
@@ -124,13 +130,41 @@ public enum AgentSessionProbe {
 
     public static func parseSessions(_ text: String, kind: AgentKind, configDir: String) -> [AgentSessionInfo] {
         text.split(whereSeparator: \.isNewline).compactMap { line in
-            let f = line.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
-            guard f.count == 4, !f[0].isEmpty, AgentCommand.isSafeToken(f[0]) else { return nil }
+            let f = line.split(separator: "|", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
+            guard f.count >= 4, !f[0].isEmpty, AgentCommand.isSafeToken(f[0]) else { return nil }
             let cwd = f[3].isEmpty ? "~" : f[3]
+            let preview = f.count >= 5 ? String(f[4].prefix(140)) : ""
             return AgentSessionInfo(
                 kind: kind, configDir: configDir, id: f[0], cwd: cwd,
-                lastActiveEpoch: Int(f[1]) ?? 0, eventCount: Int(f[2]) ?? 0
+                lastActiveEpoch: Int(f[1]) ?? 0, eventCount: Int(f[2]) ?? 0, preview: preview
             )
+        }
+    }
+
+    /// A Codex account dir and its non-secret account id, for switching accounts.
+    public struct CodexAccount: Sendable, Equatable {
+        public let path: String
+        public let accountID: String
+        public init(path: String, accountID: String) { self.path = path; self.accountID = accountID }
+    }
+
+    /// Codex account dirs (`~/.codex*` with a sessions dir) and each one's
+    /// non-secret `tokens.account_id`. Never reads any token.
+    public static func codexAccounts(host: HostConfig, target: TargetConfig) async -> Result<[CodexAccount], RemoteFailure> {
+        let script = """
+        command -v jq >/dev/null 2>&1 || exit 0
+        for d in "$HOME"/.codex "$HOME"/.codex-*; do
+          [ -d "$d/sessions" ] || continue
+          id=$(jq -r '.tokens.account_id // empty' "$d/auth.json" 2>/dev/null)
+          [ -n "$id" ] && printf '%s|%s\\n' "$d" "$id"
+        done
+        """
+        return (await RemoteScript.run(script, host: host, target: target, timeoutSeconds: 15)).map { text in
+            text.split(whereSeparator: \.isNewline).compactMap { line in
+                let p = line.split(separator: "|", maxSplits: 1).map(String.init)
+                guard p.count == 2, !p[0].isEmpty, !p[1].isEmpty, AgentAccountSwitch.isSafeConfigDir(p[0]) else { return nil }
+                return CodexAccount(path: p[0], accountID: p[1])
+            }
         }
     }
 }
@@ -340,6 +374,91 @@ public enum AgentAccountSwitch {
         if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; sleep 0.3; fi
         sleep 0.4
         cmd="CLAUDE_CONFIG_DIR=$newcfg claude --resume $sid"
+        \(tm) send-keys -t "$pane" -l "$cmd" || { echo "ERR: could not type the relaunch command"; exit 1; }
+        \(tm) send-keys -t "$pane" Enter
+        echo "OK: $sid"
+        """
+        let result = await RemoteScript.run(script, host: host, target: target, timeoutSeconds: 30)
+        switch result {
+        case let .success(output):
+            let lines = output.split(whereSeparator: \.isNewline).map(String.init)
+            guard let status = lines.last(where: { $0.hasPrefix("OK:") || $0.hasPrefix("ERR:") }) else {
+                return .failure(RemoteFailure(.remoteCommandFailed, detail: output.isEmpty ? "no output" : output))
+            }
+            if status.hasPrefix("OK:") {
+                return .success(status.dropFirst(3).trimmingCharacters(in: .whitespaces))
+            }
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: status.dropFirst(4).trimmingCharacters(in: .whitespaces)))
+        case let .failure(failure):
+            return .failure(failure)
+        }
+    }
+
+    /// Switches a Codex agent to another account dir (CODEX_HOME), resuming the
+    /// same session in place. Works because the per-account `sessions` dirs are
+    /// linked to one canonical copy, so `codex resume <id>` finds the rollout
+    /// under the new account. `codexPID` is the detected Codex process for the
+    /// pane; a stale pid is refused. Destructive — the caller confirms first.
+    public static func switchCodexAccount(
+        host: HostConfig, target: TargetConfig,
+        paneID: String, codexPID: Int, cwd: String, newConfigDir: String
+    ) async -> Result<String, RemoteFailure> {
+        guard TmuxQuote.id(paneID) != nil else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "invalid pane id"))
+        }
+        guard isSafeConfigDir(newConfigDir) else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "unsafe config dir"))
+        }
+        guard codexPID > 1 else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "invalid pid"))
+        }
+        let tmux: TmuxInvocation
+        do { tmux = try target.executionContext().tmux }
+        catch { return .failure(RemoteFailure(.remoteCommandFailed, detail: "\(error)")) }
+        let tm = ShellQuote.command(tmux.argv)
+        let script = """
+        pane=\(ShellQuote.word(paneID))
+        pid=\(ShellQuote.word(String(codexPID)))
+        newcfg=\(ShellQuote.word(newConfigDir))
+        cwd=\(ShellQuote.word(cwd))
+        # Refuse to touch a pid that is not this pane's Codex (guards a stale pid).
+        tp=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
+        cl=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+        case "$tp" in "$pane") ;; *) echo "ERR: process $pid is not in $pane any more (stale); refusing"; exit 1;; esac
+        case "$cl" in *codex*) ;; *) echo "ERR: process $pid is not Codex any more (stale); refusing"; exit 1;; esac
+        ch=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
+        ch=${ch:-$HOME/.codex}
+        # Session id to resume: `resume <id>` on the cmdline, else the id of the
+        # live rollout the shared app-server holds for this (CODEX_HOME, cwd),
+        # else the newest rollout matching this cwd. Only metadata is read.
+        sid=$(printf '%s' "$cl" | grep -oE 'resume [A-Za-z0-9._-]+' | awk '{print $2}' | head -1)
+        if [ -z "$sid" ] && command -v jq >/dev/null 2>&1; then
+          for q in $(ps -eo pid=,comm= 2>/dev/null | awk '$2=="codex"{print $1}'); do
+            case "$(tr '\\0' ' ' < "/proc/$q/cmdline" 2>/dev/null)" in *app-server*) ;; *) continue ;; esac
+            qch=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1); qch=${qch:-$HOME/.codex}
+            [ "$qch" = "$ch" ] || continue
+            for rf in $(ls -l "/proc/$q/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | sort -u); do
+              [ -f "$rf" ] || continue
+              [ "$(head -n 1 "$rf" | jq -r '.payload.cwd // empty' 2>/dev/null)" = "$cwd" ] || continue
+              sid=$(head -n 1 "$rf" | jq -r '.payload.id // empty' 2>/dev/null); [ -n "$sid" ] && break
+            done
+            [ -n "$sid" ] && break
+          done
+        fi
+        if [ -z "$sid" ] && command -v jq >/dev/null 2>&1; then
+          rf=$(find -L "$ch/sessions" -name 'rollout-*.jsonl' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | while read -r _ f; do
+            [ "$(head -n 1 "$f" | jq -r '.payload.cwd // empty' 2>/dev/null)" = "$cwd" ] && { echo "$f"; break; }
+          done)
+          [ -n "$rf" ] && sid=$(head -n 1 "$rf" | jq -r '.payload.id // empty' 2>/dev/null)
+        fi
+        case "$sid" in ""|*[!A-Za-z0-9._-]*) echo "ERR: could not determine the session id to resume"; exit 1;; esac
+        # Stop gracefully, then hard.
+        kill -TERM "$pid" 2>/dev/null
+        i=0
+        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.25; i=$((i+1)); done
+        if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; sleep 0.3; fi
+        sleep 0.4
+        cmd="CODEX_HOME=$newcfg codex resume $sid"
         \(tm) send-keys -t "$pane" -l "$cmd" || { echo "ERR: could not type the relaunch command"; exit 1; }
         \(tm) send-keys -t "$pane" Enter
         echo "OK: $sid"
