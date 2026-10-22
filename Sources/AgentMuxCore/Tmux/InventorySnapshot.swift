@@ -140,6 +140,55 @@ public struct InventorySnapshot: Sendable, Equatable {
         }
     }
 
+    /// Progress of a long-running job in an agent's pane, from the per-pane JSON
+    /// the `agentmux-progress` wrapper writes. Structural only (counts, times,
+    /// a short status line), never the conversation.
+    public struct AgentProgress: Sendable, Equatable, Decodable {
+        public var label: String
+        public var state: String // running | done | failed
+        /// The tmux pane the job runs in, so it maps to the right agent even when
+        /// the file is keyed by a custom --id.
+        public var pane: String?
+        public var current: Int?
+        public var total: Int?
+        public var percent: Double?
+        public var message: String?
+        public var startedAt: Double?
+        public var updatedAt: Double?
+        public var etaSeconds: Int?
+        public var exitCode: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case label, state, pane, current, total, percent, message
+            case startedAt = "started_at"
+            case updatedAt = "updated_at"
+            case etaSeconds = "eta_seconds"
+            case exitCode = "exit_code"
+        }
+
+        public init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? nil ?? "job"
+            state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? nil ?? "running"
+            pane = try? c.decodeIfPresent(String.self, forKey: .pane)
+            current = try? c.decodeIfPresent(Int.self, forKey: .current)
+            total = try? c.decodeIfPresent(Int.self, forKey: .total)
+            percent = try? c.decodeIfPresent(Double.self, forKey: .percent)
+            message = try? c.decodeIfPresent(String.self, forKey: .message)
+            startedAt = try? c.decodeIfPresent(Double.self, forKey: .startedAt)
+            updatedAt = try? c.decodeIfPresent(Double.self, forKey: .updatedAt)
+            etaSeconds = try? c.decodeIfPresent(Int.self, forKey: .etaSeconds)
+            exitCode = try? c.decodeIfPresent(Int.self, forKey: .exitCode)
+        }
+
+        /// Fraction complete (0-1) from percent, else current/total.
+        public var fraction: Double? {
+            if let percent { return max(0, min(1, percent / 100)) }
+            guard let current, let total, total > 0 else { return nil }
+            return max(0, min(1, Double(current) / Double(total)))
+        }
+    }
+
     public var container: Container?
     public var uid: Int?
     /// `ID` from /etc/os-release, e.g. `ubuntu`.
@@ -161,6 +210,8 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var logStates: [String: String] = [:]
     /// Token usage per agent pane, read from the session log (numbers only).
     public var usage: [String: AgentUsage] = [:]
+    /// Long-job progress per agent pane, from the agentmux-progress wrapper.
+    public var progress: [String: AgentProgress] = [:]
     /// Model id per agent pane (e.g. "claude-opus-5-5", "gpt-6-astra"), read
     /// from the session log (metadata only).
     public var models: [String: String] = [:]

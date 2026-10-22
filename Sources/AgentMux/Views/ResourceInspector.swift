@@ -14,6 +14,10 @@ struct ResourceInspector: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let ref = model.selection, let state = model.state(ref.targetID) {
                     let host = model.resources[state.host.id]
+                    let jobs = state.snapshot?.progress.values.filter { $0.pane == ref.paneID } ?? []
+                    if !jobs.isEmpty {
+                        progressSection(Array(jobs))
+                    }
                     // Changes (code) first — it isn't a resource, so it leads
                     // rather than splitting the resource sections below.
                     if let git = model.gitStatus(for: ref) {
@@ -64,6 +68,87 @@ struct ResourceInspector: View {
                           fraction: agent.diskPercent / 100)
             }
         }
+    }
+
+    /// A long-running job's progress in the selected agent's pane, from the
+    /// agentmux-progress wrapper: how far along, how long it has run, and the
+    /// estimated time left. Counts and a short status line only.
+    @ViewBuilder
+    private func progressSection(_ jobs: [InventorySnapshot.AgentProgress]) -> some View {
+        // Running jobs first, then most-recently-updated. Show all running, or
+        // just the latest when none is running.
+        let sorted = jobs.sorted { a, b in
+            let ar = a.state == "running", br = b.state == "running"
+            if ar != br { return ar }
+            return (a.updatedAt ?? 0) > (b.updatedAt ?? 0)
+        }
+        let shown = Array(sorted.prefix(sorted.contains { $0.state == "running" } ? 4 : 1))
+        InspectorSection(title: "Progress", icon: "hourglass") {
+            ForEach(Array(shown.enumerated()), id: \.offset) { index, p in
+                if index > 0 { Divider() }
+                progressJob(p)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func progressJob(_ p: InventorySnapshot.AgentProgress) -> some View {
+        let stalled = p.state == "running" && isStalled(p)
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 6) {
+                Circle().fill(progressColor(p, stalled: stalled)).frame(width: 7, height: 7)
+                Text(p.label).lineLimit(1)
+                Spacer()
+                Text(progressStateText(p, stalled: stalled)).foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            if let frac = p.fraction {
+                let pct = "\(Int((frac * 100).rounded()))%"
+                MetricRow(icon: "chart.bar.fill", title: "Progress",
+                          value: progressAmount(p) ?? pct,
+                          unit: progressAmount(p) == nil ? nil : pct,
+                          fraction: frac)
+            } else if p.state == "running" {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Working…").foregroundStyle(.secondary) }
+                    .font(.caption)
+            }
+            if let started = p.startedAt {
+                MetricRow(icon: "clock", title: "Elapsed",
+                          value: uptimeText(max(0, Int(Date().timeIntervalSince1970 - started))))
+            }
+            if p.state == "running", !stalled, let eta = p.etaSeconds, eta > 0 {
+                MetricRow(icon: "timer", title: "ETA", value: uptimeText(eta))
+            }
+            if let msg = p.message, !msg.isEmpty {
+                Text(msg).font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(2).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func isStalled(_ p: InventorySnapshot.AgentProgress) -> Bool {
+        guard let updated = p.updatedAt else { return false }
+        return Date().timeIntervalSince1970 - updated > 90
+    }
+
+    private func progressColor(_ p: InventorySnapshot.AgentProgress, stalled: Bool) -> Color {
+        if p.state == "failed" { return .red }
+        if p.state == "done" { return .green }
+        return stalled ? .orange : .accentColor
+    }
+
+    private func progressStateText(_ p: InventorySnapshot.AgentProgress, stalled: Bool) -> String {
+        switch p.state {
+        case "done": return "Done"
+        case "failed": return p.exitCode.map { "Failed (\($0))" } ?? "Failed"
+        default: return stalled ? "Stalled" : "Running"
+        }
+    }
+
+    private func progressAmount(_ p: InventorySnapshot.AgentProgress) -> String? {
+        if let c = p.current, let t = p.total { return "\(c)/\(t)" }
+        return nil
     }
 
     /// The selected agent's git working tree: branch, how much changed, and how

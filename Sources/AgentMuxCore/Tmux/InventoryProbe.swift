@@ -287,6 +287,16 @@ public enum InventoryProbe {
           else st=unknown; fi
           echo "@@screenstate $pane $st"
         done
+        # Per-pane progress files from the agentmux-progress wrapper (our own
+        # small JSON, keyed by tmux pane; never the conversation).
+        pgdir="${AGENTMUX_PROGRESS_DIR:-$HOME/.agentmux/progress}"
+        if [ -d "$pgdir" ]; then
+          for pf in "$pgdir"/*.json; do
+            [ -f "$pf" ] || continue
+            j=$(tr -d '\\r\\n' < "$pf" 2>/dev/null)
+            [ -n "$j" ] && printf '@@progress %s %s\\n' "$(basename "$pf" .json)" "$j"
+          done
+        fi
         echo "@@end \(nonce)"
 
         """
@@ -389,6 +399,19 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@account ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 2, isID(f[0], "%") { snapshot.accounts[String(f[0])] = String(f[1]) }
+            } else if let rest = line.dropPrefix("@@progress ") {
+                // "<file-key> <compact-json>": the key is the first token (the
+                // progress file name, which may be a custom --id), the rest is
+                // JSON (which may contain spaces). The job maps to an agent by the
+                // JSON's own `pane` field, not this key.
+                if let sp = rest.firstIndex(of: " ") {
+                    let key = String(rest[..<sp])
+                    let json = rest[rest.index(after: sp)...]
+                    if let data = String(json).data(using: .utf8),
+                       let p = try? JSONDecoder().decode(InventorySnapshot.AgentProgress.self, from: data) {
+                        snapshot.progress[key] = p
+                    }
+                }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
                 if let pid = currentAgent {
