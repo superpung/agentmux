@@ -119,7 +119,10 @@ public enum RemoteCommand {
     /// the view ends it and leaves no tmux state behind.
     public static func shell(in context: ExecutionContext, environment: [String: String] = [:]) -> String {
         let env = environment.merging(["TERM": "xterm-256color"]) { current, _ in current }
-        let command = ["sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash -i; else exec sh -i; fi"]
+        // Default to a UTF-8 locale when the container sets none (a bare shell
+        // often has LANG unset / charmap ASCII, so CJK and other non-ASCII text
+        // renders as "?"). Only fills in when unset, so a configured locale wins.
+        let command = ["sh", "-c", ": \"${LANG:=C.UTF-8}\"; : \"${LC_CTYPE:=$LANG}\"; export LANG LC_CTYPE; if command -v bash >/dev/null 2>&1; then exec bash -i; else exec sh -i; fi"]
         guard let docker = context.container else {
             let envArgs = ["env"] + env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
             return ShellQuote.command(envArgs + command)
