@@ -80,7 +80,11 @@ public enum InventoryProbe {
         # Newer Codex keeps the live session's rollout in a shared app-server the
         # TUI does not hold, so a pane with no fd of its own still finds its
         # session here by (CODEX_HOME, cwd). Only session_meta.cwd is read.
-        codexsrv=$(for q in $(printf '%s\\n' "$procs" | awk '$6=="codex"{print $3}'); do
+        codexsrv=$(for q in $(ps -eo pid= -o comm= 2>/dev/null | awk '$2=="codex"{print $1}'); do
+          # Scan ALL codex processes, not just tmux-pane descendants: the shared
+          # app-server is often a daemon re-parented to pid 1, so it never
+          # appears in the pane-descendant process list yet holds the live
+          # rollouts the panes need for last-active/usage.
           case "$(tr '\\0' ' ' < "/proc/$q/cmdline" 2>/dev/null)" in *app-server*) ;; *) continue ;; esac
           qch=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
           qch=${qch:-$HOME/.codex}
