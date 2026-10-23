@@ -21,7 +21,7 @@ struct ResourceInspector: View {
                     // Changes (code) first — it isn't a resource, so it leads
                     // rather than splitting the resource sections below.
                     if let git = model.gitStatus(for: ref) {
-                        gitSection(git)
+                        gitSection(git, ref: ref)
                     }
                     if let agent = model.agentResources(for: ref) {
                         agentSection(agent)
@@ -152,9 +152,10 @@ struct ResourceInspector: View {
     }
 
     /// The selected agent's git working tree: branch, how much changed, and how
-    /// it sits vs upstream. Read-only status; no file contents.
+    /// it sits vs upstream. The per-file diff stays folded behind a button that
+    /// opens it in a popover. Read-only status; the diff is fetched on demand.
     @ViewBuilder
-    private func gitSection(_ git: GitStatus) -> some View {
+    private func gitSection(_ git: GitStatus, ref: PaneRef) -> some View {
         InspectorSection(title: "Changes", icon: "arrow.triangle.branch") {
             MetricRow(icon: "arrow.triangle.branch", title: "Branch", value: git.branch.isEmpty ? "detached" : git.branch)
             if git.isClean {
@@ -170,6 +171,9 @@ struct ResourceInspector: View {
             if git.ahead > 0 || git.behind > 0 {
                 MetricRow(icon: "arrow.up.arrow.down", title: "vs upstream",
                           value: "↑\(git.ahead)", unit: "↓\(git.behind)")
+            }
+            if !git.files.isEmpty {
+                GitChangesButton(files: git.files.sorted { $0.churn > $1.churn }, ref: ref)
             }
         }
     }
@@ -394,6 +398,157 @@ struct MetricRow: View {
             }
             Text(unit).font(.caption).foregroundStyle(.tertiary).lineLimit(1).minimumScaleFactor(0.8)
         }
+    }
+}
+
+/// The folded entry point to the diff: a full-width button summarizing the
+/// changed files, which opens the per-file list and diffs in a popover.
+private struct GitChangesButton: View {
+    let files: [GitFileStat]
+    let ref: PaneRef
+    @State private var open = false
+
+    var body: some View {
+        Button { open = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "text.magnifyingglass").font(.caption).frame(width: 15)
+                Text("View diff").font(.caption)
+                Spacer(minLength: 8)
+                Text("\(files.count) file\(files.count == 1 ? "" : "s")")
+                    .font(.caption).monospacedDigit().foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $open, arrowEdge: .leading) {
+            ChangesPopover(files: files, ref: ref)
+        }
+    }
+}
+
+/// The popover: every changed file, busiest first, each expandable to its real
+/// unified diff (fetched on demand, bounded on the remote, coloured by sign).
+private struct ChangesPopover: View {
+    let files: [GitFileStat]
+    let ref: PaneRef
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(files) { file in
+                    FileDiffRow(file: file, ref: ref)
+                    Divider()
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(width: 540, height: 460)
+    }
+}
+
+/// One file in the popover: a tappable stat header that reveals, loads, and
+/// renders that file's diff beneath it.
+private struct FileDiffRow: View {
+    let file: GitFileStat
+    let ref: PaneRef
+    @Environment(AppModel.self) private var model
+
+    @State private var expanded = false
+    @State private var diff: String?
+    @State private var error: String?
+    @State private var loading = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2).foregroundStyle(.tertiary).frame(width: 12)
+                    Text(file.path)
+                        .font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                        .help(file.path)
+                    Spacer(minLength: 8)
+                    if file.isBinary {
+                        Text("binary").font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                    } else {
+                        HStack(spacing: 6) {
+                            if file.insertions > 0 { Text("+\(file.insertions)").foregroundStyle(.green) }
+                            if file.deletions > 0 { Text("−\(file.deletions)").foregroundStyle(.red) }
+                        }
+                        .font(.caption2.monospaced().weight(.medium))
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+
+            if expanded {
+                Group {
+                    if loading {
+                        HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading diff…").foregroundStyle(.secondary) }
+                            .font(.caption).padding(.horizontal, 14).padding(.bottom, 8)
+                    } else if let error {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                            .padding(.horizontal, 14).padding(.bottom, 8)
+                    } else if let diff, !diff.isEmpty {
+                        DiffText(diff: diff)
+                    } else if diff != nil {
+                        Text("No textual changes.").font(.caption).foregroundStyle(.tertiary)
+                            .padding(.horizontal, 14).padding(.bottom, 8)
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggle() {
+        expanded.toggle()
+        guard expanded, diff == nil, error == nil, !file.isBinary, !loading else { return }
+        loading = true
+        Task {
+            let result = await model.fileDiff(for: ref, path: file.path)
+            loading = false
+            switch result {
+            case let .success(text): diff = text
+            case let .failure(f): error = f.detail.isEmpty ? f.kind.rawValue : f.detail
+            }
+        }
+    }
+}
+
+/// Renders a bounded unified diff: added lines green, removed red, hunk headers
+/// accented, file/index headers muted, context plain. Monospaced and
+/// horizontally scrollable so long lines don't widen the popover.
+private struct DiffText: View {
+    let diff: String
+
+    private var lines: [Substring] { diff.split(separator: "\n", omittingEmptySubsequences: false) }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    Text(line.isEmpty ? " " : line)
+                        .foregroundStyle(color(for: line))
+                }
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .textSelection(.enabled)
+            .padding(.horizontal, 14).padding(.bottom, 8)
+        }
+    }
+
+    private func color(for line: Substring) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") || line.hasPrefix("diff ") || line.hasPrefix("index ") {
+            return .secondary
+        }
+        if line.hasPrefix("@@") { return .accentColor }
+        if line.hasPrefix("+") { return .green }
+        if line.hasPrefix("-") { return .red }
+        return Theme.text
     }
 }
 

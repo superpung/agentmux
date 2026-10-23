@@ -645,6 +645,19 @@ final class AppModel {
         focusedGitRef == ref ? focusedGitStatus : nil
     }
 
+    /// The unified diff of one changed file in the selected agent's working tree,
+    /// fetched on demand when the user opens that file (never on the refresh
+    /// cycle). Read-only `git diff HEAD -- <path>`.
+    func fileDiff(for ref: PaneRef, path: String) async -> Result<String, RemoteFailure> {
+        guard let state = state(ref.targetID) else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "no container"))
+        }
+        guard let cwd = agentEntry(ref)?.space.path, !cwd.isEmpty else {
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: "no working directory"))
+        }
+        return await GitDiffProbe.file(host: state.host, target: state.target, cwd: cwd, path: path)
+    }
+
     /// Any agent's usage (context tokens / rate limit) from the latest snapshot,
     /// with Claude's context window inferred so a fraction is available for both.
     func usage(for ref: PaneRef) -> InventorySnapshot.AgentUsage? {
