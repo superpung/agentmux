@@ -111,7 +111,12 @@ struct LaunchWindow: View {
             }
             for await list in group { all.append(contentsOf: list) }
         }
-        sessions = all.sorted { $0.lastActiveEpoch > $1.lastActiveEpoch }
+        // Accounts whole-dir-symlink their projects/sessions to one shared store,
+        // so each account's probe returns the same conversations. Collapse to one
+        // row per (kind, id); the row still offers every account as a resume target.
+        var seen = Set<String>()
+        let unique = all.filter { seen.insert("\($0.kind.rawValue):\($0.id)").inserted }
+        sessions = unique.sorted { $0.lastActiveEpoch > $1.lastActiveEpoch }
         loading = false
     }
 
