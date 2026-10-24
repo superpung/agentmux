@@ -236,7 +236,10 @@ public enum InventoryProbe {
               crid=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE 'resume [0-9a-f-]{36}' | head -1 | awk '{print $2}')
               cch=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
               cch=${cch:-$HOME/.codex}
-              [ -n "$crid" ] && crf=$(find "$cch/sessions" -name "rollout-*-$crid.jsonl" 2>/dev/null | head -1)
+              # Trailing slash so find descends when sessions/ is itself a symlink
+              # (homes whose sessions dir is linked to a canonical store); without
+              # it find treats the symlinked start path as a file and matches none.
+              [ -n "$crid" ] && crf=$(find "$cch/sessions/" -name "rollout-*-$crid.jsonl" 2>/dev/null | head -1)
             fi
             if [ -n "$cpane" ] && [ -n "$crf" ]; then
               cage=$(( $(date +%s) - $(stat -c %Y "$crf" 2>/dev/null) ))
