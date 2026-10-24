@@ -86,22 +86,30 @@ public enum ActivityDetector {
         case "idle": return ActivityObservation(.idle, .high, "log: task complete")
         default: break
         }
-        // Claude: the session log is robust to CLI version changes.
-        // "turn_duration" is written when a turn ends; an assistant/user last
-        // event means the turn is still in progress.
-        if let logEvent {
-            if logEvent.hasSuffix("/turn_duration") {
-                return ActivityObservation(.idle, .high, "log: turn ended (\(logEvent))")
-            }
-            if logEvent.hasPrefix("assistant") || logEvent.hasPrefix("user") {
-                return ActivityObservation(.working, .high, "log: turn in progress (\(logEvent))")
-            }
+        // Claude: a written turn-end marker is authoritative. "turn_duration" is
+        // emitted when a turn ends; nothing newer follows it in the log (a new
+        // turn would append after it), so it outranks the screen.
+        if let logEvent, logEvent.hasSuffix("/turn_duration") {
+            return ActivityObservation(.idle, .high, "log: turn ended (\(logEvent))")
         }
+        // The live screen reflects whether a turn is actually running — a spinner
+        // or "esc to interrupt" vs the ready "❯" prompt — and the screen verdict
+        // already resolves working ahead of idle. It outranks the log's last-line
+        // inference below, which reads a trailing tool_result or plain user/
+        // assistant record as "in progress" while Claude in fact sits idle at the
+        // prompt (seen on a resumed session, 2026-10-24).
         switch screenState {
         case "working": return ActivityObservation(.working, .high, "screen verdict: working")
+        case "waiting": return ActivityObservation(.waitingInput, .high, "screen verdict: selection prompt")
         case "idle": return ActivityObservation(.idle, kind == .codex ? .high : .medium, "screen verdict: idle")
-        default: return ActivityObservation(.unknown, .low, "no log or screen signal")
+        default: break
         }
+        // No screen signal: fall back to the log's last turn event. An assistant
+        // or user last event means a turn is still in progress.
+        if let logEvent, logEvent.hasPrefix("assistant") || logEvent.hasPrefix("user") {
+            return ActivityObservation(.working, .high, "log: turn in progress (\(logEvent))")
+        }
+        return ActivityObservation(.unknown, .low, "no log or screen signal")
     }
 
     /// Whether the terminal title shows the agent is waiting on the user.
@@ -146,6 +154,13 @@ public enum ActivityDetector {
         }
         if lower.contains("esc to interrupt") {
             return ActivityObservation(.working, .high, "screen shows 'esc to interrupt'")
+        }
+        // A numbered selection menu with the "❯" cursor on an option is Claude
+        // waiting for the user to pick (a permission or question prompt). The
+        // cursor also starts a plain idle prompt, so this is matched first.
+        if kind == .claudeCode,
+           screen.contains(where: { $0.range(of: #"^\s*❯\s+\d+\.\s"#, options: .regularExpression) != nil }) {
+            return ActivityObservation(.waitingInput, .high, "screen shows a selection prompt")
         }
         if text.contains("· Ready ·") || lower.contains(" ready · context") {
             return ActivityObservation(.idle, .high, "Codex status shows 'Ready'")

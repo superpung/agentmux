@@ -171,8 +171,11 @@ public enum InventoryProbe {
               lage=$(( $(date +%s) - $(stat -c %Y "$lf" 2>/dev/null) ))
               ev=$(tail -n 1 "$lf" 2>/dev/null | jq -r '(.type)+"/"+(.subtype // "")' 2>/dev/null)
               echo "log $ev $lage"
-              # A definitive Claude log event means we need no screen fallback.
-              case "$ev" in */turn_duration|assistant/*|user/*) [ -n "$clpane" ] && logpanes="$logpanes$clpane " ;; esac
+              # Only a written turn-end marker is definitive enough to skip the
+              # screen. A trailing assistant/user record (e.g. a tool_result) can
+              # sit at the end of the log while the agent is idle at the prompt,
+              # so those panes still need the screen to tell working from waiting.
+              case "$ev" in */turn_duration) [ -n "$clpane" ] && logpanes="$logpanes$clpane " ;; esac
               [ -n "$clpane" ] && [ -n "$re" ] && echo "@@active $clpane $(( $(date +%s) - re ))"
               # Context size = the last assistant turn's prompt (input + cached +
               # cache-creation tokens), from a bounded tail. Numbers only.
@@ -283,6 +286,10 @@ public enum InventoryProbe {
           case "$logpanes" in *" $pane "*) continue ;; esac
           scr=$(tm capture-pane -p -t "$pane" 2>/dev/null | tail -n 24)
           if printf '%s' "$scr" | grep -qiE '…[[:space:]]*\\([0-9]+[[:space:]]*[hms]|esc to interrupt'; then st=working
+          # A numbered selection menu with the "❯" cursor on an option is Claude
+          # waiting for the user to choose (a permission or question prompt). The
+          # cursor also starts a plain idle prompt, so this is tested before idle.
+          elif printf '%s' "$scr" | grep -qE '^[[:space:]]*❯[[:space:]]+[0-9]+\\.[[:space:]]'; then st=waiting
           elif printf '%s' "$scr" | grep -qE '· Ready ·|^[[:space:]]*(❯|›)'; then st=idle
           else st=unknown; fi
           echo "@@screenstate $pane $st"

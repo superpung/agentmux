@@ -33,6 +33,32 @@ import Testing
         #expect(result.activity == .idle)
     }
 
+    // Real Claude selection/permission prompt (xp01, 2026-10-24): the "❯" cursor
+    // sits on a numbered option while it waits for the user to choose. The cursor
+    // also starts a plain idle prompt, so the menu must not be read as idle.
+    let claudeSelectionPrompt = [
+        "Do you want to proceed?",
+        "❯ 1. Yes",
+        "  2. No, and tell Claude what to do differently (esc)",
+        "──────────────────────────────────────────────── resume ─",
+    ]
+
+    @Test func claudeSelectionPromptIsWaitingInput() {
+        let r = ActivityDetector.screenVerdict(kind: .claudeCode, screen: claudeSelectionPrompt)
+        #expect(r.activity == .waitingInput)
+        #expect(r.activity.needsAttention)
+        // A plain idle prompt is still idle, not waiting.
+        #expect(ActivityDetector.screenVerdict(kind: .claudeCode, screen: claudeIdle).activity == .idle)
+    }
+
+    @Test func screenWaitingStateIsWaitingInput() {
+        // The server reduces the selection prompt to screenState "waiting"; it
+        // outranks a trailing user/assistant log record that looks "in progress".
+        let r = ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: "waiting")
+        #expect(r.activity == .waitingInput)
+        #expect(r.activity.needsAttention)
+    }
+
     @Test func claudeWorkingFromRealSpinner() {
         // Real capture (2026-10-11): spinner + elapsed, input box also present.
         let working = [
@@ -74,8 +100,20 @@ import Testing
     }
 
     @Test func logMidTurnIsWorking() {
+        // With no screen signal, the log's last turn event decides.
         #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "assistant/", screenState: nil).activity == .working)
-        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: "idle").activity == .working)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: nil).activity == .working)
+    }
+
+    @Test func screenIdleOutranksTrailingTurnRecord() {
+        // A resumed/paused Claude session can end its log on a tool_result or a
+        // plain user/assistant record while sitting idle at the prompt. The "❯"
+        // screen verdict (idle) must win over that stale last-line inference, or
+        // the pane reads "working" forever (xp01, 2026-10-24).
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: "idle").activity == .idle)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "assistant/", screenState: "idle").activity == .idle)
+        // A genuinely running turn still shows the spinner, so screen "working" wins too.
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: "working").activity == .working)
     }
 
     @Test func codexLogStateWinsOverScreen() {
