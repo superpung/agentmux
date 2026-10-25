@@ -58,11 +58,25 @@ final class PaneTerminal {
     init(ref: PaneRef, sessionID: String, host: HostConfig, target: TargetConfig) throws {
         let mirror = try PaneMirror(host: host, target: target, session: sessionID, paneID: ref.paneID)
         let gate = InputGate()
+        // Drops mouse reports while the pane is a bare shell (no live agent),
+        // so a terminal stuck in mouse-reporting mode cannot flood the shell;
+        // keystrokes, arrows included, always pass.
+        let mouseFilter = MouseReportFilter()
         let session = InMemoryTerminalSession(
             write: { data in
                 // Keys and mouse reports reach the pane only while this view
                 // is selected and live.
-                if gate.isOpen { mirror.sendInput(data) }
+                guard gate.isOpen else { return }
+                // Forward mouse reports only while a live TUI (Claude/Codex)
+                // is in the foreground consuming them; otherwise strip them so
+                // a bare shell is not fed pointer events as keystrokes.
+                if gate.allowsMouse {
+                    mouseFilter.reset()
+                    mirror.sendInput(data)
+                } else {
+                    let filtered = mouseFilter.strip(data)
+                    if !filtered.isEmpty { mirror.sendInput(filtered) }
+                }
             },
             // The local surface drives the remote window size, so the pane
             // reflows to fill the view (like a normal terminal) rather than
@@ -154,6 +168,20 @@ final class PaneTerminal {
         gate.setSelected(active)
         state.isSurfaceVisible = active
         if active { state.requestFocus() }
+    }
+
+    /// Forward mouse reports to the pane only while a live agent (Claude/Codex)
+    /// is in the foreground to consume them. The model sets this each poll from
+    /// the pane's detection; a killed agent drops to a shell and mouse stops.
+    func setMouseForwardingAllowed(_ allowed: Bool) {
+        gate.setAllowsMouse(allowed)
+    }
+
+    /// Suspends all input to the pane without hiding it. Used around an account
+    /// switch, which kills the agent and types the relaunch command itself, so
+    /// no local key or pointer event can race ahead of that command.
+    func setInputSuspended(_ suspended: Bool) {
+        gate.setSuspended(suspended)
     }
 
     /// Pastes through tmux so bracketed paste follows the pane's real mode.
@@ -336,8 +364,12 @@ final class InputGate: @unchecked Sendable {
     private var live = false
     private var closed = false
     private var selected = true
+    private var suspended = false
+    /// Off until the model confirms a live agent is in the pane's foreground.
+    private var mouseAllowed = false
 
-    var isOpen: Bool { lock.withLock { live && !closed && selected } }
+    var isOpen: Bool { lock.withLock { live && !closed && selected && !suspended } }
+    var allowsMouse: Bool { lock.withLock { mouseAllowed } }
 
     func markLive() {
         lock.withLock { live = true }
@@ -345,6 +377,14 @@ final class InputGate: @unchecked Sendable {
 
     func setSelected(_ value: Bool) {
         lock.withLock { selected = value }
+    }
+
+    func setSuspended(_ value: Bool) {
+        lock.withLock { suspended = value }
+    }
+
+    func setAllowsMouse(_ value: Bool) {
+        lock.withLock { mouseAllowed = value }
     }
 
     func close() {

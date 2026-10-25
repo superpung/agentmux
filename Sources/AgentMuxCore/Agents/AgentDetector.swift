@@ -7,6 +7,10 @@ public enum AgentKind: String, Sendable, Equatable {
     case none
     /// Not enough evidence either way (e.g. no process table).
     case unknown
+
+    /// A real agent CLI (Claude Code or Codex) runs in the pane, as opposed to
+    /// a bare shell or an undetermined pane.
+    public var isAgent: Bool { self == .codex || self == .claudeCode }
 }
 
 public enum Confidence: String, Sendable, Equatable, Comparable {

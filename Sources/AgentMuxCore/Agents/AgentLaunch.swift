@@ -374,6 +374,9 @@ public enum AgentAccountSwitch {
         if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; sleep 0.3; fi
         sleep 0.4
         cmd="CLAUDE_CONFIG_DIR=$newcfg claude --resume $sid"
+        # Discard any partial line at the shell prompt before typing, so a stray
+        # byte that landed between the kill and now cannot prefix the command.
+        \(tm) send-keys -t "$pane" C-u
         \(tm) send-keys -t "$pane" -l "$cmd" || { echo "ERR: could not type the relaunch command"; exit 1; }
         \(tm) send-keys -t "$pane" Enter
         echo "OK: $sid"
@@ -459,6 +462,9 @@ public enum AgentAccountSwitch {
         if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; sleep 0.3; fi
         sleep 0.4
         cmd="CODEX_HOME=$newcfg codex resume $sid"
+        # Discard any partial line at the shell prompt before typing, so a stray
+        # byte that landed between the kill and now cannot prefix the command.
+        \(tm) send-keys -t "$pane" C-u
         \(tm) send-keys -t "$pane" -l "$cmd" || { echo "ERR: could not type the relaunch command"; exit 1; }
         \(tm) send-keys -t "$pane" Enter
         echo "OK: $sid"

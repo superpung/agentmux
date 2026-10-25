@@ -292,6 +292,11 @@ final class AppModel {
         guard let state = state(ref.targetID), let agent = agentEntry(ref),
               let pid = state.detections[ref.paneID]?.pid
         else { return "This agent is no longer available." }
+        // The switch kills the agent and types the relaunch command into the
+        // pane itself. Suspend this mirror's input for the duration so no local
+        // key or stray mouse report races ahead of that command and corrupts it.
+        terminals[ref]?.setInputSuspended(true)
+        defer { terminals[ref]?.setInputSuspended(false) }
         let result: Result<String, RemoteFailure>
         switch agent.kind {
         case .claudeCode:
@@ -860,6 +865,12 @@ final class AppModel {
             let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
             notifyActivityTransitions(state, old: state.activities, new: newActivities)
             state.activities = newActivities
+            // Let the mirror forward mouse reports only while a live agent holds
+            // the pane; a killed/terminated agent drops to a shell and mouse is
+            // stripped so pointer events are not typed into it as commands.
+            for (ref, terminal) in terminals where ref.targetID == state.id {
+                terminal.setMouseForwardingAllowed(state.detections[ref.paneID]?.kind.isAgent ?? false)
+            }
             state.lastSuccess = Date()
             state.lastFailure = nil
             state.interval = TargetState.baseInterval
@@ -1072,6 +1083,7 @@ final class AppModel {
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
             terminal.onFontSizeChanged = { [weak self] size in self?.rememberTerminalFontSize(size) }
             terminal.applyTheme(terminalTheme)
+            terminal.setMouseForwardingAllowed(state.detections[ref.paneID]?.kind.isAgent ?? false)
             terminals[ref] = terminal
             // Populate the account-link map so "Switch Account" is ready.
             if linkGroupsByTarget[ref.targetID] == nil { refreshLinks(ref.targetID) }
