@@ -241,6 +241,32 @@ public enum InventoryProbe {
               # it find treats the symlinked start path as a file and matches none.
               [ -n "$crid" ] && crf=$(find "$cch/sessions/" -name "rollout-*-$crid.jsonl" 2>/dev/null | head -1)
             fi
+            # Still nothing: a fresh `codex` (no resume id and no rollout fd of
+            # its own) that shares its home+cwd with another session, so the
+            # ambiguous app-server match above was skipped. A fresh session
+            # creates a new rollout at startup, so among the app-server-held
+            # rollouts for this (home,cwd) pick the one whose start time (encoded
+            # in the filename) is nearest this process's start — unique per
+            # process even with a sibling in the same dir. Only filenames and
+            # timestamps are read, never content.
+            if [ -z "$crf" ]; then
+              clk=$(getconf CLK_TCK 2>/dev/null || echo 100)
+              bt=$(awk '/^btime/{print $2}' /proc/stat 2>/dev/null)
+              sb=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)
+              if [ -n "$bt" ] && [ -n "$sb" ]; then
+                pstart=$(( bt + sb / clk ))
+                bestd=180
+                for rf in $(printf '%s\\n' "$codexsrv" | awk -F'|' -v h="${pch:-$HOME/.codex}" -v c="$pcwd" '$1==h && $2==c{print $4}'); do
+                  bn=${rf##*/}
+                  rts=$(printf '%s' "$bn" | sed -nE 's/^rollout-([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2})-([0-9]{2})-([0-9]{2})-.*/\\1 \\2:\\3:\\4/p')
+                  [ -n "$rts" ] || continue
+                  rs=$(date -d "$rts" +%s 2>/dev/null)
+                  [ -n "$rs" ] || continue
+                  d=$(( pstart - rs )); [ "$d" -lt 0 ] && d=$(( -d ))
+                  if [ "$d" -le "$bestd" ]; then bestd=$d; crf=$rf; fi
+                done
+              fi
+            fi
             if [ -n "$cpane" ] && [ -n "$crf" ]; then
               cage=$(( $(date +%s) - $(stat -c %Y "$crf" 2>/dev/null) ))
               # Last active = the last real turn event, not the file mtime (Codex
