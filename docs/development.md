@@ -94,6 +94,12 @@ docs/                  requirements, decision records, observed compatibility
 - **Notifications.** Activity transitions and new faults become `InboxItem`s
   (persisted in `inbox.json` beside `settings.json`), with an OS banner unless the
   agent is on screen.
+- **Auto-continue.** For a retryable fault, `AppModel` schedules tries (10 s,
+  1 min, 5 min; shown as a filling ring) and `AgentNudge` types the message with
+  `send-keys`, after checking in the container that the agent is still in front,
+  no attached terminal had input in the last 30 s, and the input line holds no
+  undimmed text. AgentMux's own control-mode mirrors do not update tmux's
+  `client_activity`, so the app checks their last input itself.
 
 ## Compatibility and decisions
 

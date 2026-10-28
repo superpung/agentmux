@@ -69,6 +69,7 @@ final class PaneTerminal {
                 // Keys and mouse reports reach the pane only while this view
                 // is selected and live.
                 guard gate.isOpen else { return }
+                gate.noteInput()
                 // Forward mouse reports only while a live TUI (Claude/Codex)
                 // is in the foreground consuming them; otherwise strip them so
                 // a bare shell is not fed pointer events as keystrokes.
@@ -200,6 +201,9 @@ final class PaneTerminal {
         guard gate.isOpen else { return false }
         return mirror.paste(text)
     }
+
+    /// When the user last typed or clicked into this pane here.
+    var lastInputAt: Date? { gate.lastInput }
 
     /// Whether input can currently be delivered (mirror live and on screen).
     var canSend: Bool { gate.isOpen }
@@ -385,6 +389,13 @@ final class InputGate: @unchecked Sendable {
     private var suspended = false
     /// Off until the model confirms a live agent is in the pane's foreground.
     private var mouseAllowed = false
+    private var lastInputDate: Date?
+
+    var lastInput: Date? { lock.withLock { lastInputDate } }
+
+    func noteInput() {
+        lock.withLock { lastInputDate = Date() }
+    }
 
     var isOpen: Bool { lock.withLock { live && !closed && selected && !suspended } }
     var allowsMouse: Bool { lock.withLock { mouseAllowed } }

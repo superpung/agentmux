@@ -222,6 +222,15 @@ private struct StatusBar: View {
             HStack(spacing: 10) {
                 metadata(ref)
                 Spacer(minLength: 8)
+                if let pending = model.pendingNudges[ref] {
+                    HStack(spacing: 8) {
+                        NudgeRing(start: pending.start, fireAt: pending.fireAt, size: 12)
+                        Button("Send Now") { model.sendNudgeNow(ref) }
+                        Button("Cancel") { model.cancelNudge(ref) }
+                    }
+                    .buttonStyle(.borderless)
+                    .layoutPriority(1)
+                }
                 if let problem = content?.problem {
                     Circle().fill(problem.color).frame(width: 7, height: 7)
                     Text(problem.text).lineLimit(1).layoutPriority(1)
@@ -432,6 +441,9 @@ private struct TileHeader: View {
                 Text(model.customName(agent.identityKey) ?? agent.title).lineLimit(1).truncationMode(.tail)
                 StatusChip(activity: agent.activity, compact: true)
                 AgentStatusGlyph(activity: .idle, fault: agent.activity == .working ? nil : agent.fault)
+                if let pending = model.pendingNudges[ref] {
+                    NudgeRing(start: pending.start, fireAt: pending.fireAt)
+                }
                 Text(agent.device.name).foregroundStyle(.tertiary).lineLimit(1)
             } else if let pane = model.paneEntry(ref) {
                 Image(systemName: "terminal").foregroundStyle(.tertiary)

@@ -1015,10 +1015,12 @@ final class AppModel {
                                          new: [String: AgentActivity], faults: [String: AgentFault]) {
         let first = old.isEmpty
         let started = state.faultTracker.update(faults, now: Date(), report: !first)
+        defer { reconcileNudges(state, faults: faults) }
         guard !first else { return }
         for (paneID, now) in new {
             guard let before = old[paneID], before != now else { continue }
             if before == .working, now == .idle, faults[paneID] == nil {
+                nudgeAttempts["\(state.id)/\(paneID)"] = nil
                 post(.finished, state, paneID)
             } else if !before.needsAttention, now.needsAttention {
                 post(.needsInput, state, paneID)
@@ -1029,7 +1031,8 @@ final class AppModel {
             case .usageLimit:
                 post(.usageLimit, state, paneID, detail: usageDetail(fault))
             case .error:
-                post(.error, state, paneID, detail: fault.summary)
+                let retry = scheduleNudge(state, paneID: paneID, fault: fault)
+                post(.error, state, paneID, detail: [fault.summary, retry].compactMap { $0 }.joined(separator: " · "))
             }
         }
     }
@@ -1044,14 +1047,16 @@ final class AppModel {
     }
 
     /// Adds an inbox item for `paneID`; it arrives already read, and without
-    /// a banner, when the agent is on screen.
-    private func post(_ kind: InboxItem.Kind, _ state: TargetState, _ paneID: String, detail: String? = nil) {
+    /// a banner, when the agent is on screen. An auto-continue is a log entry
+    /// next to its error, so it arrives read too.
+    private func post(_ kind: InboxItem.Kind, _ state: TargetState, _ paneID: String, detail: String? = nil, banner: Bool = true) {
         guard let ref = state.ref(for: paneID) else { return }
         let viewed = visibleRefs.contains(ref) || poppedOut.contains(ref)
         let name = agentEntry(ref).map { customName($0.identityKey) ?? $0.title } ?? agentTitle(state, paneID: paneID)
-        let item = InboxItem(kind: kind, ref: ref, agent: name, place: state.device.name, detail: detail, isRead: viewed)
+        let item = InboxItem(kind: kind, ref: ref, agent: name, place: state.device.name, detail: detail,
+                             isRead: viewed || kind == .autoContinued)
         inbox.add(item)
-        if !viewed, notificationsEnabled { notifier.notify(item) }
+        if banner, !viewed, notificationsEnabled { notifier.notify(item) }
     }
 
     /// Opens the agent an inbox item is about (if it is still there) and
@@ -1078,6 +1083,160 @@ final class AppModel {
     func removeInboxItems(_ ids: [UUID]) {
         for id in ids { inbox.remove(id) }
         notifier.withdraw(ids)
+    }
+
+    // MARK: Auto-continue
+
+    /// Whether an agent stopped by a retryable error is asked to continue
+    /// (Settings; off by default), with what, and how many times in a row.
+    var autoContinueEnabled: Bool { UserDefaults.standard.bool(forKey: "autoContinueEnabled") }
+    var autoContinueMessage: String {
+        let text = UserDefaults.standard.string(forKey: "autoContinueMessage")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return text.isEmpty ? "continue" : text
+    }
+    var autoContinueAttempts: Int {
+        let value = UserDefaults.standard.object(forKey: "autoContinueAttempts") as? Int ?? 3
+        return min(10, max(1, value))
+    }
+
+    /// Wait before each try. The agent has already retried on its own, so
+    /// the first comes soon (long enough to see it coming and cancel), later
+    /// ones give the service more time.
+    static let nudgeDelays: [Duration] = [.seconds(10), .seconds(60), .seconds(300)]
+    /// No try while someone typed into the agent within this long.
+    static let nudgeQuietSeconds = 30
+
+    /// A try waiting to be sent, shown as a filling ring with Send Now / Cancel.
+    struct PendingNudge: Equatable {
+        var start: Date
+        var fireAt: Date
+        var attempt: Int
+        var fault: AgentFault
+    }
+
+    private(set) var pendingNudges: [PaneRef: PendingNudge] = [:]
+    /// Tries so far per "<target>/<pane>", reset by a turn that finishes
+    /// without a fault.
+    @ObservationIgnored private var nudgeAttempts: [String: Int] = [:]
+    /// A scheduled or in-flight try per agent; at most one at a time.
+    @ObservationIgnored private var nudgeTasks: [PaneRef: Task<Void, Never>] = [:]
+
+    /// After a refresh: drops tries for agents no longer stopped (they went
+    /// back to work, or the user continued them), and schedules one for every
+    /// agent stopped on an error that has none and was not handled yet during
+    /// this fault (stopped before the app started or before auto-continue was
+    /// turned on). A fault that starts while running was already scheduled as
+    /// it was reported.
+    private func reconcileNudges(_ state: TargetState, faults: [String: AgentFault]) {
+        for ref in pendingNudges.keys where ref.targetID == state.id && faults[ref.paneID] == nil {
+            stopNudge(ref)
+        }
+        guard autoContinueEnabled else { return }
+        for (paneID, fault) in faults where fault.kind == .error && !state.faultTracker.isHandled(paneID) {
+            if let ref = state.ref(for: paneID), nudgeTasks[ref] == nil {
+                _ = scheduleNudge(state, paneID: paneID, fault: fault)
+            }
+        }
+    }
+
+    /// Schedules the next try for an agent stopped by `fault`, when allowed.
+    /// Returns what the error notification should say about it ("continuing
+    /// in 10 s"), or nil when nothing is scheduled. Past the last try it
+    /// posts a give-up notice once.
+    private func scheduleNudge(_ state: TargetState, paneID: String, fault: AgentFault) -> String? {
+        guard autoContinueEnabled, fault.isRetryable, state.target.access.allowsAttach else { return nil }
+        let key = "\(state.id)/\(paneID)"
+        let attempt = (nudgeAttempts[key] ?? 0) + 1
+        let limit = autoContinueAttempts
+        guard attempt <= limit else {
+            if attempt == limit + 1 {
+                nudgeAttempts[key] = attempt
+                post(.gaveUp, state, paneID, detail: "Stopped after \(limit) \(limit == 1 ? "try" : "tries")")
+            }
+            state.faultTracker.abandon(paneID)
+            return nil
+        }
+        let delay = Self.nudgeDelays[min(attempt, Self.nudgeDelays.count) - 1]
+        startNudge(state, paneID: paneID, fault: fault, attempt: attempt, after: delay)
+        return "continuing in \(Self.short(delay))"
+    }
+
+    private func startNudge(_ state: TargetState, paneID: String, fault: AgentFault, attempt: Int, after delay: Duration) {
+        guard let ref = state.ref(for: paneID) else { return }
+        nudgeTasks[ref]?.cancel()
+        let now = Date()
+        pendingNudges[ref] = PendingNudge(start: now, fireAt: now.addingTimeInterval(TimeInterval(delay.components.seconds)),
+                                          attempt: attempt, fault: fault)
+        nudgeTasks[ref] = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.nudge(state, paneID: paneID, fault: fault, attempt: attempt)
+        }
+    }
+
+    /// Sends the waiting try for `ref` right away.
+    func sendNudgeNow(_ ref: PaneRef) {
+        guard let pending = pendingNudges[ref], let state = state(ref.targetID) else { return }
+        nudgeTasks[ref]?.cancel()
+        pendingNudges[ref] = nil
+        nudgeTasks[ref] = Task { [weak self] in
+            await self?.nudge(state, paneID: ref.paneID, fault: pending.fault, attempt: pending.attempt)
+        }
+    }
+
+    /// Cancels the waiting try for `ref`; no more tries during this fault.
+    func cancelNudge(_ ref: PaneRef) {
+        stopNudge(ref)
+        state(ref.targetID)?.faultTracker.abandon(ref.paneID)
+    }
+
+    private func stopNudge(_ ref: PaneRef) {
+        nudgeTasks.removeValue(forKey: ref)?.cancel()
+        pendingNudges[ref] = nil
+    }
+
+    /// Types the message into the agent if it is still stopped on the same
+    /// fault, nobody is typing to it, and the setting is still on. Its task
+    /// stays registered until the send is done, so a refresh in the meantime
+    /// does not schedule a second one.
+    private func nudge(_ state: TargetState, paneID: String, fault: AgentFault, attempt: Int) async {
+        guard let ref = state.ref(for: paneID) else { return }
+        pendingNudges[ref] = nil
+        guard autoContinueEnabled, targetStates[state.id] === state,
+              let current = state.faults[paneID], current.isSameOccurrence(as: fault) else {
+            nudgeTasks[ref] = nil
+            return
+        }
+        if let typed = terminals[ref]?.lastInputAt, Date().timeIntervalSince(typed) < Double(Self.nudgeQuietSeconds) {
+            startNudge(state, paneID: paneID, fault: fault, attempt: attempt, after: .seconds(Self.nudgeQuietSeconds))
+            return
+        }
+        let message = autoContinueMessage
+        let result = await AgentNudge.send(message, host: state.host, target: state.target, paneID: paneID,
+                                           quietSeconds: Self.nudgeQuietSeconds)
+        if result != .success(.busy) { nudgeTasks[ref] = nil }
+        switch result {
+        case .success(.sent):
+            nudgeAttempts["\(state.id)/\(paneID)"] = attempt
+            state.faultTracker.noteNudge(paneID, at: Date())
+            post(.autoContinued, state, paneID, detail: "Sent “\(message)” · try \(attempt) of \(autoContinueAttempts)", banner: false)
+            state.refreshRequested = true
+        case .success(.busy):
+            startNudge(state, paneID: paneID, fault: fault, attempt: attempt, after: .seconds(Self.nudgeQuietSeconds))
+        case .success(.gone):
+            state.faultTracker.abandon(paneID)
+        case .success(.draft):
+            state.faultTracker.abandon(paneID)
+            post(.gaveUp, state, paneID, detail: "Not sent: its prompt holds unsent text")
+        case let .failure(failure):
+            state.faultTracker.abandon(paneID)
+            post(.gaveUp, state, paneID, detail: "Could not send: \(failure.detail.isEmpty ? failure.kind.rawValue : failure.detail)")
+        }
+    }
+
+    private static func short(_ duration: Duration) -> String {
+        let seconds = Int(duration.components.seconds)
+        return seconds < 60 ? "\(seconds) s" : "\(seconds / 60) min"
     }
 
     func requestNotificationAuthorization() {

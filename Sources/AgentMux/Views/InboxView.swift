@@ -189,6 +189,8 @@ extension InboxItem.Kind {
         case .needsInput: "Needs you"
         case .usageLimit: "Usage limit"
         case .error: "Stopped on an error"
+        case .autoContinued: "Auto-continued"
+        case .gaveUp: "Auto-continue stopped"
         }
     }
 
@@ -198,6 +200,8 @@ extension InboxItem.Kind {
         case .needsInput: "exclamationmark.circle.fill"
         case .usageLimit: "hourglass.circle.fill"
         case .error: "exclamationmark.triangle.fill"
+        case .autoContinued: "arrow.clockwise.circle.fill"
+        case .gaveUp: "xmark.octagon.fill"
         }
     }
 
@@ -206,7 +210,8 @@ extension InboxItem.Kind {
         case .finished: Theme.success
         case .needsInput: Theme.warning
         case .usageLimit: Color(nsColor: .systemPurple)
-        case .error: Theme.danger
+        case .error, .gaveUp: Theme.danger
+        case .autoContinued: Color(nsColor: .systemBlue)
         }
     }
 }

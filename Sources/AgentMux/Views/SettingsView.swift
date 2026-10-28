@@ -21,6 +21,9 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
+    @AppStorage("autoContinueEnabled") private var autoContinueEnabled = false
+    @AppStorage("autoContinueMessage") private var autoContinueMessage = "continue"
+    @AppStorage("autoContinueAttempts") private var autoContinueAttempts = 3
 
     /// Installed monospaced families, with the current choice always present.
     private var fontFamilies: [String] {
@@ -35,6 +38,20 @@ private struct GeneralSettings: View {
         Form {
             Section {
                 Toggle("Show banners for new notifications", isOn: $notificationsEnabled)
+            }
+            Section {
+                Toggle("Continue agents stopped by an error", isOn: $autoContinueEnabled)
+                TextField("Message", text: $autoContinueMessage, prompt: Text("continue"))
+                    .disabled(!autoContinueEnabled)
+                LabeledContent("Tries in a row") {
+                    HStack(spacing: 8) {
+                        Text("\(autoContinueAttempts)").monospacedDigit().foregroundStyle(.primary)
+                        Stepper("", value: $autoContinueAttempts, in: 1 ... 10).labelsHidden()
+                    }
+                }
+                .disabled(!autoContinueEnabled)
+            } header: {
+                Text("Auto-continue")
             }
             Section {
                 Picker("Terminal theme", selection: Binding(

@@ -167,6 +167,11 @@ struct SidebarView: View {
     }
 
     @ViewBuilder private func rowMenu(_ agent: AgentEntry) -> some View {
+        if model.pendingNudges[agent.ref] != nil {
+            Button("Continue Now") { model.sendNudgeNow(agent.ref) }
+            Button("Cancel Auto-continue") { model.cancelNudge(agent.ref) }
+            Divider()
+        }
         Button(model.isPinned(agent.identityKey) ? "Unpin" : "Pin") {
             model.togglePin(agent.identityKey)
         }
@@ -424,8 +429,10 @@ private struct AgentRow: View {
                     .help("Open")
             }
             // While working, the spinner already says "active now"; the time
-            // would be redundant.
-            if entry.activity != .working, let active = RelativeTime.short(entry.lastActiveSeconds) {
+            // would be redundant. A waiting auto-continue shows its ring.
+            if let pending = model.pendingNudges[entry.ref] {
+                NudgeRing(start: pending.start, fireAt: pending.fireAt)
+            } else if entry.activity != .working, let active = RelativeTime.short(entry.lastActiveSeconds) {
                 Text(active)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

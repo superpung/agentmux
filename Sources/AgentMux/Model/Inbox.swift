@@ -4,13 +4,15 @@ import Foundation
 import Observation
 
 /// One thing that happened to an agent: it finished, needs the user, hit a
-/// usage limit, or stopped on an error.
+/// usage limit, stopped on an error, or was asked to continue after one.
 struct InboxItem: Codable, Identifiable, Equatable, Sendable {
     enum Kind: String, Codable, CaseIterable, Sendable {
         case finished
         case needsInput
         case usageLimit
         case error
+        case autoContinued
+        case gaveUp
     }
 
     var id = UUID()

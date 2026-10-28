@@ -49,6 +49,8 @@ extension InboxItem.Kind {
         case .needsInput: "Agent needs you"
         case .usageLimit: "Usage limit reached"
         case .error: "Agent stopped on an error"
+        case .autoContinued: "Agent continued after an error"
+        case .gaveUp: "Auto-continue stopped"
         }
     }
 }

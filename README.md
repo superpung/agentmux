@@ -47,7 +47,8 @@ What makes it different:
 - ⌨️ **Command palette.** Press ⌘K to jump to any agent, or send a prompt straight into one.
 - 🚀 **Launch, resume & switch.** Start or resume a Claude Code or Codex agent in any directory, and switch a Claude or Codex account in place, resuming the same conversation.
 - 🧭 **Activity & faults.** Working, waiting for input, or idle, read from structural session-log fields. A turn that stopped on a usage limit or on an API error is marked in the sidebar, with the limit's reset time.
-- 🔔 **Notification inbox.** Finished, needs you, usage limit, stopped on an error: each goes to a list behind the toolbar bell with unread state, filters and clear, a Dock badge, and a desktop banner when you are not already looking at that agent.
+- 🔁 **Auto-continue.** Optionally sends `continue` to an agent stopped by a connection or server error, after a visible wait you can cancel, and never over your typing or an unsent draft. See [Notifications and auto-continue](#notifications-and-auto-continue).
+- 🔔 **Notification inbox.** Finished, needs you, usage limit, stopped on an error, auto-continued: each goes to a list behind the toolbar bell with unread state, filters and clear, a Dock badge, and a desktop banner when you are not already looking at that agent.
 - 🔬 **Resource inspector.** Per-agent CPU, memory and uptime, git working-tree status (branch, diff, ahead/behind), and host load, memory, disk and GPU.
 - 📁 **Files.** Browse the remote working directory with rich previews (syntax-highlighted code, Markdown, CSV/TSV, SVG, PDF, images). Drag files in from Finder to upload or out to Finder to download, and create, rename or delete files and folders.
 - 🧩 **tmux management.** Create or kill sessions, windows and panes, plus a throwaway shell with ⌘T.
@@ -118,7 +119,7 @@ To see Claude context and rate-limit usage, copy [`scripts/agentmux-statusline.s
 - **Closing.** A tile's × (or ⌘-clicking its row again) takes it out; its mirror stays warm like any recently viewed agent.
 - Each tile sizes its agent's tmux window to the tile, as the single view does with the full area. If you also have that window attached elsewhere, you see it at the tile's size while the tile is open.
 
-## Notifications
+## Notifications and auto-continue
 
 The toolbar bell (⌥⌘N) opens the inbox:
 
@@ -128,10 +129,21 @@ The toolbar bell (⌥⌘N) opens the inbox:
 | Needs you | The agent waits for input or an approval. |
 | Usage limit | The turn stopped on a usage limit; shows which one and when it resets. |
 | Stopped on an error | The turn stopped on an API error after the agent's own retries. |
+| Auto-continued | AgentMux sent `continue` (see below). |
+| Auto-continue stopped | Tries ran out, or a try was skipped (an unsent draft) or failed. |
 
 Items are kept across launches, newest first by day, with unread dots, an All / Unread filter, mark read or unread, delete (hover, swipe or right-click), Mark All as Read, Clear Read and Clear All. The Dock icon shows the unread count. A desktop banner appears unless that agent is on screen; clicking a banner or a row opens the agent. Banners can be turned off in Settings; the inbox always records.
 
 **How a stopped turn is recognized.** For Claude Code, the last real record of the session log is an API error: its error code and quota fields (`rate_limit` with a rejected quota is a usage limit; `server_error`, `unknown` and transient 429s are errors). For Codex, which writes no errors to its rollout, the last error line on its screen comes after its last output line; a usage-limit message is a usage limit and Esc's "Conversation interrupted" is not an error. Both are reduced to a verdict inside the container; the message text never leaves it.
+
+**Auto-continue** (Settings ▸ General, off by default) types `continue` (configurable) into an agent stopped by a connection or server error, which is what Claude Code's own error docs advise after a dropped response. Usage limits, auth and billing errors, and rejected requests are left alone.
+
+- **When.** 10 s after the error, then 1 min, then 5 min, up to 3 tries in a row (configurable); a turn that finishes normally resets the count. Agents already stopped when AgentMux starts, or when the setting is turned on, are included.
+- **Visible.** While a try waits, the sidebar row and the tile header show a ring that fills up until it is sent, and the status bar adds **Send Now** and **Cancel** (also in the row's right-click menu). Cancel stops tries until that error clears.
+- **Safe.** Right before typing, inside the container: the agent must still be stopped on the same error and still in front (never a shell); nobody may have typed into its window in the last 30 s (an attached terminal, or this app); and its input line must be empty, ignoring the agent's dimmed placeholder or suggestion. Otherwise it waits, or skips and says so in the inbox.
+- It runs only while AgentMux is open.
+
+For long unattended Claude Code runs, also set `CLAUDE_CODE_RETRY_WATCHDOG=1` in each account's `settings.json` `env`: Claude Code then retries capacity errors (429/529) indefinitely and other transient errors for hours before giving up, so fewer turns stop at all. Codex's built-in OpenAI provider does not let its retry counts be changed.
 
 ## How it works
 
@@ -140,8 +152,8 @@ Each refresh makes one read-only SSH connection that inventories processes and t
 ## Privacy & security
 
 - **Read-only auto-refresh.** Polling only inventories processes and tmux. It never changes your servers, containers, tmux, or agents.
-- **You make every change.** Writes happen only when you act: opening a terminal and typing, sending a prompt, launching, resuming or switching an agent, managing tmux, or working with files.
-- **No conversation content.** Only structural log fields (event type, error code, token counts, timestamps) are read, never message text. Screen checks (working or idle, an error line) run inside the container and return only a verdict.
+- **You make every change.** Writes happen only when you act: opening a terminal and typing, sending a prompt, launching, resuming or switching an agent, managing tmux, or working with files. The one automatic write is auto-continue, and only after you turn it on: it types its message into an agent stopped on an error, under the checks above.
+- **No conversation content.** Only structural log fields (event type, error code, token counts, timestamps) are read, never message text. Screen checks (working or idle, an error line, an empty input line) run inside the container and return only a verdict.
 - **No secrets.** Tokens and credentials are never read. Account de-duplication uses only non-secret account id fields.
 
 ## Development

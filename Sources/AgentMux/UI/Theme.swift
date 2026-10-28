@@ -123,6 +123,29 @@ struct AgentStatusGlyph: View {
     }
 }
 
+/// A ring that fills up until an automatic continue is sent.
+struct NudgeRing: View {
+    let start: Date
+    let fireAt: Date
+    var size: CGFloat = 11
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.1)) { context in
+            let total = max(1, fireAt.timeIntervalSince(start))
+            let progress = min(1, max(0, context.date.timeIntervalSince(start) / total))
+            ZStack {
+                Circle().stroke(Color(nsColor: .systemBlue).opacity(0.2), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(Color(nsColor: .systemBlue), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: size, height: size)
+        }
+        .help("Continues automatically")
+    }
+}
+
 struct SpinnerView<S: ShapeStyle>: View {
     let color: S
 
