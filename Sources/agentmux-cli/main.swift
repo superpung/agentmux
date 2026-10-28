@@ -258,13 +258,14 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                         if let directory = detection.configDirectory { line += " [\(directory)]" }
                         if let m = snapshot.models[pane.id] { line += " model=\(m)"; if let e = snapshot.efforts[pane.id] { line += "/\(e)" } }
                         let ev = detection.pid.flatMap { snapshot.agents[$0] }
-                        let activity = ActivityDetector.resolve(kind: detection.kind, logEvent: ev?.logEvent, logAgeSeconds: ev?.logAgeSeconds, screenState: snapshot.screenStates[pane.id], logState: snapshot.logStates[pane.id], title: pane.title)
+                        let activity = ActivityDetector.resolve(kind: detection.kind, logEvent: ev?.logEvent, logAgeSeconds: ev?.logAgeSeconds, screenState: snapshot.screenStates[pane.id], logState: snapshot.logStates[pane.id], title: pane.title, agentState: snapshot.agentStates[pane.id])
                         line += " {\(activity.activity.rawValue)/\(activity.confidence.rawValue)}"
                         let logEventStr = String(describing: ev?.logEvent)
                         let logAgeStr = String(describing: ev?.logAgeSeconds)
                         let screenStr = String(describing: snapshot.screenStates[pane.id])
                         let logStateStr = String(describing: snapshot.logStates[pane.id])
                         let titleStr = String(describing: pane.title)
+                        if let agentState = snapshot.agentStates[pane.id] { line += " state=\(agentState)" }
                         line += " <in logEvent=\(logEventStr) logAge=\(logAgeStr) screen=\(screenStr) logState=\(logStateStr) title=\(titleStr)>"
                         if let u = snapshot.usage[pane.id] {
                             var parts: [String] = []

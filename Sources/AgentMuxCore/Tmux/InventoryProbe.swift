@@ -146,7 +146,21 @@ public enum InventoryProbe {
             # Claude, or a session with no turn yet) fall back to the newest
             # .jsonl in the pane's project dir, which is wrong when agents share
             # that dir (all account dirs link one projects store).
-            csid=$(jq -r '.sessionId // empty' "$ccfg/sessions/$pid.json" 2>/dev/null)
+            crec=$(jq -r '[(.sessionId // ""), (.status // ""), (.waitingFor // "" | gsub("[\\t\\n]"; " "))] | @tsv' "$ccfg/sessions/$pid.json" 2>/dev/null)
+            csid=$(printf '%s' "$crec" | cut -f1)
+            # Claude's own state from the same record (busy / idle / waiting),
+            # which outranks every screen or log guess. What it waits for can
+            # name a file or command, so only its class leaves: a question or
+            # an open dialog is input, anything else (a permission, worker or
+            # sandbox request) is an approval.
+            clst=$(printf '%s' "$crec" | cut -f2)
+            clwf=$(printf '%s' "$crec" | cut -f3)
+            case "$clst" in
+              waiting) case "$clwf" in *input*|"dialog open") clst=waiting-input ;; *) clst=waiting-approval ;; esac ;;
+              busy|idle) ;;
+              *) clst="" ;;
+            esac
+            [ -n "$clpane" ] && [ -n "$clst" ] && { echo "@@agentstate $clpane $clst"; logpanes="$logpanes$clpane "; }
             lf=""
             for cand in "$csid" "$res"; do
               case "$cand" in ""|*[!0-9a-fA-F-]*) continue ;; esac
@@ -420,6 +434,9 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@screenstate ") {
                 let fields = rest.split(separator: " ")
                 if fields.count == 2, isID(fields[0], "%") { snapshot.screenStates[String(fields[0])] = String(fields[1]) }
+            } else if let rest = line.dropPrefix("@@agentstate ") {
+                let f = rest.split(separator: " ")
+                if f.count == 2, isID(f[0], "%") { snapshot.agentStates[String(f[0])] = String(f[1]) }
             } else if let rest = line.dropPrefix("@@fault ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 2, isID(f[0], "%"), let fault = AgentFault.parse(f.dropFirst()) {

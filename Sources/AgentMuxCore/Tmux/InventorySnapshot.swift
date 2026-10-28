@@ -208,6 +208,9 @@ public struct InventorySnapshot: Sendable, Equatable {
     /// from the rollout's last task_started/task_complete. Only the verdict
     /// leaves the container — never the conversation.
     public var logStates: [String: String] = [:]
+    /// Pane id → the state the agent itself reports (Claude's per-process
+    /// session record): "busy", "idle", "waiting-input" or "waiting-approval".
+    public var agentStates: [String: String] = [:]
     /// Pane id → why its agent's last turn stopped short (usage limit or an
     /// error), when it did.
     public var faults: [String: AgentFault] = [:]

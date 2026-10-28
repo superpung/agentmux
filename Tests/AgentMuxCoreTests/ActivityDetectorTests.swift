@@ -180,4 +180,21 @@ import Testing
         #expect(!AgentActivity.idle.needsAttention)
         #expect(!AgentActivity.working.needsAttention)
     }
+
+    /// Claude's own state (sessions/<pid>.json) wins over the screen. Seen
+    /// live 2026-10-28: while Claude waited out an API retry ("Waiting for API
+    /// response · will retry in 1m 33s"), the screen read idle (no spinner
+    /// marker, empty prompt) and the log ended in an api-request record, but
+    /// Claude itself reported busy.
+    @Test func claudeOwnStateOutranksTheScreen() {
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "api-request/", screenState: "idle", agentState: "busy").activity == .working)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "assistant/", screenState: "working", agentState: "idle").activity == .idle)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: nil, screenState: "idle", agentState: "waiting-input").activity == .waitingInput)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: nil, screenState: "idle", agentState: "waiting-approval").activity == .waitingApproval)
+        // Unknown or absent (older Claude): the existing rules decide.
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: "idle", agentState: "odd").activity == .idle)
+        #expect(ActivityDetector.resolve(kind: .claudeCode, logEvent: "user/", screenState: nil).activity == .working)
+        // Codex ignores it.
+        #expect(ActivityDetector.resolve(kind: .codex, logEvent: nil, screenState: "idle", logState: "idle", agentState: "busy").activity == .idle)
+    }
 }

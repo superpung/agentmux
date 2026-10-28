@@ -53,8 +53,17 @@ public enum ActivityDetector {
         logAgeSeconds _: Int? = nil,
         screenState: String?,
         logState: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        agentState: String? = nil
     ) -> ActivityObservation {
+        // Claude reports its own state in its per-process session record:
+        // busy while a turn runs (also while it waits out an API retry, whose
+        // spinner no screen rule knows), waiting while a question, permission
+        // or other dialog needs the user, idle otherwise. It outranks every
+        // guess below; older versions without the record fall through.
+        if kind == .claudeCode, let state = agentState.flatMap(claudeVerdict) {
+            return state
+        }
         // Highest priority: the agent has explicitly flagged it is blocked on
         // the user. This outranks a "working" log/screen signal because the
         // turn can still read as running while it waits at a prompt.
@@ -110,6 +119,16 @@ public enum ActivityDetector {
             return ActivityObservation(.working, .high, "log: turn in progress (\(logEvent))")
         }
         return ActivityObservation(.unknown, .low, "no log or screen signal")
+    }
+
+    static func claudeVerdict(_ state: String) -> ActivityObservation? {
+        switch state {
+        case "busy": ActivityObservation(.working, .high, "claude: busy")
+        case "idle": ActivityObservation(.idle, .high, "claude: idle")
+        case "waiting-input": ActivityObservation(.waitingInput, .high, "claude: waiting for input")
+        case "waiting-approval": ActivityObservation(.waitingApproval, .high, "claude: waiting for approval")
+        default: nil
+        }
     }
 
     /// Whether the terminal title shows the agent is waiting on the user.

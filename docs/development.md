@@ -86,6 +86,11 @@ docs/                  requirements, decision records, observed compatibility
   most) and keeping the current one unless another is clearly better. Every
   mirror keeps one place in the view tree whether it fills the area, is a tile or
   is hidden, so switching never rebuilds a surface.
+- **Claude state.** Claude Code keeps `sessions/<pid>.json` per process in its
+  config dir. The probe reads its `sessionId` to find the agent's own session
+  log (the newest file in a shared project dir belongs to whichever agent wrote
+  last) and its `status` (`busy` / `idle` / `waiting`, reduced on the server to
+  input or approval) as `@@agentstate`, which outranks the screen and log rules.
 - **Faults.** The probe emits `@@fault` per agent pane: for Claude, the error
   code and quota fields of the session log's last real record when it is an API
   error; for Codex, the class of the last `■` error line on its screen when it

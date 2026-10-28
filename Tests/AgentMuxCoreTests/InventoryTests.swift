@@ -163,6 +163,9 @@ arg -p
         @@server 1 2 /tmp/tmux-0/default
         @@section agents
         @@logstate %2 working 5
+        @@agentstate %9 waiting-approval
+        @@agentstate %10 busy
+        @@agentstate bad busy
         @@usage %2 110247 258400 44.0
         @@usage %6 266971 - -
         @@usage %7 0 0 -
@@ -170,6 +173,7 @@ arg -p
         """
         let s = try InventoryProbe.parse(out, nonce: nonce)
         #expect(s.logStates["%2"] == "working")
+        #expect(s.agentStates == ["%9": "waiting-approval", "%10": "busy"])
         #expect(s.usage["%2"]?.contextTokens == 110247)
         #expect(s.usage["%2"]?.contextWindow == 258400)
         #expect(s.usage["%2"]?.rateLimitPercent == 44.0)

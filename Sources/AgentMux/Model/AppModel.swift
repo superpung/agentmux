@@ -999,7 +999,8 @@ final class AppModel {
                 logAgeSeconds: evidence?.logAgeSeconds,
                 screenState: snapshot.screenStates[paneID],
                 logState: snapshot.logStates[paneID],
-                title: snapshot.pane(paneID)?.title
+                title: snapshot.pane(paneID)?.title,
+                agentState: snapshot.agentStates[paneID]
             ).activity
         }
         return result
