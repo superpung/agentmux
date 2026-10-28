@@ -183,7 +183,8 @@ public enum InventoryProbe {
               [ -n "$clpane" ] && [ -n "$cctx" ] && [ "$cctx" -gt 0 ] && echo "@@usage $clpane $cctx - -"
               # Current model + reasoning effort = the last assistant turn's
               # fields (metadata only), emitted as "<model> <effort>".
-              cmodel=$(tail -n 200 "$lf" 2>/dev/null | jq -r 'select(.type=="assistant") | (.message.model // "-")+" "+(.perTurnEffort // .effort // "-")' 2>/dev/null | grep -v '^- ' | tail -n 1)
+              # An API error record carries the model "<synthetic>"; skip it.
+              cmodel=$(tail -n 200 "$lf" 2>/dev/null | jq -r 'select(.type=="assistant" and .message.model != "<synthetic>") | (.message.model // "-")+" "+(.perTurnEffort // .effort // "-")' 2>/dev/null | grep -v '^- ' | tail -n 1)
               [ -n "$clpane" ] && [ -n "$cmodel" ] && echo "@@model $clpane $cmodel"
             fi
           fi
