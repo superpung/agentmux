@@ -39,6 +39,11 @@ struct AgentMuxApp: App {
                     .keyboardShortcut("]", modifiers: .command)
                 Button("Previous Agent") { model.selectAdjacentAgent(-1) }
                     .keyboardShortcut("[", modifiers: .command)
+                // With several agents shown (⌘-click in the sidebar), the
+                // focused one fills the area until toggled back.
+                Button(model.isZoomed ? "Show All Agents" : "Zoom Agent") { model.toggleZoom() }
+                    .keyboardShortcut(.return, modifiers: [.command, .shift])
+                    .disabled(!model.isTiled)
                 Divider()
                 OpenFilesButton(model: model)
                 Divider()

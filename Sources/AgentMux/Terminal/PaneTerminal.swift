@@ -30,6 +30,8 @@ final class PaneTerminal {
     @ObservationIgnored var onActivity: (@MainActor @Sendable () -> Void)?
     /// A path the user asked to preview (via the terminal's context menu).
     @ObservationIgnored var onPreviewRequest: ((String) -> Void)?
+    /// The surface took keyboard focus (clicked into, or focused in code).
+    @ObservationIgnored var onFocus: (() -> Void)?
     /// Last time an activity notification fired; confined to the mirror queue.
     @ObservationIgnored nonisolated(unsafe) private var lastActivityNotify = Date.distantPast
     private(set) var phase: Phase = .connecting
@@ -98,6 +100,7 @@ final class PaneTerminal {
             view.onPreviewPath = { raw in self?.onPreviewRequest?(raw) }
             view.onShiftEnter = { [weak self] in _ = self?.sendNewline() }
             view.onPasteImage = { [weak self] png in self?.pasteImage(png) }
+            view.onFocus = { [weak self] in self?.onFocus?() }
             // Ghostty picks its palette from the view's appearance; honour the
             // terminal's theme preference (set before this runs via applyTheme).
             view.appearance = self?.themePreference.appearance
@@ -162,12 +165,20 @@ final class PaneTerminal {
         }
     }
 
-    /// Only the terminal on screen may send input; hidden ones drop it even
+    /// Only a terminal on screen may send input; hidden ones drop it even
     /// if they still hold keyboard focus.
+    func setVisible(_ visible: Bool) {
+        gate.setSelected(visible)
+        state.isSurfaceVisible = visible
+    }
+
+    func focus() {
+        state.requestFocus()
+    }
+
     func setActive(_ active: Bool) {
-        gate.setSelected(active)
-        state.isSurfaceVisible = active
-        if active { state.requestFocus() }
+        setVisible(active)
+        if active { focus() }
     }
 
     /// Forward mouse reports to the pane only while a live agent (Claude/Codex)
@@ -281,6 +292,13 @@ final class PasteInterceptingTerminalView: AppTerminalView {
     var onShiftEnter: (() -> Void)?
     /// ⌘V of a clipboard image (when no text is also present) hands over the PNG.
     var onPasteImage: ((Data) -> Void)?
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result { onFocus?() }
+        return result
+    }
 
     override func keyDown(with event: NSEvent) {
         // keyCode 36 is the main Return key; intercept Shift+Return only (no

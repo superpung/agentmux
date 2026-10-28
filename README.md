@@ -43,6 +43,7 @@ What makes it different:
 - 📊 **Fleet dashboard.** Per-account usage (5-hour and 7-day limits with reset countdowns), agent counts and activity, and per-container CPU and memory sparklines.
 - 🎛️ **Usage at a glance.** Context window %, 5h / 7d limits, and the model and reasoning effort each agent is using, in a status bar whose fields you choose.
 - 🖥️ **Live terminal mirror.** Open the actual tmux pane an agent runs in, softly resized to a readable font, or pop it out into its own window. Your keystrokes go to that pane only; your own tmux clients stay untouched.
+- 🪟 **Several agents at once.** ⌘-click up to four agents in the sidebar to tile them, laid out to the window's shape (side by side, stacked, or a grid). Click a tile to type into it, ⌘] / ⌘[ to move between tiles, ⇧⌘↩ to zoom one. See [Several agents at once](#several-agents-at-once).
 - ⌨️ **Command palette.** Press ⌘K to jump to any agent, or send a prompt straight into one.
 - 🚀 **Launch, resume & switch.** Start or resume a Claude Code or Codex agent in any directory, and switch a Claude or Codex account in place, resuming the same conversation.
 - 🧭 **Activity & alerts.** Working, waiting for input, or idle, read from structural session-log fields, with desktop notifications when an agent finishes or needs you.
@@ -106,6 +107,15 @@ Everything is set up in the app's **Settings** window:
 2. **Containers**: pick which auto-discovered containers to monitor.
 
 To see Claude context and rate-limit usage, copy [`scripts/agentmux-statusline.sh`](scripts/agentmux-statusline.sh) into each container and point Claude Code's `statusLine` setting at it. Codex usage is read automatically, with no extra setup.
+
+## Several agents at once
+
+⌘-click (or ⇧-click) up to four agents in the sidebar and they share the detail area; a plain click goes back to one.
+
+- **Layout** follows the area's shape and keeps every tile wide enough for an agent's TUI (about 80 columns) when it can. On a landscape window: two side by side, three as one tall tile beside two stacked, four as a 2×2 grid. On a portrait or narrow window they stack top to bottom. Resizing the window does not flip the layout back and forth near the switch point.
+- **Focus.** Keys go to one tile at a time, marked by an accent line under its header. Click a tile, or use ⌘] / ⌘[, to move focus. ⇧⌘↩ zooms the focused tile to the full area and back; the others keep running and keep their size.
+- **Closing.** A tile's × (or ⌘-clicking its row again) takes it out; its mirror stays warm like any recently viewed agent.
+- Each tile sizes its agent's tmux window to the tile, as the single view does with the full area. If you also have that window attached elsewhere, you see it at the tile's size while the tile is open.
 
 ## How it works
 

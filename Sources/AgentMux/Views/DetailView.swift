@@ -7,6 +7,9 @@ struct DetailView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var pendingSwitch: PendingSwitch?
     @State private var switchError: String?
+    /// The tile arrangement in use, kept across window resizes unless another
+    /// is clearly better (see `TileLayout.best`).
+    @State private var arrangement: TileLayout.Arrangement?
 
     /// A requested account switch awaiting confirmation (it stops and relaunches
     /// the agent, so it is confirmed first).
@@ -29,19 +32,13 @@ struct DetailView: View {
     var body: some View {
         ZStack {
             GhosttyRuntime.terminalBackground(for: backgroundTheme)
-            // Every open terminal stays mounted so its screen survives
-            // switching; only the selected one is visible and live. A mirror
-            // shown in its own window is not rendered here, so its single
-            // surface never lives in two hierarchies.
-            ForEach(Array(model.terminals.values), id: \.ref) { terminal in
-                if !model.poppedOut.contains(terminal.ref) {
-                    MirroredSurfaceView(terminal: terminal)
-                        .opacity(terminal.ref == model.selection ? 1 : 0)
-                        .allowsHitTesting(terminal.ref == model.selection)
-                }
+            GeometryReader { proxy in
+                terminals(in: CGRect(origin: .zero, size: proxy.size))
             }
             if let ref = model.selection {
-                if model.poppedOut.contains(ref) {
+                if model.isTiled {
+                    // Tiles draw their own placeholders.
+                } else if model.poppedOut.contains(ref) {
                     PoppedInfoView()
                 } else if model.terminal(for: ref) == nil {
                     PanePlaceholderView(ref: ref)
@@ -75,6 +72,63 @@ struct DetailView: View {
             Button("OK", role: .cancel) {}
         } message: { Text(switchError ?? "") }
     }
+
+    /// Every open terminal stays mounted so its screen survives switching;
+    /// only the ones on screen are visible and live. Each keeps one place in
+    /// the view tree whether it fills the area, is a tile, or is hidden, so
+    /// moving between those never rebuilds its surface. A hidden terminal
+    /// keeps a full-area frame, or its tile's while another tile is zoomed,
+    /// so hiding it does not resize its remote window. A mirror shown in its
+    /// own window is not rendered here, so its single surface never lives in
+    /// two hierarchies.
+    @ViewBuilder private func terminals(in area: CGRect) -> some View {
+        let tiles = model.tiles
+        let current = TileLayout.best(count: tiles.count, in: area.size, cell: GhosttyRuntime.approximateCellSize,
+                                      chrome: TileHeader.height, gap: Self.tileGap, current: arrangement)
+        let frames = Dictionary(uniqueKeysWithValues: zip(tiles, TileLayout.frames(current, in: area, gap: Self.tileGap)))
+        let shown = Set(model.visibleRefs)
+        let zoomed = model.isZoomed
+        let frame = { (ref: PaneRef) in zoomed && shown.contains(ref) ? area : frames[ref] ?? area }
+        ZStack(alignment: .topLeading) {
+            if model.isTiled, !model.isZoomed {
+                Color(nsColor: .separatorColor)
+            }
+            ForEach(Array(model.terminals.values), id: \.ref) { terminal in
+                if !model.poppedOut.contains(terminal.ref) {
+                    let rect = frame(terminal.ref)
+                    let visible = shown.contains(terminal.ref)
+                    VStack(spacing: 0) {
+                        if model.isTiled, visible { TileHeader(ref: terminal.ref) }
+                        MirroredSurfaceView(terminal: terminal)
+                    }
+                    .background(GhosttyRuntime.terminalBackground(for: model.terminalTheme))
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    // Resizing a live surface every animation frame would
+                    // reflow it (and its remote window) over and over.
+                    .animation(nil, value: rect)
+                    .opacity(visible ? 1 : 0)
+                    .allowsHitTesting(visible)
+                }
+            }
+            // Tiles with no mirror yet, or on a view-only target.
+            if model.isTiled {
+                ForEach(model.visibleRefs.filter { model.terminal(for: $0) == nil }, id: \.self) { ref in
+                    let rect = frame(ref)
+                    VStack(spacing: 0) {
+                        TileHeader(ref: ref)
+                        PanePlaceholderView(ref: ref)
+                    }
+                    .background(GhosttyRuntime.terminalBackground(for: model.terminalTheme))
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                }
+            }
+        }
+        .onChange(of: current, initial: true) { _, new in arrangement = new }
+    }
+
+    private static let tileGap: CGFloat = 1
 
     private func performSwitch(_ pending: PendingSwitch) {
         let ref = pending.ref
@@ -126,8 +180,7 @@ struct DetailView: View {
                     }
                     Divider()
                     Button {
-                        model.closeTerminal(ref)
-                        model.selection = nil
+                        model.closeView(ref)
                     } label: {
                         Label("Close View", systemImage: "xmark.circle")
                     }
@@ -356,6 +409,64 @@ private struct Meter: View {
         case ..<0.9: return .orange
         default: return .red
         }
+    }
+}
+
+/// A tile's title strip: status, name and container, with zoom and close on
+/// hover. The focused tile, which gets the keys, is marked with an accent
+/// underline. Double-click zooms.
+private struct TileHeader: View {
+    static let height: CGFloat = 26
+
+    @Environment(AppModel.self) private var model
+    let ref: PaneRef
+    @State private var hovering = false
+
+    var body: some View {
+        let focused = model.selection == ref
+        HStack(spacing: 6) {
+            if let agent = model.agentEntry(ref) {
+                if let resource = BrandIconLoader.agentIcon(for: agent.kind) {
+                    BrandIcon(resource: resource, size: 12)
+                }
+                Text(model.customName(agent.identityKey) ?? agent.title).lineLimit(1).truncationMode(.tail)
+                StatusChip(activity: agent.activity, compact: true)
+                Text(agent.device.name).foregroundStyle(.tertiary).lineLimit(1)
+            } else if let pane = model.paneEntry(ref) {
+                Image(systemName: "terminal").foregroundStyle(.tertiary)
+                Text(pane.title).lineLimit(1).truncationMode(.tail)
+                Text(pane.device.name).foregroundStyle(.tertiary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if hovering || focused {
+                Button {
+                    model.focusTile(ref)
+                    model.toggleZoom()
+                } label: {
+                    Image(systemName: model.isZoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                }
+                .help(model.isZoomed ? "Show All" : "Zoom")
+                Button { model.removeTile(ref) } label: { Image(systemName: "xmark") }
+                    .help("Close")
+            }
+        }
+        .buttonStyle(.borderless)
+        .font(.callout.weight(focused ? .medium : .regular))
+        .foregroundStyle(focused ? .primary : .secondary)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.height)
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            if focused { Theme.accent.frame(height: 2) }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            model.focusTile(ref)
+            model.toggleZoom()
+        }
+        .onTapGesture { model.focusTile(ref) }
+        .onHover { hovering = $0 }
     }
 }
 

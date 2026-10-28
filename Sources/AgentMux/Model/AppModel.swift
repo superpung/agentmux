@@ -60,7 +60,25 @@ final class AppModel {
     private(set) var targets: [TargetState] = []
     /// Non-nil only when saving settings failed.
     private(set) var configError: String?
-    var selection: PaneRef?
+    /// The focused agent: the one shown, or with several shown together, the
+    /// tile that has keyboard focus. Selecting anything outside the tiles goes
+    /// back to the single view.
+    var selection: PaneRef? {
+        didSet {
+            guard selection != oldValue else { return }
+            if let selection, tiles.contains(selection) {} else {
+                tiles = []
+                isZoomed = false
+            }
+            applyVisibility()
+        }
+    }
+    /// Agents shown together in the detail area, in layout order; empty when
+    /// one agent (the selection) fills it.
+    private(set) var tiles: [PaneRef] = []
+    /// The focused tile temporarily fills the detail area; the others keep
+    /// their mirrors and sizes.
+    private(set) var isZoomed = false
     /// Sidebar scope: one target (nil = all) and one working directory (nil = all).
     var deviceFilter: String? {
         didSet { if oldValue != deviceFilter { spaceFilter = nil } }
@@ -852,7 +870,7 @@ final class AppModel {
     /// on the background interval to keep remote load low; output from any open
     /// mirror still nudges its own target (see `nudge`).
     private func effectiveInterval(_ state: TargetState) -> Duration {
-        if state.lastFailure == nil, selection?.targetID == state.id {
+        if state.lastFailure == nil, visibleRefs.contains(where: { $0.targetID == state.id }) {
             return min(TargetState.activeInterval, state.interval)
         }
         return state.interval
@@ -981,7 +999,7 @@ final class AppModel {
         guard notificationsEnabled, !old.isEmpty else { return }
         for (paneID, now) in new {
             guard let before = old[paneID], before != now else { continue }
-            if let ref = state.ref(for: paneID), ref == selection { continue }
+            if let ref = state.ref(for: paneID), visibleRefs.contains(ref) { continue }
             let title = agentTitle(state, paneID: paneID)
             if before == .working, now == .idle {
                 notifier.notify(.finished, agent: title, detail: state.device.name)
@@ -996,8 +1014,14 @@ final class AppModel {
     }
 
     /// Moves the selection to the next (`delta` = 1) or previous agent in the
-    /// current scope, wrapping around, and opens it like a click would.
+    /// current scope, wrapping around, and opens it like a click would. With
+    /// several agents shown, it moves focus between their tiles instead.
     func selectAdjacentAgent(_ delta: Int) {
+        if isTiled {
+            let index = selection.flatMap { tiles.firstIndex(of: $0) } ?? 0
+            selection = tiles[(index + delta + tiles.count) % tiles.count]
+            return
+        }
         let refs = agentEntries.map(\.ref)
         guard !refs.isEmpty else { return }
         if let current = selection, let index = refs.firstIndex(of: current) {
@@ -1037,25 +1061,110 @@ final class AppModel {
     private var recentlyViewed: [PaneRef] = []
 
     /// Selecting a pane on an attachable target opens its mirror at once;
-    /// mirroring changes nothing shared in tmux.
+    /// mirroring changes nothing shared in tmux. A pane already in the tiles
+    /// just takes focus.
     func select(_ ref: PaneRef) {
         selection = ref
-        if state(ref.targetID)?.target.access.allowsAttach == true {
+        open([ref])
+        applyVisibility()
+    }
+
+    /// Shows the sidebar's selection: one row fills the detail area, several
+    /// are tiled. Tiles keep their places; new ones join at the end in sidebar
+    /// order and the last of them takes focus. Past `TileLayout.maxTiles` the
+    /// extra rows are left out.
+    func show(_ refs: Set<PaneRef>, sidebarOrder: [PaneRef]) {
+        guard refs.count > 1 else {
+            if let ref = refs.first {
+                tiles = []
+                select(ref)
+            } else {
+                selection = nil
+            }
+            return
+        }
+        var next = tiles.filter(refs.contains)
+        if next.isEmpty, let selection, refs.contains(selection) { next = [selection] }
+        let added = sidebarOrder.filter { refs.contains($0) && !next.contains($0) }
+        next += added
+        next = Array(next.prefix(TileLayout.maxTiles))
+        let focus = added.last(where: next.contains) ?? selection.flatMap { next.contains($0) ? $0 : nil } ?? next[0]
+        tiles = next.count > 1 ? next : []
+        selection = focus
+        open(next)
+        applyVisibility()
+    }
+
+    /// The agents in the detail area right now (all tiles, or the zoomed or
+    /// single one).
+    var visibleRefs: [PaneRef] {
+        if isTiled, !isZoomed { return tiles }
+        return selection.map { [$0] } ?? []
+    }
+
+    var isTiled: Bool { tiles.count > 1 }
+
+    /// A tile's surface took keyboard focus (the user clicked into it).
+    func focusTile(_ ref: PaneRef) {
+        guard tiles.contains(ref), selection != ref else { return }
+        selection = ref
+    }
+
+    /// Takes a tile out of the view; its mirror stays open like any recently
+    /// viewed one. The last remaining tile fills the area again.
+    func removeTile(_ ref: PaneRef) {
+        guard let index = tiles.firstIndex(of: ref) else { return }
+        var next = tiles
+        next.remove(at: index)
+        let focus = selection == ref ? next[min(index, next.count - 1)] : selection
+        tiles = next.count > 1 ? next : []
+        if tiles.isEmpty { isZoomed = false }
+        selection = focus
+        applyVisibility()
+    }
+
+    func toggleZoom() {
+        guard isTiled else { return }
+        isZoomed.toggle()
+        applyVisibility()
+    }
+
+    /// Closes the view of `ref` from its Actions menu: a tile leaves the
+    /// tiles; a single view returns to the dashboard.
+    func closeView(_ ref: PaneRef) {
+        if tiles.contains(ref) { removeTile(ref) } else if selection == ref { selection = nil }
+        closeTerminal(ref)
+    }
+
+    /// Opens the mirrors of `refs` on attachable targets and marks them
+    /// recently viewed.
+    private func open(_ refs: [PaneRef]) {
+        for ref in refs.reversed() where state(ref.targetID)?.target.access.allowsAttach == true {
             if terminals[ref] == nil { openTerminal(ref) }
             recentlyViewed.removeAll { $0 == ref }
             recentlyViewed.insert(ref, at: 0)
-            evictStaleTerminals()
         }
-        for terminal in terminals.values where !poppedOut.contains(terminal.ref) {
-            terminal.setActive(terminal.ref == ref)
-        }
+        evictStaleTerminals()
     }
 
-    /// Closes mirrors beyond the cap, oldest first, never the selected one or
+    /// Shows, and opens input to, exactly the mirrors on screen in the detail
+    /// area, and gives the selected one keyboard focus. Mirrors in their own
+    /// window are left alone.
+    private func applyVisibility() {
+        let shown = Set(visibleRefs)
+        for terminal in terminals.values where !poppedOut.contains(terminal.ref) {
+            terminal.setVisible(shown.contains(terminal.ref))
+        }
+        if let selection, !poppedOut.contains(selection) { terminals[selection]?.focus() }
+    }
+
+    /// Closes mirrors beyond the cap, oldest first, never one on screen or
     /// one shown in its own window.
     private func evictStaleTerminals() {
         while terminals.count > Self.maxOpenTerminals,
-              let victim = recentlyViewed.last(where: { $0 != selection && !poppedOut.contains($0) && terminals[$0] != nil })
+              let victim = recentlyViewed.last(where: {
+                  $0 != selection && !tiles.contains($0) && !poppedOut.contains($0) && terminals[$0] != nil
+              })
         {
             recentlyViewed.removeAll { $0 == victim }
             closeTerminal(victim)
@@ -1069,11 +1178,14 @@ final class AppModel {
         if terminals[ref] == nil { openTerminal(ref) }
         poppedOut.insert(ref)
         terminals[ref]?.setActive(true)
+        // A tile moving to its own window leaves the tiles.
+        removeTile(ref)
     }
 
     /// The window closed: the mirror returns to the main detail pane.
     func returnFromWindow(_ ref: PaneRef) {
         poppedOut.remove(ref)
+        applyVisibility()
     }
 
     func terminal(for ref: PaneRef) -> PaneTerminal? {
@@ -1096,6 +1208,7 @@ final class AppModel {
             terminal.onActivity = { [weak self] in self?.nudge(ref.targetID) }
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
             terminal.onFontSizeChanged = { [weak self] size in self?.rememberTerminalFontSize(size) }
+            terminal.onFocus = { [weak self] in self?.focusTile(ref) }
             terminal.applyTheme(terminalTheme)
             terminal.setMouseForwardingAllowed(state.detections[ref.paneID]?.kind.isAgent ?? false)
             terminals[ref] = terminal
@@ -1109,6 +1222,7 @@ final class AppModel {
     /// Ends this view's mirror. The pane and its programs keep running.
     func closeTerminal(_ ref: PaneRef) {
         poppedOut.remove(ref)
+        removeTile(ref)
         terminals.removeValue(forKey: ref)?.close()
     }
 

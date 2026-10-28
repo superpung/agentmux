@@ -80,6 +80,12 @@ docs/                  requirements, decision records, observed compatibility
   once. Client and grouped-session cleanup is scoped to a stable per-install id so
   two copies of AgentMux can watch the same tmux server without tearing down each
   other's views.
+- **Tiles.** Several selected agents share the detail area. `TileLayout`
+  (AgentMuxCore) picks the arrangement from the area's size and the terminal cell
+  size, scoring each candidate by its worst tile (width up to ~100 columns counts
+  most) and keeping the current one unless another is clearly better. Every
+  mirror keeps one place in the view tree whether it fills the area, is a tile or
+  is hidden, so switching never rebuilds a surface.
 
 ## Compatibility and decisions
 

@@ -103,6 +103,15 @@ enum GhosttyRuntime {
         }
     }
 
+    /// About one terminal cell at the current font, for choosing how to tile
+    /// several terminals (Ghostty's own metrics differ by a point or so).
+    static var approximateCellSize: CGSize {
+        let font = NSFont(descriptor: NSFontDescriptor(fontAttributes: [.family: currentFontFamily]), size: currentFontSize)
+            ?? .monospacedSystemFont(ofSize: currentFontSize, weight: .regular)
+        let width = ("M" as NSString).size(withAttributes: [.font: font]).width
+        return CGSize(width: ceil(width), height: ceil(font.ascender - font.descender + font.leading))
+    }
+
     static let darkBackground = "#101012"
     static let lightBackground = "#FFFFFF"
 

@@ -83,7 +83,6 @@ enum AgentFilter: String, CaseIterable, Identifiable {
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
-    @Binding var selection: PaneRef?
     @State private var query = ""
     @AppStorage("sidebarGroupBy") private var groupingRaw = GroupBy.project.rawValue
     @AppStorage("sidebarFilter") private var filterRaw = AgentFilter.all.rawValue
@@ -93,7 +92,7 @@ struct SidebarView: View {
     private var filter: AgentFilter { AgentFilter(rawValue: filterRaw) ?? .all }
 
     var body: some View {
-        List(selection: $selection) {
+        List(selection: selection) {
             if groups.isEmpty, filteredPanes.isEmpty {
                 emptyRow
             }
@@ -153,6 +152,18 @@ struct SidebarView: View {
                 model.setCustomName(agent.identityKey, name)
             }
         }
+    }
+
+    /// One row fills the detail area; ⌘- or ⇧-clicking more rows shows them
+    /// together (`AppModel.show`).
+    private var selection: Binding<Set<PaneRef>> {
+        Binding(
+            get: { Set(model.isTiled ? model.tiles : model.selection.map { [$0] } ?? []) },
+            set: { refs in
+                if refs.count > TileLayout.maxTiles { NSSound.beep() }
+                model.show(refs, sidebarOrder: groups.flatMap { $0.agents.map(\.ref) } + filteredPanes.map(\.ref))
+            }
+        )
     }
 
     @ViewBuilder private func rowMenu(_ agent: AgentEntry) -> some View {
