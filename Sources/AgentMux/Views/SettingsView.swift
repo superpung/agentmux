@@ -34,7 +34,7 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Notify when an agent finishes or needs you", isOn: $notificationsEnabled)
+                Toggle("Show banners for new notifications", isOn: $notificationsEnabled)
             }
             Section {
                 Picker("Terminal theme", selection: Binding(

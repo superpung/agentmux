@@ -431,6 +431,7 @@ private struct TileHeader: View {
                 }
                 Text(model.customName(agent.identityKey) ?? agent.title).lineLimit(1).truncationMode(.tail)
                 StatusChip(activity: agent.activity, compact: true)
+                AgentStatusGlyph(activity: .idle, fault: agent.activity == .working ? nil : agent.fault)
                 Text(agent.device.name).foregroundStyle(.tertiary).lineLimit(1)
             } else if let pane = model.paneEntry(ref) {
                 Image(systemName: "terminal").foregroundStyle(.tertiary)

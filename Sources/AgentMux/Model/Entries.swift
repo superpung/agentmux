@@ -56,6 +56,8 @@ struct AgentEntry: Identifiable, Hashable {
     /// Non-secret account identity for dedup ("claude:<uuid>" / "codex:<id>"),
     /// when a readable account id exists; nil falls back to container + dir.
     var accountKey: String?
+    /// Why its last turn stopped short (usage limit or error), while idle.
+    var fault: AgentFault?
     var id: PaneRef { ref }
 
     /// The config dir shown in place of the generic kind label, e.g.
@@ -218,7 +220,8 @@ extension AppModel {
                     version: detection.version,
                     model: snapshot.models[pane.id],
                     effort: snapshot.efforts[pane.id],
-                    accountKey: snapshot.accounts[pane.id]
+                    accountKey: snapshot.accounts[pane.id],
+                    fault: state.faults[pane.id]
                 )
             }
         }

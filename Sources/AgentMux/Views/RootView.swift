@@ -30,6 +30,16 @@ struct RootView: View {
                         }
                     }
                     ToolbarItem(placement: .primaryAction) {
+                        Button { model.showInbox.toggle() } label: {
+                            Label("Notifications", systemImage: model.inbox.unreadCount > 0 ? "bell.badge" : "bell")
+                                .symbolRenderingMode(model.inbox.unreadCount > 0 ? .multicolor : .monochrome)
+                        }
+                        .help(model.inbox.unreadCount > 0 ? "Notifications (\(model.inbox.unreadCount) unread)" : "Notifications")
+                        .popover(isPresented: $model.showInbox, arrowEdge: .bottom) {
+                            InboxView().environment(model)
+                        }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
                         Button { model.toggleInspector() } label: {
                             Label("Resources", systemImage: "sidebar.right")
                         }

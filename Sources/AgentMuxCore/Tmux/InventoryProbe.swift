@@ -158,8 +158,9 @@ public enum InventoryProbe {
               # model are not read from the stale file. Timestamps/ids only.
               rts=""; re=""; hop=0
               while [ -f "$lf" ] && [ "$hop" -lt 10 ]; do
-                chain=$(tac "$lf" 2>/dev/null | jq -rc 'if .type=="continued-in" then "C "+(.continuedInSessionId // "") elif (.type=="assistant" or .type=="user") then "T "+(.timestamp // "") else empty end' 2>/dev/null | awk '/^C /{c=$2} /^T /{print "T "$2; print "C "c; exit}')
-                rts=$(echo "$chain" | sed -n 's/^T //p')
+                chain=$(tac "$lf" 2>/dev/null | jq -rc 'if .type=="continued-in" then "C "+(.continuedInSessionId // "") elif (.type=="assistant" or .type=="user") then "T "+(.timestamp // "")+" "+(if .isApiErrorMessage then (.error // "unknown")+","+(.quotaLimits.status // "-")+","+((.quotaLimits.resetsAt // "-")|tostring)+","+(.quotaLimits.rateLimitType // "-") else "-" end) else empty end' 2>/dev/null | awk '/^C /{c=$2} /^T /{print "T "$2" "$3; print "C "c; exit}')
+                rts=$(echo "$chain" | sed -n 's/^T //p' | cut -d' ' -f1)
+                cerr=$(echo "$chain" | sed -n 's/^T //p' | cut -d' ' -f2)
                 re=$(date -d "$rts" +%s 2>/dev/null)
                 { [ -n "$re" ] && [ $(( $(date +%s) - re )) -lt 3600 ]; } && break
                 nxt=$(echo "$chain" | sed -n 's/^C //p')
@@ -176,6 +177,10 @@ public enum InventoryProbe {
               # sit at the end of the log while the agent is idle at the prompt,
               # so those panes still need the screen to tell working from waiting.
               case "$ev" in */turn_duration) [ -n "$clpane" ] && logpanes="$logpanes$clpane " ;; esac
+              # The last real turn record is an API error (written once Claude's
+              # own retries are spent), so the turn stopped on it. Only the
+              # error code and quota fields are read, never the message.
+              case "$cerr" in ""|-) ;; *) [ -n "$clpane" ] && echo "@@fault $clpane claude $(printf '%s' "$cerr" | tr ',' ' ') ${re:--}" ;; esac
               [ -n "$clpane" ] && [ -n "$re" ] && echo "@@active $clpane $(( $(date +%s) - re ))"
               # Context size = the last assistant turn's prompt (input + cached +
               # cache-creation tokens), from a bounded tail. Numbers only.
@@ -302,6 +307,21 @@ public enum InventoryProbe {
               ceffort=$(grep -E '^[[:space:]]*model_reasoning_effort' "${pch:-$HOME/.codex}/config.toml" 2>/dev/null | head -n 1 | sed 's/.*=[[:space:]]*//; s/["[:space:]]//g')
               [ -n "$cmodel" ] && echo "@@model $cpane $cmodel ${ceffort:--}"
             fi
+            # Codex writes no error to its rollout; its screen shows one as a
+            # "■ " history line. One after the last "• " output line means the
+            # turn stopped on it. Reduced here to a class; the line itself never
+            # leaves. "■ Conversation interrupted" is the user's Esc.
+            if [ -n "$cpane" ]; then
+              cf=$(tm capture-pane -p -J -S -80 -t "$cpane" 2>/dev/null | awk '/^[[:space:]]*• /{e=""} /^[[:space:]]*■ /{e=$0} END{print e}')
+              case "$cf" in
+                "") ;;
+                *[Ii]nterrupted*) ;;
+                *"usage limit"*|*"hit your"*) echo "@@fault $cpane codex usage_limit - - - -" ;;
+                *'"status":429'*|*'"status": 429'*|*" 429 "*) echo "@@fault $cpane codex error - - - -" ;;
+                *"context window"*|*context_length*|*[Uu]nauthorized*|*invalid_request*|*"Bad Request"*|*'"status":40'*|*'"status": 40'*) echo "@@fault $cpane codex fatal - - - -" ;;
+                *) echo "@@fault $cpane codex error - - - -" ;;
+              esac
+            fi
           fi
         done
         echo "@@section screens"
@@ -392,6 +412,11 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@screenstate ") {
                 let fields = rest.split(separator: " ")
                 if fields.count == 2, isID(fields[0], "%") { snapshot.screenStates[String(fields[0])] = String(fields[1]) }
+            } else if let rest = line.dropPrefix("@@fault ") {
+                let f = rest.split(separator: " ")
+                if f.count >= 2, isID(f[0], "%"), let fault = AgentFault.parse(f.dropFirst()) {
+                    snapshot.faults[String(f[0])] = fault
+                }
             } else if let rest = line.dropPrefix("@@logstate ") {
                 let fields = rest.split(separator: " ")
                 if fields.count >= 2, isID(fields[0], "%") { snapshot.logStates[String(fields[0])] = String(fields[1]) }

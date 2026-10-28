@@ -46,7 +46,8 @@ What makes it different:
 - 🪟 **Several agents at once.** ⌘-click up to four agents in the sidebar to tile them, laid out to the window's shape (side by side, stacked, or a grid). Click a tile to type into it, ⌘] / ⌘[ to move between tiles, ⇧⌘↩ to zoom one. See [Several agents at once](#several-agents-at-once).
 - ⌨️ **Command palette.** Press ⌘K to jump to any agent, or send a prompt straight into one.
 - 🚀 **Launch, resume & switch.** Start or resume a Claude Code or Codex agent in any directory, and switch a Claude or Codex account in place, resuming the same conversation.
-- 🧭 **Activity & alerts.** Working, waiting for input, or idle, read from structural session-log fields, with desktop notifications when an agent finishes or needs you.
+- 🧭 **Activity & faults.** Working, waiting for input, or idle, read from structural session-log fields. A turn that stopped on a usage limit or on an API error is marked in the sidebar, with the limit's reset time.
+- 🔔 **Notification inbox.** Finished, needs you, usage limit, stopped on an error: each goes to a list behind the toolbar bell with unread state, filters and clear, a Dock badge, and a desktop banner when you are not already looking at that agent.
 - 🔬 **Resource inspector.** Per-agent CPU, memory and uptime, git working-tree status (branch, diff, ahead/behind), and host load, memory, disk and GPU.
 - 📁 **Files.** Browse the remote working directory with rich previews (syntax-highlighted code, Markdown, CSV/TSV, SVG, PDF, images). Drag files in from Finder to upload or out to Finder to download, and create, rename or delete files and folders.
 - 🧩 **tmux management.** Create or kill sessions, windows and panes, plus a throwaway shell with ⌘T.
@@ -117,6 +118,21 @@ To see Claude context and rate-limit usage, copy [`scripts/agentmux-statusline.s
 - **Closing.** A tile's × (or ⌘-clicking its row again) takes it out; its mirror stays warm like any recently viewed agent.
 - Each tile sizes its agent's tmux window to the tile, as the single view does with the full area. If you also have that window attached elsewhere, you see it at the tile's size while the tile is open.
 
+## Notifications
+
+The toolbar bell (⌥⌘N) opens the inbox:
+
+| Event | When |
+|---|---|
+| Finished | A turn ended normally (working → idle). |
+| Needs you | The agent waits for input or an approval. |
+| Usage limit | The turn stopped on a usage limit; shows which one and when it resets. |
+| Stopped on an error | The turn stopped on an API error after the agent's own retries. |
+
+Items are kept across launches, newest first by day, with unread dots, an All / Unread filter, mark read or unread, delete (hover, swipe or right-click), Mark All as Read, Clear Read and Clear All. The Dock icon shows the unread count. A desktop banner appears unless that agent is on screen; clicking a banner or a row opens the agent. Banners can be turned off in Settings; the inbox always records.
+
+**How a stopped turn is recognized.** For Claude Code, the last real record of the session log is an API error: its error code and quota fields (`rate_limit` with a rejected quota is a usage limit; `server_error`, `unknown` and transient 429s are errors). For Codex, which writes no errors to its rollout, the last error line on its screen comes after its last output line; a usage-limit message is a usage limit and Esc's "Conversation interrupted" is not an error. Both are reduced to a verdict inside the container; the message text never leaves it.
+
 ## How it works
 
 Each refresh makes one read-only SSH connection that inventories processes and tmux. Opening an agent attaches a live view over tmux control mode on a private, per-view session, so your own tmux clients and layout are never disturbed. Only structural status is ever read, never the conversation.
@@ -125,7 +141,7 @@ Each refresh makes one read-only SSH connection that inventories processes and t
 
 - **Read-only auto-refresh.** Polling only inventories processes and tmux. It never changes your servers, containers, tmux, or agents.
 - **You make every change.** Writes happen only when you act: opening a terminal and typing, sending a prompt, launching, resuming or switching an agent, managing tmux, or working with files.
-- **No conversation content.** Only structural log fields (event type, token counts, timestamps) are read, never message text.
+- **No conversation content.** Only structural log fields (event type, error code, token counts, timestamps) are read, never message text. Screen checks (working or idle, an error line) run inside the container and return only a verdict.
 - **No secrets.** Tokens and credentials are never read. Account de-duplication uses only non-secret account id fields.
 
 ## Development

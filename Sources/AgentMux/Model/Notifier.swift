@@ -2,13 +2,13 @@ import AgentMuxCore
 import Foundation
 import UserNotifications
 
-/// Posts OS notifications when an agent needs the user: it finished a turn
-/// (working → idle) or started waiting for input/approval, and the user is not
-/// currently viewing it. Mirrors Claude Desktop's "a session finished and you
-/// aren't viewing it" behaviour.
+/// Posts the OS banner for an inbox item (the inbox keeps every item; a
+/// banner is only for ones the user is not already looking at). Clicking the
+/// banner opens the agent: the request carries the item's id.
 @MainActor
 final class Notifier {
-    private var authorized = false
+    nonisolated static let inboxIDKey = "inboxID"
+
     private var requested = false
     /// UNUserNotificationCenter needs a real app bundle; running the raw binary
     /// (dev smoke tests) has none, so skip rather than crash.
@@ -19,31 +19,36 @@ final class Notifier {
     func requestAuthorizationIfNeeded() {
         guard available, !requested else { return }
         requested = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
-            Task { @MainActor in self?.authorized = granted }
-        }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    enum Reason {
-        case finished
-        case needsAttention
-
-        var title: String {
-            switch self {
-            case .finished: return "Agent finished"
-            case .needsAttention: return "Agent needs you"
-            }
-        }
-    }
-
-    func notify(_ reason: Reason, agent: String, detail: String) {
+    func notify(_ item: InboxItem) {
         guard available else { return }
         requestAuthorizationIfNeeded()
         let content = UNMutableNotificationContent()
-        content.title = reason.title
-        content.body = detail.isEmpty ? agent : "\(agent) · \(detail)"
+        content.title = item.kind.bannerTitle
+        content.body = [item.agent, item.detail, item.place].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         content.sound = .default
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        content.userInfo = [Self.inboxIDKey: item.id.uuidString]
+        let request = UNNotificationRequest(identifier: item.id.uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Takes the banners of items that were read or deleted in the app out of
+    /// Notification Center.
+    func withdraw(_ ids: [UUID]) {
+        guard available, !ids.isEmpty else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids.map(\.uuidString))
+    }
+}
+
+extension InboxItem.Kind {
+    var bannerTitle: String {
+        switch self {
+        case .finished: "Agent finished"
+        case .needsInput: "Agent needs you"
+        case .usageLimit: "Usage limit reached"
+        case .error: "Agent stopped on an error"
+        }
     }
 }

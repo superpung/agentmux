@@ -93,8 +93,21 @@ enum Theme {
 /// Spinner while working, a mark when the agent needs you, nothing otherwise.
 struct AgentStatusGlyph: View {
     let activity: AgentActivity
+    /// Why an idle agent stopped short, shown in place of nothing.
+    var fault: AgentFault? = nil
 
     var body: some View {
+        if activity != .working, !activity.needsAttention, let fault {
+            Image(systemName: fault.kind == .usageLimit ? "hourglass" : "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(fault.kind == .usageLimit ? Color(nsColor: .systemPurple) : Theme.danger)
+                .help(fault.summary)
+        } else {
+            activityGlyph
+        }
+    }
+
+    @ViewBuilder private var activityGlyph: some View {
         switch activity {
         case .working:
             // Same weight as the adjacent last-active time (.tertiary).

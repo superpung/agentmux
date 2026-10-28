@@ -86,6 +86,14 @@ docs/                  requirements, decision records, observed compatibility
   most) and keeping the current one unless another is clearly better. Every
   mirror keeps one place in the view tree whether it fills the area, is a tile or
   is hidden, so switching never rebuilds a surface.
+- **Faults.** The probe emits `@@fault` per agent pane: for Claude, the error
+  code and quota fields of the session log's last real record when it is an API
+  error; for Codex, the class of the last `■` error line on its screen when it
+  follows the last `•` output line. `AgentFault` classifies them (usage limit,
+  retryable or not) and `FaultTracker` reports each occurrence once.
+- **Notifications.** Activity transitions and new faults become `InboxItem`s
+  (persisted in `inbox.json` beside `settings.json`), with an OS banner unless the
+  agent is on screen.
 
 ## Compatibility and decisions
 

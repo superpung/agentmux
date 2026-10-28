@@ -276,6 +276,9 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
                             if !parts.isEmpty { line += " usage[\(parts.joined(separator: " "))]" }
                         }
                         if let a = snapshot.lastActiveSeconds[pane.id] { line += " active[\(a)s]" }
+                        if let f = snapshot.faults[pane.id] {
+                            line += " fault[\(f.kind.rawValue) \(f.summary)\(f.isRetryable ? " retryable" : "")]"
+                        }
                         line += " (\(detection.confidence.rawValue): \(detection.evidence.joined(separator: ", ")))"
                         if !detection.children.isEmpty {
                             line += " children: \(detection.children.map { "\($0.kind.rawValue)#\($0.pid)" }.joined(separator: " "))"

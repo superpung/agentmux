@@ -13,6 +13,7 @@ struct AgentMuxApp: App {
                 .environment(model)
                 .onAppear {
                     appDelegate.model = model
+                    model.inbox.refreshBadge()
                     model.startPolling()
                     model.requestNotificationAuthorization()
                     Task { await model.discoverAll() }
@@ -44,6 +45,8 @@ struct AgentMuxApp: App {
                 Button(model.isZoomed ? "Show All Agents" : "Zoom Agent") { model.toggleZoom() }
                     .keyboardShortcut(.return, modifiers: [.command, .shift])
                     .disabled(!model.isTiled)
+                Button("Notifications") { model.showInbox = true }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
                 Divider()
                 OpenFilesButton(model: model)
                 Divider()
@@ -156,14 +159,34 @@ private struct OpenFilesButton: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     @MainActor var model: AppModel?
+    /// For callbacks that arrive off the main actor and must not capture it.
+    @MainActor static weak var shared: AppDelegate?
 
     func applicationDidFinishLaunching(_: Notification) {
+        MainActor.assumeIsolated { AppDelegate.shared = self }
         // Needed when launched as a bare executable rather than from a bundle.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().delegate = self
         }
+        MainActor.assumeIsolated { model?.inbox.refreshBadge() }
+    }
+
+    /// Clicking a banner opens its agent and marks the inbox item read.
+    func userNotificationCenter(
+        _: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let raw = response.notification.request.content.userInfo[Notifier.inboxIDKey] as? String
+        if let raw, let id = UUID(uuidString: raw) {
+            AppDelegate.performOnMainRunLoop {
+                NSApp.activate(ignoringOtherApps: true)
+                AppDelegate.shared?.model?.openInboxItem(id)
+            }
+        }
+        completionHandler()
     }
 
     /// Show the banner even when AgentMux is frontmost (the finished agent is

@@ -22,6 +22,9 @@ final class TargetState: Identifiable {
     var detections: [String: AgentDetection] = [:]
     /// Resolved activity per agent pane, recomputed each refresh.
     var activities: [String: AgentActivity] = [:]
+    /// Why an agent that is not working stopped short, per pane.
+    var faults: [String: AgentFault] = [:]
+    var faultTracker = FaultTracker()
     var lastSuccess: Date?
     var lastFailure: RemoteFailure?
     var lastAttempt: Date?
@@ -172,6 +175,9 @@ final class AppModel {
     }
     private var releasedOrphans: Set<String> = []
     @ObservationIgnored private let notifier = Notifier()
+    /// Every notification, with read state (the toolbar bell).
+    let inbox = Inbox()
+    var showInbox = false
 
     /// Whether OS notifications fire (shared with the Settings toggle).
     var notificationsEnabled: Bool {
@@ -895,8 +901,15 @@ final class AppModel {
             state.snapshot = snapshot
             state.detections = AgentDetector.detect(snapshot)
             let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
-            notifyActivityTransitions(state, old: state.activities, new: newActivities)
+            // A fault only describes an agent that is not busy: a working or
+            // waiting agent has moved past it.
+            let newFaults = snapshot.faults.filter { pane, _ in
+                let activity = newActivities[pane] ?? .unknown
+                return activity != .working && !activity.needsAttention
+            }
+            noteActivityTransitions(state, old: state.activities, new: newActivities, faults: newFaults)
             state.activities = newActivities
+            state.faults = newFaults
             // Let the mirror forward mouse reports only while a live agent holds
             // the pane; a killed/terminated agent drops to a shell and mouse is
             // stripped so pointer events are not typed into it as commands.
@@ -992,21 +1005,79 @@ final class AppModel {
         return result
     }
 
-    /// Fires a notification when a known agent finishes (working → idle) or
-    /// starts needing input, unless the user is already viewing it. Nothing
-    /// fires on a target's first refresh (no prior state to compare).
-    private func notifyActivityTransitions(_ state: TargetState, old: [String: AgentActivity], new: [String: AgentActivity]) {
-        guard notificationsEnabled, !old.isEmpty else { return }
+    /// Records what happened to each agent since the last refresh: a turn
+    /// finished (working → idle), it started needing the user, or its turn
+    /// stopped on a usage limit or an error. Each goes to the inbox, with a
+    /// banner unless the agent is on screen. Nothing fires on a target's first
+    /// refresh (no prior state to compare); faults already there are only
+    /// noted, not reported.
+    private func noteActivityTransitions(_ state: TargetState, old: [String: AgentActivity],
+                                         new: [String: AgentActivity], faults: [String: AgentFault]) {
+        let first = old.isEmpty
+        let started = state.faultTracker.update(faults, now: Date(), report: !first)
+        guard !first else { return }
         for (paneID, now) in new {
             guard let before = old[paneID], before != now else { continue }
-            if let ref = state.ref(for: paneID), visibleRefs.contains(ref) { continue }
-            let title = agentTitle(state, paneID: paneID)
-            if before == .working, now == .idle {
-                notifier.notify(.finished, agent: title, detail: state.device.name)
+            if before == .working, now == .idle, faults[paneID] == nil {
+                post(.finished, state, paneID)
             } else if !before.needsAttention, now.needsAttention {
-                notifier.notify(.needsAttention, agent: title, detail: state.device.name)
+                post(.needsInput, state, paneID)
             }
         }
+        for (paneID, fault) in started {
+            switch fault.kind {
+            case .usageLimit:
+                post(.usageLimit, state, paneID, detail: usageDetail(fault))
+            case .error:
+                post(.error, state, paneID, detail: fault.summary)
+            }
+        }
+    }
+
+    /// "5-hour limit · resets 4:00 PM"
+    private func usageDetail(_ fault: AgentFault) -> String {
+        guard let resetsAt = fault.resetsAt else { return fault.summary }
+        let date = Date(timeIntervalSince1970: TimeInterval(resetsAt))
+        let style: Date.FormatStyle = Calendar.current.isDateInToday(date)
+            ? .dateTime.hour().minute() : .dateTime.month(.abbreviated).day().hour().minute()
+        return "\(fault.summary) · resets \(date.formatted(style))"
+    }
+
+    /// Adds an inbox item for `paneID`; it arrives already read, and without
+    /// a banner, when the agent is on screen.
+    private func post(_ kind: InboxItem.Kind, _ state: TargetState, _ paneID: String, detail: String? = nil) {
+        guard let ref = state.ref(for: paneID) else { return }
+        let viewed = visibleRefs.contains(ref) || poppedOut.contains(ref)
+        let name = agentEntry(ref).map { customName($0.identityKey) ?? $0.title } ?? agentTitle(state, paneID: paneID)
+        let item = InboxItem(kind: kind, ref: ref, agent: name, place: state.device.name, detail: detail, isRead: viewed)
+        inbox.add(item)
+        if !viewed, notificationsEnabled { notifier.notify(item) }
+    }
+
+    /// Opens the agent an inbox item is about (if it is still there) and
+    /// marks the item read. Also the action of clicking its banner.
+    func openInboxItem(_ id: UUID) {
+        guard let item = inbox.item(id) else { return }
+        markInboxRead(id)
+        guard let state = state(item.ref.targetID), state.snapshot?.pane(item.ref.paneID) != nil,
+              state.ref(for: item.ref.paneID) == item.ref else { return }
+        select(item.ref)
+    }
+
+    func markInboxRead(_ id: UUID, _ read: Bool = true) {
+        inbox.setRead(id, read)
+        if read { notifier.withdraw([id]) }
+    }
+
+    func markAllInboxRead() {
+        let unread = inbox.items.filter { !$0.isRead }.map(\.id)
+        inbox.markAllRead()
+        notifier.withdraw(unread)
+    }
+
+    func removeInboxItems(_ ids: [UUID]) {
+        for id in ids { inbox.remove(id) }
+        notifier.withdraw(ids)
     }
 
     func requestNotificationAuthorization() {
