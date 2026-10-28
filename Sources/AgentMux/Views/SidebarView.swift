@@ -438,7 +438,7 @@ private struct AgentRow: View {
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
-            AgentStatusGlyph(activity: entry.activity, fault: entry.fault)
+            AgentStatusGlyph(activity: entry.activity, fault: entry.fault, retrying: entry.isRetrying)
         }
         .padding(.vertical, 2)
     }

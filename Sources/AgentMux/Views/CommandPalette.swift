@@ -201,7 +201,7 @@ private struct PaletteRow: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 6)
-            AgentStatusGlyph(activity: agent.activity)
+            AgentStatusGlyph(activity: agent.activity, retrying: agent.isRetrying)
         }
         .padding(.horizontal, 14).padding(.vertical, 7)
         .background(highlighted ? Theme.itemWashSelected : .clear)

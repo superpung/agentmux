@@ -136,7 +136,7 @@ struct MenuBarContent: View {
                             Text(agent.device.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 4)
-                        StatusChip(activity: agent.activity)
+                        StatusChip(activity: agent.activity, retrying: agent.isRetrying)
                     }
                     .contentShape(Rectangle())
                     .padding(.horizontal, 14).padding(.vertical, 5)

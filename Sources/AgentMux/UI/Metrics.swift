@@ -11,12 +11,15 @@ struct StatusChip: View {
     /// In a list, idle on every row is noise, so it's hidden by default. A
     /// single focal status (e.g. the detail titlebar) can opt in to show it.
     var showsIdle = false
+    /// Working, but waiting out an API retry: "Retrying", in the warning tint.
+    var retrying = false
 
     var body: some View {
         // Only working / needs-input / needs-approval / exited earn a chip in a
         // list; idle is shown only where `showsIdle` is set.
-        if (showsIdle || activity != .idle), let label = Theme.activityLabel(activity) {
-            let tint = Theme.activityColor(activity)
+        let retrying = retrying && activity == .working
+        if (showsIdle || activity != .idle), let label = retrying ? "Retrying" : Theme.activityLabel(activity) {
+            let tint = retrying ? Theme.warning : Theme.activityColor(activity)
             HStack(spacing: 4) {
                 if activity == .working {
                     SpinnerView(color: tint).frame(width: 8, height: 8)

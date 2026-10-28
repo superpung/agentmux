@@ -209,7 +209,7 @@ private struct DashAgentRow: View {
                 if agent.activity != .working, let active = RelativeTime.short(agent.lastActiveSeconds) {
                     Text(active).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                 }
-                StatusChip(activity: agent.activity)
+                StatusChip(activity: agent.activity, retrying: agent.isRetrying)
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 12)

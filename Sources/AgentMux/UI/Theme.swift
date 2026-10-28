@@ -95,6 +95,8 @@ struct AgentStatusGlyph: View {
     let activity: AgentActivity
     /// Why an idle agent stopped short, shown in place of nothing.
     var fault: AgentFault? = nil
+    /// Working, but waiting out an API retry: the spinner turns the warning tint.
+    var retrying = false
 
     var body: some View {
         if activity != .working, !activity.needsAttention, let fault {
@@ -110,9 +112,15 @@ struct AgentStatusGlyph: View {
     @ViewBuilder private var activityGlyph: some View {
         switch activity {
         case .working:
-            // Same weight as the adjacent last-active time (.tertiary).
-            SpinnerView(color: .tertiary)
-                .frame(width: 12, height: 12)
+            if retrying {
+                SpinnerView(color: Theme.warning)
+                    .frame(width: 12, height: 12)
+                    .help("Retrying")
+            } else {
+                // Same weight as the adjacent last-active time (.tertiary).
+                SpinnerView(color: .tertiary)
+                    .frame(width: 12, height: 12)
+            }
         case .waitingInput, .waitingApproval:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 11, weight: .semibold))

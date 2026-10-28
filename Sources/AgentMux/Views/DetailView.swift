@@ -146,7 +146,7 @@ struct DetailView: View {
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         if let ref = model.selection, let agent = model.agentEntry(ref), agent.activity != .unknown {
             ToolbarItem(placement: .navigation) {
-                StatusChip(activity: agent.activity, showsIdle: true)
+                StatusChip(activity: agent.activity, showsIdle: true, retrying: agent.isRetrying)
             }
         }
         if let ref = model.selection, let terminal = model.terminal(for: ref) {
@@ -439,7 +439,7 @@ private struct TileHeader: View {
                     BrandIcon(resource: resource, size: 12)
                 }
                 Text(model.customName(agent.identityKey) ?? agent.title).lineLimit(1).truncationMode(.tail)
-                StatusChip(activity: agent.activity, compact: true)
+                StatusChip(activity: agent.activity, compact: true, retrying: agent.isRetrying)
                 AgentStatusGlyph(activity: .idle, fault: agent.activity == .working ? nil : agent.fault)
                 if let pending = model.pendingNudges[ref] {
                     NudgeRing(start: pending.start, fireAt: pending.fireAt)

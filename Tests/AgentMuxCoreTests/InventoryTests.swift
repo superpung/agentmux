@@ -166,6 +166,8 @@ arg -p
         @@agentstate %9 waiting-approval
         @@agentstate %10 busy
         @@agentstate bad busy
+        @@retrying %10
+        @@retrying nope
         @@usage %2 110247 258400 44.0
         @@usage %6 266971 - -
         @@usage %7 0 0 -
@@ -174,6 +176,7 @@ arg -p
         let s = try InventoryProbe.parse(out, nonce: nonce)
         #expect(s.logStates["%2"] == "working")
         #expect(s.agentStates == ["%9": "waiting-approval", "%10": "busy"])
+        #expect(s.retrying == ["%10"])
         #expect(s.usage["%2"]?.contextTokens == 110247)
         #expect(s.usage["%2"]?.contextWindow == 258400)
         #expect(s.usage["%2"]?.rateLimitPercent == 44.0)
@@ -464,5 +467,31 @@ arg -p
         // so there is no name to show — the caller falls back to the session.
         let title = "[ ! ] Action Required | ______________PR | conf-scheduler"
         #expect(AgentTitle.from(paneTitle: title, kind: .codex) == nil)
+    }
+
+    /// The retry patterns as `grep -E` sees them in a container (C locale),
+    /// against what each CLI shows. The Claude line is from a live screen
+    /// (2026-10-28); the Codex ones are its status strings (0.165).
+    @Test func retryPatternsMatchWhatTheCLIsShow() throws {
+        func matches(_ pattern: String, _ line: String) throws -> Bool {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", "printf '%s\\n' \"$1\" | grep -qE '\(pattern)'", "sh", line]
+            process.environment = ["PATH": "/usr/bin:/bin"]
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        }
+        let claude = InventoryProbe.claudeRetryPattern
+        #expect(try matches(claude, "✻ Waiting for API response · will retry in 1m 33s · check your network"))
+        #expect(try matches(claude, "✻ Retrying in 5s… (attempt 3/10)"))
+        #expect(try !matches(claude, "✻ Sautéed for 33m 15s · done 9:32 PM"))
+        #expect(try !matches(claude, "✶ Pondering… (2m 4s · ↓ 3.1k tokens · esc to interrupt)"))
+        let codex = InventoryProbe.codexRetryPattern
+        #expect(try matches(codex, "• Reconnecting... 2/5 (14s • esc to interrupt)"))
+        #expect(try matches(codex, "• Reconnecting... waiting for network"))
+        #expect(try matches(codex, "⚠ stream connection failed; waiting to retry"))
+        #expect(try !matches(codex, "• Working (5s • esc to interrupt)"))
+        #expect(try !matches(codex, "Reconnecting to server"))
     }
 }

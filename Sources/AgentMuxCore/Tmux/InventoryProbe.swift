@@ -8,6 +8,13 @@ import Foundation
 /// a safe field separator: every untrusted text field is fetched by its own
 /// `list-*` call as `<id> <value>` and split on the first space.
 public enum InventoryProbe {
+    /// What each CLI shows while it waits out an API retry: Claude above its
+    /// input box ("Waiting for API response · will retry in 1m 33s",
+    /// "Retrying in 5s"), Codex in its status line ("Reconnecting... 2/5",
+    /// "Reconnecting... waiting for network"). Extended regexes for `grep -E`.
+    static let claudeRetryPattern = "Waiting for API response|will retry in|Retrying in"
+    static let codexRetryPattern = "Reconnecting\\.\\.\\.|waiting to retry"
+
     public static let maxProcessLines = 3000
     public static let maxAgentCandidates = 64
 
@@ -161,6 +168,10 @@ public enum InventoryProbe {
               *) clst="" ;;
             esac
             [ -n "$clpane" ] && [ -n "$clst" ] && { echo "@@agentstate $clpane $clst"; logpanes="$logpanes$clpane "; }
+            # A busy Claude waiting out an API retry says so just above its
+            # input box ("Waiting for API response · will retry in 1m 33s").
+            # Only the yes/no leaves.
+            [ -n "$clpane" ] && [ "$clst" = busy ] && tm capture-pane -p -t "$clpane" 2>/dev/null | tail -n 15 | grep -qE '\(claudeRetryPattern)' && echo "@@retrying $clpane"
             lf=""
             for cand in "$csid" "$res"; do
               case "$cand" in ""|*[!0-9a-fA-F-]*) continue ;; esac
@@ -334,7 +345,10 @@ public enum InventoryProbe {
             # turn stopped on it. Reduced here to a class; the line itself never
             # leaves. "■ Conversation interrupted" is the user's Esc.
             if [ -n "$cpane" ]; then
-              cf=$(tm capture-pane -p -J -S -80 -t "$cpane" 2>/dev/null | awk '/^[[:space:]]*• /{e=""} /^[[:space:]]*■ /{e=$0} END{print e}')
+              ccap=$(tm capture-pane -p -J -S -80 -t "$cpane" 2>/dev/null)
+              # Reconnecting after a dropped stream, in its status line.
+              printf '%s\\n' "$ccap" | tail -n 12 | grep -qE '\(codexRetryPattern)' && echo "@@retrying $cpane"
+              cf=$(printf '%s\\n' "$ccap" | awk '/^[[:space:]]*• /{e=""} /^[[:space:]]*■ /{e=$0} END{print e}')
               case "$cf" in
                 "") ;;
                 *[Ii]nterrupted*) ;;
@@ -437,6 +451,8 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@agentstate ") {
                 let f = rest.split(separator: " ")
                 if f.count == 2, isID(f[0], "%") { snapshot.agentStates[String(f[0])] = String(f[1]) }
+            } else if let rest = line.dropPrefix("@@retrying ") {
+                if isID(Substring(rest), "%") { snapshot.retrying.insert(rest) }
             } else if let rest = line.dropPrefix("@@fault ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 2, isID(f[0], "%"), let fault = AgentFault.parse(f.dropFirst()) {

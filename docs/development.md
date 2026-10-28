@@ -91,6 +91,11 @@ docs/                  requirements, decision records, observed compatibility
   log (the newest file in a shared project dir belongs to whichever agent wrote
   last) and its `status` (`busy` / `idle` / `waiting`, reduced on the server to
   input or approval) as `@@agentstate`, which outranks the screen and log rules.
+- **Retrying.** A working agent waiting out an API retry is flagged
+  `@@retrying` from the bottom of its screen (Claude: "Waiting for API
+  response", "will retry in", "Retrying in"; Codex: "Reconnecting...",
+  "waiting to retry"; patterns in `InventoryProbe`), and shown as an orange
+  "Retrying" instead of "Working".
 - **Faults.** The probe emits `@@fault` per agent pane: for Claude, the error
   code and quota fields of the session log's last real record when it is an API
   error; for Codex, the class of the last `■` error line on its screen when it
