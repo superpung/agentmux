@@ -21,6 +21,10 @@ struct AgentMuxApp: App {
         .defaultSize(width: 1100, height: 720)
         .commands {
             SidebarCommands()
+            // Edit ▸ Find (⌘F, ⌘G, ⇧⌘G, ⌘E) for the Files previews. Items stay
+            // disabled where no responder handles them, so a focused terminal
+            // still receives these keys.
+            TextEditingCommands()
             CommandGroup(after: .toolbar) {
                 Button("Command Palette") { model.showCommandPalette = true }
                     .keyboardShortcut("k", modifiers: .command)

@@ -766,6 +766,8 @@ private struct CodePreview: NSViewRepresentable {
             tv.isEditable = false
             tv.isSelectable = true
             tv.isRichText = true
+            tv.usesFindBar = true
+            tv.isIncrementalSearchingEnabled = true
             tv.textContainerInset = NSSize(width: 8, height: 8)
             // Soft-wrap long lines to the (narrow) panel width so nothing runs
             // off the right edge; the inspector is too narrow for horizontal
@@ -964,19 +966,19 @@ private struct SVGPreview: NSViewRepresentable {
     }
 }
 
-/// Renders a PDF with PDFKit.
+/// Renders a PDF with PDFKit, searchable with the system find bar.
 private struct PDFPreview: NSViewRepresentable {
     let data: Data
 
-    func makeNSView(context: Context) -> PDFView {
-        let view = PDFView()
-        view.autoScales = true
-        view.displayMode = .singlePageContinuous
-        view.backgroundColor = .clear
+    func makeNSView(context: Context) -> FindablePDFView {
+        let view = FindablePDFView()
+        view.pdfView.autoScales = true
+        view.pdfView.displayMode = .singlePageContinuous
+        view.pdfView.backgroundColor = .clear
         return view
     }
 
-    func updateNSView(_ view: PDFView, context: Context) {
+    func updateNSView(_ view: FindablePDFView, context: Context) {
         guard context.coordinator.data != data else { return }
         context.coordinator.data = data
         view.document = PDFDocument(data: data)
