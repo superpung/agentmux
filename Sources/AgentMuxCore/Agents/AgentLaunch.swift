@@ -356,13 +356,20 @@ public enum AgentAccountSwitch {
         cl=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
         case "$tp" in "$pane") ;; *) echo "ERR: process $pid is not in $pane any more (stale); refusing"; exit 1;; esac
         case "$cl" in *claude*) ;; *) echo "ERR: process $pid is not Claude any more (stale); refusing"; exit 1;; esac
-        # Session id to resume: the --resume on the cmdline, else the newest
-        # transcript in this account's project dir for this cwd.
-        sid=$(printf '%s' "$cl" | grep -oE -- '--resume [0-9a-fA-F-]{36}' | awk '{print $2}' | head -1)
+        # Session id to resume: the process's own session record
+        # (sessions/<pid>.json, kept current by Claude), else the --resume on
+        # the cmdline, else the newest transcript in this account's project dir
+        # for this cwd (wrong when agents share that dir, so the last resort).
+        ccfg=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1)
+        ccfg=${ccfg:-$HOME/.claude}
+        enc=$(printf '%s' "$cwd" | sed 's#/#-#g')
+        sid=""
+        for cand in "$(jq -r '.sessionId // empty' "$ccfg/sessions/$pid.json" 2>/dev/null)" \\
+                    "$(printf '%s' "$cl" | grep -oE -- '--resume [0-9a-fA-F-]{36}' | awk '{print $2}' | head -1)"; do
+          case "$cand" in ""|*[!0-9a-fA-F-]*) continue ;; esac
+          [ -f "$ccfg/projects/$enc/$cand.jsonl" ] && { sid=$cand; break; }
+        done
         if [ -z "$sid" ]; then
-          ccfg=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1)
-          ccfg=${ccfg:-$HOME/.claude}
-          enc=$(printf '%s' "$cwd" | sed 's#/#-#g')
           nf=$(ls -t "$ccfg/projects/$enc"/*.jsonl 2>/dev/null | head -1)
           [ -n "$nf" ] && sid=$(basename "$nf" .jsonl)
         fi

@@ -101,9 +101,9 @@ public enum InventoryProbe {
           tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -E '^(CODEX_HOME|CLAUDE_CONFIG_DIR|TMUX_PANE)=' | cut -c1-300 | sed 's/^/env /'
           echo "start $(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f20)"
           # Claude session log state — structural only (event type/subtype +
-          # mtime age), never message content. Located by the --resume id
-          # (the pane's own session file; the newest file in the dir is wrong
-          # when agents share a project dir).
+          # mtime age), never message content. Located by the process's own
+          # session (see below); the newest file in the dir is wrong when
+          # agents share a project dir.
           if [ "$(cat /proc/$pid/comm 2>/dev/null)" = claude ] && command -v jq >/dev/null 2>&1; then
             clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
             # Locate this pane's AgentMux status-line sidecar (our own file,
@@ -140,11 +140,19 @@ public enum InventoryProbe {
             cacct=$(jq -r '.oauthAccount.accountUuid // empty' "$ccfg/.claude.json" 2>/dev/null)
             [ -n "$clpane" ] && [ -n "$cacct" ] && echo "@@account $clpane claude:$cacct"
             cenc=$(readlink "/proc/$pid/cwd" 2>/dev/null | sed 's#/#-#g')
-            lf="$ccfg/projects/$cenc/$res.jsonl"
-            # Resumed via the picker (no --resume id on the cmdline) or started
-            # fresh: Claude does not keep the transcript fd open, so locate the
-            # active one as the newest .jsonl in the pane's project dir.
-            { [ -z "$res" ] || [ ! -f "$lf" ]; } && lf=$(ls -t "$ccfg/projects/$cenc/"*.jsonl 2>/dev/null | head -n 1)
+            # The process's session: Claude's own per-process record
+            # (sessions/<pid>.json, kept current by Claude), else the --resume
+            # id on the cmdline. Only the id is read. Without either (an older
+            # Claude, or a session with no turn yet) fall back to the newest
+            # .jsonl in the pane's project dir, which is wrong when agents share
+            # that dir (all account dirs link one projects store).
+            csid=$(jq -r '.sessionId // empty' "$ccfg/sessions/$pid.json" 2>/dev/null)
+            lf=""
+            for cand in "$csid" "$res"; do
+              case "$cand" in ""|*[!0-9a-fA-F-]*) continue ;; esac
+              [ -f "$ccfg/projects/$cenc/$cand.jsonl" ] && { lf="$ccfg/projects/$cenc/$cand.jsonl"; break; }
+            done
+            [ -z "$lf" ] && lf=$(ls -t "$ccfg/projects/$cenc/"*.jsonl 2>/dev/null | head -n 1)
             if [ -n "$lf" ] && [ -f "$lf" ]; then
               clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
               # Follow Claude's continuation chain. When a resumed session is
