@@ -4,14 +4,17 @@ import Foundation
 public struct RemoteFileEntry: Sendable, Hashable, Identifiable {
     public var name: String
     public var path: String
+    /// True for a folder, including a symlink that points at one.
     public var isDirectory: Bool
+    public var isSymlink: Bool
     public var size: Int
     public var id: String { path }
 
-    public init(name: String, path: String, isDirectory: Bool, size: Int) {
+    public init(name: String, path: String, isDirectory: Bool, isSymlink: Bool = false, size: Int) {
         self.name = name
         self.path = path
         self.isDirectory = isDirectory
+        self.isSymlink = isSymlink
         self.size = size
     }
 }
@@ -168,6 +171,145 @@ public enum RemoteFileService {
         }
     }
 
+    /// The outcome of a remote write that never replaces an existing path.
+    public enum NoClobberResult: Sendable, Equatable { case done, alreadyExists }
+
+    /// Creates an empty file. Refuses (`.alreadyExists`) when anything is at
+    /// `path`, so an existing file is never truncated.
+    public static func createFile(
+        _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<NoClobberResult, RemoteFailure> {
+        let result = await RemoteScript.run(createFileScript(path), host: host, target: target,
+                                            options: options, timeoutSeconds: 15)
+        return result.flatMap(parseNoClobber)
+    }
+
+    /// Creates one directory (no parents). Refuses when anything is at `path`.
+    /// Unlike `makeDirectory`, an existing folder is reported, not reused.
+    public static func createDirectory(
+        _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<NoClobberResult, RemoteFailure> {
+        let result = await RemoteScript.run(createDirectoryScript(path), host: host, target: target,
+                                            options: options, timeoutSeconds: 15)
+        return result.flatMap(parseNoClobber)
+    }
+
+    /// Renames (moves) a file or folder. Refuses when `newPath` exists, so a
+    /// rename never replaces another entry or moves into an existing folder.
+    public static func rename(
+        _ path: String, to newPath: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<NoClobberResult, RemoteFailure> {
+        let result = await RemoteScript.run(renameScript(path, to: newPath), host: host, target: target,
+                                            options: options, timeoutSeconds: 15)
+        return result.flatMap(parseNoClobber)
+    }
+
+    /// Removes an empty folder (`rmdir`). Never recurses: a folder with
+    /// anything in it fails with the remote's message. A symlink to a folder
+    /// is removed as a link, leaving its target untouched.
+    public static func removeDirectory(
+        _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<Void, RemoteFailure> {
+        let result = await RemoteScript.run(removeDirectoryScript(path), host: host, target: target,
+                                            options: options, timeoutSeconds: 15)
+        return result.flatMap { output in
+            parseNoClobber(output).flatMap { outcome in
+                outcome == .done ? .success(()) : .failure(RemoteFailure(.remoteCommandFailed, detail: "unexpected response"))
+            }
+        }
+    }
+
+    // Scripts for the no-clobber writes (POSIX sh; run locally by the tests).
+    // Each prints one marker that `parseNoClobber` reads.
+
+    /// noclobber (`set -C`) also covers a file appearing between the check and
+    /// the redirection, which then fails instead of truncating it.
+    static func createFileScript(_ path: String) -> String {
+        let qf = ShellQuote.command([path])
+        return """
+        if [ -e \(qf) ] || [ -L \(qf) ]; then printf '@@exists\\n'
+        elif err=$( (set -C; : > \(qf)) 2>&1 ); then printf '@@ok\\n'
+        else printf '@@err %s\\n' "$err"; fi
+        """
+    }
+
+    static func createDirectoryScript(_ path: String) -> String {
+        let qd = ShellQuote.command([path])
+        return """
+        if [ -e \(qd) ] || [ -L \(qd) ]; then printf '@@exists\\n'
+        elif err=$(mkdir -- \(qd) 2>&1); then printf '@@ok\\n'
+        else printf '@@err %s\\n' "$err"; fi
+        """
+    }
+
+    static func renameScript(_ path: String, to newPath: String) -> String {
+        let qs = ShellQuote.command([path])
+        let qd = ShellQuote.command([newPath])
+        return """
+        if [ ! -e \(qs) ] && [ ! -L \(qs) ]; then printf '@@missing\\n'
+        elif [ -e \(qd) ] || [ -L \(qd) ]; then printf '@@exists\\n'
+        elif err=$(mv -- \(qs) \(qd) 2>&1); then printf '@@ok\\n'
+        else printf '@@err %s\\n' "$err"; fi
+        """
+    }
+
+    static func removeDirectoryScript(_ path: String) -> String {
+        let qd = ShellQuote.command([path])
+        return """
+        if [ -L \(qd) ]; then
+          if err=$(rm -f -- \(qd) 2>&1); then printf '@@ok\\n'; else printf '@@err %s\\n' "$err"; fi
+        elif [ ! -d \(qd) ]; then printf '@@err not a folder\\n'
+        elif err=$(rmdir -- \(qd) 2>&1); then printf '@@ok\\n'
+        else printf '@@err %s\\n' "$err"; fi
+        """
+    }
+
+    /// Why a name can't be used for a new or renamed entry.
+    public enum NameProblem: Sendable, Equatable {
+        case empty
+        /// "." or "..".
+        case reserved
+        case slash
+        /// Line breaks would split the entry across lines of the listing.
+        case lineBreak
+        /// Over the 255-byte limit of Linux file systems.
+        case tooLong
+    }
+
+    /// Checks a single path component typed by the user. nil means usable.
+    public static func nameProblem(_ name: String) -> NameProblem? {
+        if name.isEmpty { return .empty }
+        if name == "." || name == ".." { return .reserved }
+        if name.contains("/") { return .slash }
+        if name.contains(where: \.isNewline) || name.unicodeScalars.contains("\0") { return .lineBreak }
+        if name.utf8.count > 255 { return .tooLong }
+        return nil
+    }
+
+    /// Why a local item can't be uploaded, or nil when it can.
+    public enum UploadRefusal: Sendable, Equatable {
+        case folder
+        /// A FIFO, socket or device: reading it could block or never end.
+        case notAFile
+        case unusableName
+        case tooLarge
+    }
+
+    /// The upload policy shared by the open panel and drag-and-drop: regular
+    /// files only, with a name the listing can show, up to `downloadByteCap`.
+    public static func uploadRefusal(name: String, isDirectory: Bool, isRegularFile: Bool, size: Int) -> UploadRefusal? {
+        if isDirectory { return .folder }
+        if !isRegularFile { return .notAFile }
+        if nameProblem(name) != nil { return .unusableName }
+        if size > downloadByteCap { return .tooLarge }
+        return nil
+    }
+
+    /// `name` inside `directory`, joined the way listings build entry paths.
+    public static func path(_ name: String, in directory: String) -> String {
+        (directory.hasSuffix("/") ? directory : directory + "/") + name
+    }
+
     /// Best-effort cleanup: deletes regular files in `directory` last modified
     /// more than `days` ago. Used to keep the paste-image cache small; it never
     /// reports failure to the caller.
@@ -207,8 +349,26 @@ public enum RemoteFileService {
             .joined(separator: "\n")
     }
 
+    /// Reads the marker a no-clobber write prints: `@@ok`, `@@exists`,
+    /// `@@missing` or `@@err <message>` (the message may span lines).
+    static func parseNoClobber(_ output: String) -> Result<NoClobberResult, RemoteFailure> {
+        let lines = stripFraming(output).split(separator: "\n", omittingEmptySubsequences: true)
+        guard let index = lines.firstIndex(where: { $0.hasPrefix("@@") }) else {
+            let detail = lines.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            return .failure(RemoteFailure(.remoteCommandFailed, detail: detail.isEmpty ? "no response" : detail))
+        }
+        let marker = lines[index]
+        if marker == "@@ok" { return .success(.done) }
+        if marker == "@@exists" { return .success(.alreadyExists) }
+        if marker == "@@missing" { return .failure(RemoteFailure(.remoteCommandFailed, detail: "it no longer exists")) }
+        let rest = ([marker.dropFirst("@@err".count)] + lines[(index + 1)...])
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return .failure(RemoteFailure(.remoteCommandFailed, detail: rest.isEmpty ? "the remote command failed" : rest))
+    }
+
     static func parseListing(_ directory: String, _ output: String) -> [RemoteFileEntry] {
-        let base = directory.hasSuffix("/") ? directory : directory + "/"
         var entries: [RemoteFileEntry] = []
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let fields = line.split(separator: "\t", maxSplits: 3, omittingEmptySubsequences: false)
@@ -216,8 +376,8 @@ public enum RemoteFileService {
             let name = String(fields[3])
             if name.isEmpty || name == "." || name == ".." { continue }
             let isDir = fields[0] == "d" || (fields[0] == "l" && fields[1] == "d")
-            entries.append(RemoteFileEntry(name: name, path: base + name,
-                                           isDirectory: isDir, size: Int(fields[2]) ?? 0))
+            entries.append(RemoteFileEntry(name: name, path: path(name, in: directory), isDirectory: isDir,
+                                           isSymlink: fields[0] == "l", size: Int(fields[2]) ?? 0))
         }
         return entries.sorted { a, b in
             if a.isDirectory != b.isDirectory { return a.isDirectory }

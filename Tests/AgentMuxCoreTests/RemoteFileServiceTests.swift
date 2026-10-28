@@ -10,6 +10,8 @@ import Testing
         #expect(entries.first { $0.name == "src" }?.isDirectory == true)
         // a symlink whose target is a directory counts as a directory
         #expect(entries.first { $0.name == "link_to_dir" }?.isDirectory == true)
+        #expect(entries.first { $0.name == "link_to_dir" }?.isSymlink == true)
+        #expect(entries.first { $0.name == "src" }?.isSymlink == false)
         #expect(entries.first { $0.name == "readme.md" }?.path == "/data/x/readme.md")
         #expect(entries.first { $0.name == "readme.md" }?.size == 120)
     }

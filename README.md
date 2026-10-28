@@ -47,7 +47,7 @@ What makes it different:
 - 🚀 **Launch, resume & switch.** Start or resume a Claude Code or Codex agent in any directory, and switch a Claude or Codex account in place, resuming the same conversation.
 - 🧭 **Activity & alerts.** Working, waiting for input, or idle, read from structural session-log fields, with desktop notifications when an agent finishes or needs you.
 - 🔬 **Resource inspector.** Per-agent CPU, memory and uptime, git working-tree status (branch, diff, ahead/behind), and host load, memory, disk and GPU.
-- 📁 **Files.** Browse the remote working directory with rich previews (syntax-highlighted code, Markdown, CSV/TSV, SVG, PDF, images), and upload, download, delete or create.
+- 📁 **Files.** Browse the remote working directory with rich previews (syntax-highlighted code, Markdown, CSV/TSV, SVG, PDF, images). Drag files in from Finder to upload or out to Finder to download, and create, rename or delete files and folders.
 - 🧩 **tmux management.** Create or kill sessions, windows and panes, plus a throwaway shell with ⌘T.
 - 📍 **Menu-bar extra.** Agent counts, urgency, live CPU and memory, and jump to any agent without opening the main window.
 - 🔒 **Privacy-first.** Auto-refresh is read-only and structural, never conversation content, tokens, or credentials.

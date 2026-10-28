@@ -16,5 +16,6 @@ licenses.
 | [swift-cmark](https://github.com/swiftlang/swift-cmark) 0.9.0 | CommonMark parsing (dependency of swift-markdown-ui) | BSD-2-Clause |
 | [LobeHub icons](https://github.com/lobehub/lobe-icons) | `Resources/Icons/claude*.svg`, `codex*.svg` | MIT |
 | [Simple Icons](https://simpleicons.org) | `Resources/Icons/` OS icons | CC0 1.0 |
+| [MiSTerFTP](https://github.com/Simon-nhelix/mister-ftp) | Drag-out technique adapted in `Sources/AgentMux/Views/FileDragAndDrop.swift` | MIT |
 
 Brand names and logos belong to their owners.
