@@ -8,7 +8,8 @@ public enum RemoteScript {
         destination: SSHDestination,
         context: ExecutionContext,
         options: SSHOptions = SSHOptions(),
-        timeoutSeconds: Int = 20
+        timeoutSeconds: Int = 20,
+        stdoutLimit: Int = 4 << 20
     ) async -> Result<String, RemoteFailure> {
         let argv = RemoteCommand.ssh(
             destination,
@@ -23,7 +24,8 @@ public enum RemoteScript {
                 arguments: argv,
                 stdin: Data(script.utf8),
                 // Leave room for connection setup on top of the remote limit.
-                timeout: .seconds(timeoutSeconds + options.connectTimeoutSeconds + 5)
+                timeout: .seconds(timeoutSeconds + options.connectTimeoutSeconds + 5),
+                stdoutLimit: stdoutLimit
             )
         } catch {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "\(error)"))
@@ -43,7 +45,8 @@ public enum RemoteScript {
         host: HostConfig,
         target: TargetConfig,
         options: SSHOptions = SSHOptions(),
-        timeoutSeconds: Int = 20
+        timeoutSeconds: Int = 20,
+        stdoutLimit: Int = 4 << 20
     ) async -> Result<String, RemoteFailure> {
         do {
             return try await run(
@@ -51,7 +54,8 @@ public enum RemoteScript {
                 destination: SSHDestination(host.sshDestination),
                 context: target.executionContext(),
                 options: options,
-                timeoutSeconds: timeoutSeconds
+                timeoutSeconds: timeoutSeconds,
+                stdoutLimit: stdoutLimit
             )
         } catch {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "\(error)"))

@@ -40,6 +40,27 @@ import Testing
         #expect(got == data)
     }
 
+    @Test func outputLimitFitsTheLargestTransfers() {
+        // base64 of the cap, plus "@@container" / "@@size" framing.
+        let framing = "@@container abc123 running 2026-10-13T00:00:00Z 42\n@@size \(RemoteFileService.downloadByteCap)\n"
+        for cap in [RemoteFileService.downloadByteCap, RemoteFileService.imageByteCap, RemoteFileService.textByteCap] {
+            let needed = (cap + 2) / 3 * 4 + framing.utf8.count
+            #expect(RemoteFileService.base64OutputLimit(cap) >= needed)
+        }
+        // The runner's default was the bug: it can't hold a 5 MB image.
+        #expect(RemoteFileService.base64OutputLimit(RemoteFileService.imageByteCap) > 4 << 20)
+    }
+
+    @Test func runnerKeepsOutputUpToTheRaisedLimit() async throws {
+        // 6 MB of base64 (well past the 4 MiB default) passes through intact.
+        let bytes = 4_500_000
+        let result = try await CommandRunner.run(
+            executable: "/bin/sh", arguments: ["-c", "head -c \(bytes) /dev/zero | base64 | tr -d '\\n'"],
+            timeout: .seconds(30), stdoutLimit: RemoteFileService.base64OutputLimit(bytes))
+        #expect(!result.stdoutTruncated)
+        #expect(Data(base64Encoded: result.stdout)?.count == bytes)
+    }
+
     @Test func downloadRejectsOverCapWithSizeInDetail() {
         let out = "@@size \(RemoteFileService.downloadByteCap + 1)\n"
         guard case let .failure(failure) = RemoteFileService.parseDownload(out) else {

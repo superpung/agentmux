@@ -64,7 +64,8 @@ public enum RemoteFileService {
         printf '@@size %s\\n' "$sz"
         head -c \(cap) \(qf) 2>/dev/null | base64 | tr -d '\\n'
         """
-        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 20)
+        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 20,
+                                            stdoutLimit: base64OutputLimit(cap))
         return result.flatMap { parseRead(stripFraming($0), isImage: isImage, isPDF: isPDF, cap: cap) }
     }
 
@@ -83,8 +84,15 @@ public enum RemoteFileService {
         printf '@@size %s\\n' "$sz"
         if [ "$sz" -ge 0 ] && [ "$sz" -le \(downloadByteCap) ]; then base64 \(qf) 2>/dev/null | tr -d '\\n'; fi
         """
-        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 180)
+        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 180,
+                                            stdoutLimit: base64OutputLimit(downloadByteCap))
         return result.flatMap { parseDownload(stripFraming($0)) }
+    }
+
+    /// Stdout room for a script that prints `bytes` as base64 plus a few framing
+    /// lines. Without it the runner's 4 MiB default cut off anything over ~3 MB.
+    static func base64OutputLimit(_ bytes: Int) -> Int {
+        (bytes + 2) / 3 * 4 + 64 * 1024
     }
 
     static func parseDownload(_ output: String) -> Result<Data, RemoteFailure> {
