@@ -6,40 +6,40 @@ import PDFKit
 import SwiftUI
 import WebKit
 
-/// The dedicated Files window: a two-pane browser (tree | wide preview) for the
-/// selected agent's project files.
+/// What a Files window browses: a folder in one target. Windows are keyed by
+/// it, so each stays on its folder whichever agent is selected later, and
+/// opening the same folder again brings its window forward.
+struct FilesWindowSpec: Codable, Hashable, Sendable {
+    var targetID: String
+    var root: String
+}
+
+/// A Files window: a two-pane browser (tree | wide preview) for one folder.
 struct FileBrowserWindow: View {
     @Environment(AppModel.self) private var model
+    let spec: FilesWindowSpec
 
     var body: some View {
-        if let ref = model.selection, let state = model.state(ref.targetID), let root = fileRoot(ref) {
-            FileBrowser(ref: ref, host: state.host, target: state.target, root: root)
-                .id(ref) // reset the browser when the selected agent changes
+        if let state = model.state(spec.targetID) {
+            FileBrowser(spec: spec, host: state.host, target: state.target, deviceName: state.device.name)
         } else {
-            VStack(spacing: 10) {
-                Image(systemName: "folder").font(.largeTitle).foregroundStyle(.tertiary)
-                Text("Select an agent.")
-                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding()
+            // The target was removed in Settings (or a restored window outlived it).
+            Image(systemName: "folder.badge.questionmark").font(.largeTitle).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    private func fileRoot(_ ref: PaneRef) -> String? {
-        if let a = model.agentEntry(ref), !a.space.path.isEmpty { return a.space.path }
-        if let p = model.paneEntry(ref), !p.space.path.isEmpty { return p.space.path }
-        return nil
     }
 }
 
 /// Directory tree on the left, a wide resizable preview on the right.
 private struct FileBrowser: View {
     @Environment(AppModel.self) private var model
-    let ref: PaneRef
+    let spec: FilesWindowSpec
     let host: HostConfig
     let target: TargetConfig
-    let root: String
+    let deviceName: String
     @State private var selected: String?
+
+    private var root: String { spec.root }
 
     var body: some View {
         NavigationSplitView {
@@ -49,13 +49,16 @@ private struct FileBrowser: View {
             FilePreviewView(host: host, target: target, path: selected)
         }
         .navigationTitle((root as NSString).lastPathComponent)
-        .navigationSubtitle(selected.map { ($0 as NSString).lastPathComponent } ?? "")
+        // Several Files windows can be open; the container tells same-named
+        // folders apart.
+        .navigationSubtitle([deviceName, selected.map { ($0 as NSString).lastPathComponent }]
+            .compactMap { $0 }.joined(separator: " · "))
         .onAppear { applyPreviewRequest() }
         .onChange(of: model.previewRequest) { _, _ in applyPreviewRequest() }
     }
 
     private func applyPreviewRequest() {
-        if let req = model.previewRequest, req.targetID == ref.targetID { selected = req.path }
+        if let req = model.previewRequest, req.spec == spec { selected = req.path }
     }
 }
 

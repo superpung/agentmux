@@ -36,7 +36,7 @@ struct AgentMuxApp: App {
                 Button("Previous Agent") { model.selectAdjacentAgent(-1) }
                     .keyboardShortcut("[", modifiers: .command)
                 Divider()
-                OpenFilesButton()
+                OpenFilesButton(model: model)
                 Divider()
             }
         }
@@ -66,10 +66,12 @@ struct AgentMuxApp: App {
         }
         .defaultSize(width: 640, height: 640)
 
-        Window("Files", id: "files") {
-            FileBrowserWindow()
-                .environment(model)
-                .frame(minWidth: 640, minHeight: 420)
+        WindowGroup("Files", for: FilesWindowSpec.self) { $spec in
+            if let spec {
+                FileBrowserWindow(spec: spec)
+                    .environment(model)
+                    .frame(minWidth: 640, minHeight: 420)
+            }
         }
         .defaultSize(width: 1000, height: 680)
 
@@ -130,13 +132,16 @@ private struct NewTerminalButton: View {
     }
 }
 
-/// Opens the Files window (two-pane file browser for the selected agent).
+/// Opens the Files window for the selected agent's folder (or brings it
+/// forward); it then stays on that folder whatever is selected next.
 private struct OpenFilesButton: View {
     @Environment(\.openWindow) private var openWindow
+    let model: AppModel
 
     var body: some View {
-        Button("Files") { openWindow(id: "files") }
+        Button("Files") { if let spec = model.selectedFilesSpec { openWindow(value: spec) } }
             .keyboardShortcut("f", modifiers: [.command, .shift])
+            .disabled(model.selectedFilesSpec == nil)
     }
 }
 

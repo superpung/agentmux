@@ -17,7 +17,7 @@ struct RootView: View {
                     // are hidden on the dashboard (nothing selected).
                     if model.selection != nil {
                         ToolbarItem(placement: .primaryAction) {
-                            Button { openWindow(id: "files") } label: {
+                            Button { if let spec = model.selectedFilesSpec { openWindow(value: spec) } } label: {
                                 Label("Files", systemImage: "folder")
                             }
                             .help("Browse this agent's files")
@@ -42,7 +42,7 @@ struct RootView: View {
                 .inspectorColumnWidth(min: 260, ideal: 330, max: 460)
         }
         .onChange(of: model.previewRequest) { _, request in
-            if request != nil { openWindow(id: "files") }
+            if let request { openWindow(value: request.spec) }
         }
         .overlay {
             if model.showCommandPalette {

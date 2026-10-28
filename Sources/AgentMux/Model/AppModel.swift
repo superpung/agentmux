@@ -113,13 +113,24 @@ final class AppModel {
 
     /// A request to preview a file in the Files window. The nonce lets the same
     /// path be re-requested; a view observes this and opens the window.
-    struct PreviewRequest: Equatable, Sendable { var targetID: String; var path: String; var nonce: Int }
+    struct PreviewRequest: Equatable, Sendable { var spec: FilesWindowSpec; var path: String; var nonce: Int }
     private(set) var previewRequest: PreviewRequest?
     private var previewNonce = 0
 
-    func requestFilePreview(_ path: String, targetID: String) {
+    func requestFilePreview(_ path: String, in spec: FilesWindowSpec) {
         previewNonce += 1
-        previewRequest = PreviewRequest(targetID: targetID, path: path, nonce: previewNonce)
+        previewRequest = PreviewRequest(spec: spec, path: path, nonce: previewNonce)
+    }
+
+    /// The Files window for a pane: its agent's working directory.
+    func filesSpec(for ref: PaneRef) -> FilesWindowSpec? {
+        let root = [agentEntry(ref)?.space.path, paneEntry(ref)?.space.path].compactMap { $0 }.first { !$0.isEmpty }
+        return root.map { FilesWindowSpec(targetID: ref.targetID, root: $0) }
+    }
+
+    /// The Files window for the selected agent, if any.
+    var selectedFilesSpec: FilesWindowSpec? {
+        selection.flatMap(filesSpec(for:))
     }
 
     /// A path selected in `ref`'s terminal: resolve it (relative paths against
@@ -136,7 +147,10 @@ final class AppModel {
             path = trimmed
         }
         if selection != ref { select(ref) }
-        requestFilePreview(path, targetID: ref.targetID)
+        // Without a known cwd, browse the folder the path is in.
+        let spec = filesSpec(for: ref)
+            ?? FilesWindowSpec(targetID: ref.targetID, root: (path as NSString).deletingLastPathComponent)
+        requestFilePreview(path, in: spec)
     }
     private var releasedOrphans: Set<String> = []
     @ObservationIgnored private let notifier = Notifier()
