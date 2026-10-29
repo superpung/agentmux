@@ -7,9 +7,10 @@ import Foundation
 /// Parsing is Foundation's (CommonMark plus GitHub tables, strikethrough and
 /// autolinks). Quotes, code blocks and tables become NSTextBlocks (a left
 /// rule, a tinted box, an NSTextTable), lists become indents. Raw HTML keeps
-/// its text, links, anchors and images without the other tags, and an image
-/// shows as its alt text, linked to the image file: a preview reads no file
-/// other than the one it shows. Headings carry GitHub's anchors, so `#name`
+/// its text, links, anchors and images without the other tags. An image the
+/// document holds (a `data:` URI, as a notebook's plots) shows itself; any
+/// other shows as its alt text, linked to the image file: a preview reads no
+/// file other than the one it shows. Headings carry GitHub's anchors, so `#name`
 /// links find them. Safe off the main thread.
 enum MarkdownRenderer {
     static func render(_ source: String) -> NSAttributedString {
@@ -389,7 +390,7 @@ enum MarkdownRenderer {
                 if let image = run.image {
                     // A badge's link wins over its image.
                     let alt = text.isEmpty ? image.lastPathComponent : text
-                    result.append(Self.image(alt, link: link ?? Self.imageLink(image.absoluteString), attributes: attributes))
+                    result.append(Self.image(alt, source: image.absoluteString, link: link, attributes: attributes))
                     continue
                 }
                 result.append(NSAttributedString(string: text, attributes: attributes))
@@ -443,20 +444,48 @@ enum MarkdownRenderer {
         }
 
         /// An image as an icon and its alt text, leading to `link`.
-        fileprivate static func image(_ alt: String, link: Any?, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
+        /// An image: itself when the document holds it (a `data:` URI, as a
+        /// notebook's plots), else an icon and its alt text leading to `link`
+        /// or to the image file.
+        fileprivate static func image(_ alt: String, source: String, link: Any?,
+                                      attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
+            if let embedded = embeddedImage(source) {
+                let piece = NSMutableAttributedString(attributedString: embedded)
+                if let link { piece.addAttribute(.link, value: link, range: NSRange(location: 0, length: piece.length)) }
+                return piece
+            }
+            let target: Any? = link ?? imageLink(source).map { $0 as Any }
             var attributes = attributes
             attributes[.foregroundColor] = NSColor.secondaryLabelColor
             let font = attributes[.font] as? NSFont ?? Style.body
             let piece = NSMutableAttributedString(attributedString: imageGlyph(font))
             piece.append(NSAttributedString(string: alt, attributes: attributes))
-            if let link { piece.addAttribute(.link, value: link, range: NSRange(location: 0, length: piece.length)) }
+            if let target { piece.addAttribute(.link, value: target, range: NSRange(location: 0, length: piece.length)) }
             return piece
         }
 
         /// Where clicking an image leads: the image file or page, but not an
         /// image embedded in the document itself.
-        fileprivate static func imageLink(_ source: String) -> String? {
+        private static func imageLink(_ source: String) -> String? {
             source.lowercased().hasPrefix("data:") ? nil : source
+        }
+
+        /// The widest an embedded image is shown, in points.
+        private static let imageWidth: CGFloat = 640
+
+        /// A base64 `data:image/...` URI as an inline image, scaled down to
+        /// `imageWidth`.
+        private static func embeddedImage(_ source: String) -> NSAttributedString? {
+            guard source.lowercased().hasPrefix("data:image/"), let comma = source.firstIndex(of: ","),
+                  source[..<comma].lowercased().hasSuffix(";base64"),
+                  let data = Data(base64Encoded: String(source[source.index(after: comma)...]).removingPercentEncoding ?? "",
+                                  options: .ignoreUnknownCharacters),
+                  let image = NSImage(data: data), image.size.width > 0 else { return nil }
+            let scale = min(1, imageWidth / image.size.width)
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            attachment.bounds = CGRect(x: 0, y: 0, width: image.size.width * scale, height: image.size.height * scale)
+            return NSAttributedString(attachment: attachment)
         }
 
         private static func imageGlyph(_ font: NSFont) -> NSAttributedString {
@@ -605,7 +634,7 @@ enum MarkdownRenderer {
                 guard !tag.closing else { return nil }
                 let source = tag.attributes["src"] ?? ""
                 let alt = tag.attributes["alt"].flatMap { $0.isEmpty ? nil : $0 } ?? (source as NSString).lastPathComponent
-                return Builder.image(alt, link: link ?? Builder.imageLink(source),
+                return Builder.image(alt, source: source, link: link,
                                      attributes: [.font: font, .foregroundColor: color])
             case "br":
                 return NSAttributedString(string: lineBreak, attributes: [.font: font])

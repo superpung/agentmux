@@ -182,19 +182,19 @@ struct TextPreview: NSViewRepresentable {
     }
 }
 
-/// An attributed text built off the main thread (Markdown and tables can take
-/// a moment), with a spinner until it is ready.
-struct RenderedTextPreview: View {
+/// An attributed text built off the main thread (Markdown, tables and
+/// documents can take a moment), with a spinner until it is ready.
+struct RenderedTextPreview<Source: Equatable & Sendable>: View {
     /// What the text is built from; a new source builds it again.
-    let source: String
+    let source: Source
     var wraps = true
     var anchor: String?
-    let render: @Sendable (String) -> NSAttributedString
+    let render: @Sendable (Source) -> NSAttributedString
 
     @State private var rendered: Rendered?
 
     private struct Rendered: @unchecked Sendable {
-        let source: String
+        let source: Source
         let text: NSAttributedString
     }
 
@@ -274,16 +274,21 @@ struct PreviewFindRelay: NSViewRepresentable {
 
         /// The preview showing in this window, if it can find: the first
         /// preview text view or PDF in the window's views.
+        /// The preview showing in this window, if it can find: the first
+        /// preview text view or PDF in the window's views, or else a
+        /// preview that finds in another form (`FindSwitch`).
         private var target: NSView? {
-            func search(_ view: NSView) -> NSView? {
+            func search(_ view: NSView, _ match: (NSView) -> Bool) -> NSView? {
                 if view.isHidden { return nil }
-                if view is PreviewTextView || view is FindablePDFView { return view }
+                if match(view) { return view }
                 for subview in view.subviews {
-                    if let found = search(subview) { return found }
+                    if let found = search(subview, match) { return found }
                 }
                 return nil
             }
-            return window?.contentView.flatMap(search)
+            guard let content = window?.contentView else { return nil }
+            return search(content) { $0 is PreviewTextView || $0 is FindablePDFView }
+                ?? search(content) { $0 is FindSwitch.Marker }
         }
 
         // Without a preview the actions pass on, as if this were not here.
@@ -302,11 +307,45 @@ struct PreviewFindRelay: NSViewRepresentable {
 
         private func forward(_ action: Selector, _ sender: Any?) {
             guard let target else { return }
-            NSApp.sendAction(action, to: target, from: sender)
+            guard let marker = target as? FindSwitch.Marker else {
+                NSApp.sendAction(action, to: target, from: sender)
+                return
+            }
+            // Switch to the form that finds, then find there once its text
+            // is in (a document's text can take a moment to build).
+            marker.activate()
+            Task { @MainActor [weak self] in
+                for _ in 0..<100 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    guard let self, let view = self.target as? PreviewTextView else { continue }
+                    if view.textStorage?.length ?? 0 > 0 {
+                        NSApp.sendAction(action, to: view, from: sender)
+                        return
+                    }
+                }
+            }
         }
 
         func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
-            (target as? NSUserInterfaceValidations)?.validateUserInterfaceItem(item) ?? false
+            if target is FindSwitch.Marker { return true }
+            return (target as? NSUserInterfaceValidations)?.validateUserInterfaceItem(item) ?? false
         }
+    }
+}
+
+/// Marks a preview with no find of its own (a document page, a web view)
+/// whose other form has one: the Find menu switches to that form and finds
+/// there.
+struct FindSwitch: NSViewRepresentable {
+    let activate: () -> Void
+
+    func makeNSView(context: Context) -> Marker { Marker() }
+
+    func updateNSView(_ view: Marker, context: Context) {
+        view.activate = activate
+    }
+
+    final class Marker: NSView {
+        var activate: () -> Void = {}
     }
 }

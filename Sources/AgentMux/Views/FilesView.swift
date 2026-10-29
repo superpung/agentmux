@@ -3,7 +3,6 @@ import AppKit
 import Highlightr
 import PDFKit
 import SwiftUI
-import WebKit
 
 /// What a Files window browses: a folder in one target. Windows are keyed by
 /// it, so each stays on its folder whichever agent is selected later, and
@@ -646,10 +645,21 @@ private struct FileTree: View {
         let ext = (name as NSString).pathExtension.lowercased()
         if CodeHighlighter.imageExtensions.contains(ext) { return "photo" }
         if ext == "pdf" { return "doc.richtext" }
-        if ["md", "markdown", "txt", "rst"].contains(ext) { return "doc.text" }
+        switch PreviewFormat.of(name) {
+        case .document(.word), .document(.iWork): return "doc.text"
+        case .document(.spreadsheet): return "tablecells"
+        case .document(.presentation): return "rectangle.on.rectangle"
+        case .document(.audio): return "waveform"
+        case .document(.video): return "film"
+        case .archive, .compressed: return "doc.zipper"
+        default: break
+        }
+        if ["md", "markdown", "txt", "rst", "rtf"].contains(ext) { return "doc.text" }
         if ["json", "yml", "yaml", "toml", "ini", "cfg", "conf"].contains(ext) { return "gearshape" }
         if ["csv", "tsv"].contains(ext) { return "tablecells" }
-        if ["zip", "gz", "tar", "xz", "bz2", "7z"].contains(ext) { return "doc.zipper" }
+        if ["html", "htm", "xhtml"].contains(ext) { return "globe" }
+        if ext == "ipynb" { return "book.closed" }
+        if ext == "7z" { return "doc.zipper" }
         return "doc"
     }
 }
@@ -805,20 +815,16 @@ private struct PreviewPane: View {
     let preview: FilePreview
     let anchor: String?
 
-    private var ext: String { (preview.path as NSString).pathExtension.lowercased() }
+    /// The name the preview goes by: a compressed file's is the one inside.
+    private var name: String { PreviewFormat.innerName(preview.path) }
+    private var ext: String { (name as NSString).pathExtension.lowercased() }
+    private var fileName: String { (preview.path as NSString).lastPathComponent }
 
     var body: some View {
         switch preview.content {
         case let .text(text, truncated, bytes):
             VStack(spacing: 0) {
-                if truncated {
-                    Label("Showing the first \(RemoteFileService.textByteCap / 1024) KB of \(sizeText(bytes))",
-                          systemImage: "scissors")
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Theme.itemWash)
-                }
+                if truncated { banner(shown: RemoteFileService.textByteCap, of: bytes) }
                 textPreview(text)
             }
         case let .image(data):
@@ -832,8 +838,21 @@ private struct PreviewPane: View {
             }
         case let .pdf(data):
             PDFPreview(data: data)
-        case let .binary(bytes):
-            message("Binary file · \(sizeText(bytes))", "doc.badge.gearshape")
+        case let .document(data):
+            documentPreview(data)
+        case let .binary(data, bytes):
+            VStack(spacing: 0) {
+                if bytes.map({ $0 > data.count }) ?? true { banner(shown: data.count, of: bytes) }
+                RenderedTextPreview(source: data, wraps: false, anchor: anchor, render: DocumentText.hex)
+            }
+        case let .archive(entries, total):
+            VStack(spacing: 0) {
+                if total.map({ $0 > entries.count }) ?? true {
+                    banner(total.map { "Showing \(entries.count.formatted()) of \($0.formatted()) entries" }
+                        ?? "Showing the first \(entries.count.formatted()) entries")
+                }
+                RenderedTextPreview(source: entries, wraps: false, anchor: anchor, render: DocumentText.archive)
+            }
         case let .tooLarge(bytes):
             message("Too large to preview · \(sizeText(bytes))", "exclamationmark.magnifyingglass")
         case .empty:
@@ -843,8 +862,9 @@ private struct PreviewPane: View {
         }
     }
 
-    /// Formats with a rendered form get a Rendered / Source switch; every text
-    /// view here, rendered or not, has the find bar.
+    /// Formats with a rendered form get a Rendered / Source switch. Every
+    /// text view here, rendered or not, has the find bar; where the rendered
+    /// form has none (a web view), ⌘F finds in the source.
     @ViewBuilder private func textPreview(_ text: String) -> some View {
         switch ext {
         case "md", "markdown":
@@ -856,11 +876,76 @@ private struct PreviewPane: View {
             SourceSwitch(source: text, language: "plaintext") {
                 RenderedTextPreview(source: text, wraps: false, anchor: anchor) { DelimitedTextRenderer.render($0, separator: separator) }
             }
+        case "ipynb":
+            SourceSwitch(source: text, language: "json") {
+                RenderedTextPreview(source: text, anchor: anchor, render: DocumentText.notebook)
+            }
+        case "rtf":
+            SourceSwitch(source: text, language: "plaintext") {
+                RenderedTextPreview(source: text, anchor: anchor) { DocumentText.rich(Data($0.utf8), type: .rtf) }
+            }
+        case "html", "htm", "xhtml":
+            SourceSwitch(source: text, language: "xml", findsInSource: true) { WebPreview(html: text) }
         case "svg":
-            SourceSwitch(source: text, language: "xml") { SVGPreview(svg: text) }
+            SourceSwitch(source: text, language: "xml", findsInSource: true) {
+                WebPreview(html: """
+                <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+                <style>html,body{margin:0;height:100%}body{display:flex;align-items:center;justify-content:center}
+                svg{max-width:100%;height:auto}</style></head><body>\(text)</body></html>
+                """, transparent: true)
+            }
         default:
-            CodePreview(text: text, language: CodeHighlighter.language(for: preview.path), anchor: anchor)
+            CodePreview(text: text, language: CodeHighlighter.language(for: name), anchor: anchor)
         }
+    }
+
+    /// Office documents show as Quick Look shows them, with a Text form to
+    /// search where their text can be read (not the binary .xls / .ppt);
+    /// audio and video play.
+    @ViewBuilder private func documentPreview(_ data: Data) -> some View {
+        switch PreviewFormat.of(preview.path) {
+        case .document(.word) where ext == "odt":
+            // Quick Look has no OpenDocument viewer; AppKit reads it.
+            RenderedTextPreview(source: data, anchor: anchor) { DocumentText.rich($0, type: .openDocument) }
+        case .document(.word):
+            let type: NSAttributedString.DocumentType = ext == "doc" ? .docFormat : .officeOpenXML
+            DocumentSwitch {
+                QuickLookPreview(data: data, name: fileName)
+            } text: {
+                RenderedTextPreview(source: data, anchor: anchor) { DocumentText.rich($0, type: type) }
+            }
+        case .document(.spreadsheet) where ext != "xls":
+            DocumentSwitch {
+                QuickLookPreview(data: data, name: fileName)
+            } text: {
+                RenderedTextPreview(source: data, wraps: false, anchor: anchor, render: DocumentText.spreadsheet)
+            }
+        case .document(.presentation) where ext != "ppt" && ext != "pps":
+            DocumentSwitch {
+                QuickLookPreview(data: data, name: fileName)
+            } text: {
+                RenderedTextPreview(source: data, anchor: anchor, render: DocumentText.presentation)
+            }
+        case .document(.audio), .document(.video):
+            MediaPreview(data: data, name: fileName)
+        default:
+            QuickLookPreview(data: data, name: fileName)
+        }
+    }
+
+    /// "Showing the first 512 KB of 3 MB" (or without the total when it is
+    /// unknown) over a preview cut short.
+    private func banner(shown: Int, of total: Int?) -> some View {
+        let first = "Showing the first \(sizeText(shown))"
+        return banner(total.map { "\(first) of \(sizeText($0))" } ?? first)
+    }
+
+    private func banner(_ text: String) -> some View {
+        Label(text, systemImage: "scissors")
+            .font(.caption2).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Theme.itemWash)
     }
 
     private func message(_ text: String, _ icon: String) -> some View {
@@ -991,74 +1076,55 @@ final class CodeHighlighter {
 
 // MARK: - Rich-format previews
 
-/// A format shown rendered, with a switch to its source (Markdown, CSV, SVG).
-private struct SourceSwitch<Rendered: View>: View {
-    let source: String
-    let language: String
+/// A preview with a second form, Rendered first. Where the rendered form
+/// has no find of its own, ⌘F switches to the second form and finds there.
+private struct ModeSwitch<Rendered: View, Other: View>: View {
+    let otherLabel: String
+    var findsInOther = false
     @ViewBuilder let rendered: () -> Rendered
-    @State private var showsSource = false
+    @ViewBuilder let other: () -> Other
+    @State private var showsOther = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $showsSource) {
+            Picker("", selection: $showsOther) {
                 Text("Rendered").tag(false)
-                Text("Source").tag(true)
+                Text(otherLabel).tag(true)
             }
             .pickerStyle(.segmented).labelsHidden()
             .padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
-            if showsSource {
-                CodePreview(text: source, language: language)
+            if showsOther {
+                other()
             } else {
-                rendered()
+                rendered().background { if findsInOther { FindSwitch { showsOther = true } } }
             }
         }
     }
 }
 
-/// Renders an SVG via WKWebView (JavaScript disabled, no navigation: a
-/// clicked link goes to the window). Suited to self-contained SVGs such as
-/// waveforms.
-private struct SVGPreview: NSViewRepresentable {
-    let svg: String
-    @Environment(\.previewLinks) private var links
+/// A format shown rendered, with a switch to its highlighted source
+/// (Markdown, CSV, notebooks, RTF, HTML, SVG).
+private struct SourceSwitch<Rendered: View>: View {
+    let source: String
+    let language: String
+    var findsInSource = false
+    @ViewBuilder let rendered: () -> Rendered
 
-    func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.allowsContentJavaScript = false
-        let web = WKWebView(frame: .zero, configuration: config)
-        web.navigationDelegate = context.coordinator
-        web.setValue(false, forKey: "drawsBackground")
-        return web
-    }
-
-    func updateNSView(_ web: WKWebView, context: Context) {
-        context.coordinator.links = links
-        guard context.coordinator.svg != svg else { return }
-        context.coordinator.svg = svg
-        context.coordinator.programmaticLoad = true
-        let html = """
-        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-        <style>html,body{margin:0;height:100%}body{display:flex;align-items:center;justify-content:center}
-        svg{max-width:100%;height:auto}</style></head><body>\(svg)</body></html>
-        """
-        web.loadHTMLString(html, baseURL: nil)
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        var svg: String?
-        var programmaticLoad = false
-        var links: PreviewLinks?
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if programmaticLoad { programmaticLoad = false; decisionHandler(.allow); return }
-            decisionHandler(.cancel)
-            if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {
-                PreviewLinks.follow(PreviewLink.resolve(url.absoluteString, from: links?.path ?? "/"), with: links)
-            }
+    var body: some View {
+        ModeSwitch(otherLabel: "Source", findsInOther: findsInSource, rendered: rendered) {
+            CodePreview(text: source, language: language)
         }
+    }
+}
+
+/// An Office document as Quick Look shows it, with a switch to its text.
+private struct DocumentSwitch<Page: View, Text: View>: View {
+    @ViewBuilder let page: () -> Page
+    @ViewBuilder let text: () -> Text
+
+    var body: some View {
+        ModeSwitch(otherLabel: "Text", findsInOther: true, rendered: page, other: text)
     }
 }
 

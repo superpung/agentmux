@@ -122,6 +122,15 @@ docs/                  requirements, decision records, observed compatibility
   through the `previewLinks` environment value; `FileBrowser` opens it and
   keeps the Back / Forward history. Headings carry GitHub slugs in the
   `.previewAnchor` attribute. ADR 0010.
+- **Documents, media, archives.** `PreviewFormat` (core) decides how
+  `RemoteFileService.read` reads a file: whole for Office / iWork / media (up
+  to 20 MB), decompressed on the remote for `.gz` / `.bz2` / `.xz`, listed
+  with python3 (else `unzip -l` / `tar -tvf`) for archives. `DocumentPreviews`
+  shows them: `QuickLookPreview` and `MediaPreview` on a temporary copy,
+  `DocumentText` for the searchable forms (AppKit's Word reader; `Spreadsheet`
+  and `Presentation` read the OOXML through `ZipArchive`), the hex view and
+  notebooks (`Notebook` → Markdown). A `FindSwitch` on a preview without find
+  lets ⌘F switch to its text form. ADR 0011.
 
 ## Compatibility and decisions
 

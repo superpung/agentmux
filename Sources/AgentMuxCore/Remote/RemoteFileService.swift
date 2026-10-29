@@ -21,10 +21,18 @@ public struct RemoteFileEntry: Sendable, Hashable, Identifiable {
 
 /// The previewable content of a remote file.
 public enum RemoteFileContent: Sendable, Equatable {
-    case text(String, truncated: Bool, byteCount: Int)
+    /// Text, cut at the cap when `truncated`. The size is nil when unknown
+    /// (the text inside a compressed file).
+    case text(String, truncated: Bool, byteCount: Int?)
     case image(Data)
     case pdf(Data)
-    case binary(byteCount: Int)
+    /// A file for the system's viewer or a player, whole.
+    case document(Data)
+    /// A binary file's first bytes, for a hex view.
+    case binary(Data, byteCount: Int?)
+    /// An archive's first entries, of `total` (nil when there are more than
+    /// were listed).
+    case archive([ArchiveEntry], total: Int?)
     case tooLarge(byteCount: Int)
     case empty
     /// The path is a folder, not a file.
@@ -38,7 +46,12 @@ public enum RemoteFileContent: Sendable, Equatable {
 public enum RemoteFileService {
     public static let textByteCap = 512 * 1024
     public static let imageByteCap = 5 * 1024 * 1024
-    static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "heic", "ico"]
+    /// Office and iWork documents, audio and video are read whole up to this.
+    public static let documentByteCap = 20 * 1024 * 1024
+    /// The bytes of a binary file shown in its hex view.
+    public static let hexByteCap = 64 * 1024
+    /// The entries of an archive listed.
+    public static let archiveEntryCap = 20_000
 
     /// Lists one directory level (no recursion), directories first then files,
     /// each sorted case-insensitively by name.
@@ -52,28 +65,98 @@ public enum RemoteFileService {
         return result.map { parseListing(directory, stripFraming($0)) }
     }
 
-    /// Reads a file for preview: text (truncated past the cap), an image (under
-    /// the cap), or a marker for binary / too-large / a folder.
+    /// Reads a file for preview, by its `PreviewFormat`: text (truncated
+    /// past the cap) or a binary file's first bytes, an image, a PDF or a
+    /// document whole (or too large), the text inside a compressed file, an
+    /// archive's listing, or a marker for a folder. Read-only.
     public static func read(
         _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
     ) async -> Result<RemoteFileContent, RemoteFailure> {
-        let ext = (path as NSString).pathExtension.lowercased()
-        let isImage = imageExtensions.contains(ext)
-        let isPDF = ext == "pdf"
-        // Images / PDFs are read whole (up to the image cap); SVG is text but
-        // needs the whole file to render, so it also gets the larger cap.
-        let cap = (isImage || isPDF || ext == "svg") ? imageByteCap : textByteCap
+        let format = PreviewFormat.of(path)
+        let cap = byteCap(path, format)
+        let result = await RemoteScript.run(readScript(path, format, cap: cap), host: host, target: target, options: options,
+                                            timeoutSeconds: cap > imageByteCap ? 90 : 20,
+                                            stdoutLimit: base64OutputLimit(cap))
+        return result.flatMap { parseRead(stripFraming($0), format: format, cap: cap) }
+    }
+
+    /// The bytes a preview reads: SVGs and notebooks need the whole file to
+    /// render, so they get a larger cap than other text.
+    static func byteCap(_ path: String, _ format: PreviewFormat) -> Int {
+        switch format {
+        case .image, .pdf: return imageByteCap
+        case .document: return documentByteCap
+        case .archive: return 8 * 1024 * 1024 // The listing's text.
+        case .compressed: return textByteCap
+        case .text:
+            switch (path as NSString).pathExtension.lowercased() {
+            case "svg": return imageByteCap
+            case "ipynb": return documentByteCap
+            default: return textByteCap
+            }
+        }
+    }
+
+    static func readScript(_ path: String, _ format: PreviewFormat, cap: Int) -> String {
         let qf = ShellQuote.command([path])
-        let script = """
+        let body: String
+        switch format {
+        case .image, .pdf, .document:
+            // Whole or not at all.
+            body = "if [ \"$sz\" -le \(cap) ]; then base64 \(qf) 2>/dev/null | tr -d '\\n'; fi"
+        case let .compressed(tool):
+            // The size inside is unknown: one byte past the cap tells a cut.
+            body = "printf '@@stream\\n'; \(tool) -dc \(qf) 2>/dev/null | head -c \(cap + 1) | base64 | tr -d '\\n'"
+        case .archive:
+            body = archiveListingScript(qf, zip: [".zip", ".jar", ".war", ".whl"].contains { path.lowercased().hasSuffix($0) })
+        case .text:
+            body = "head -c \(cap) \(qf) 2>/dev/null | base64 | tr -d '\\n'"
+        }
+        return """
         if [ -d \(qf) ]; then printf '@@dir\\n'; else
         sz=$(stat -c %s \(qf) 2>/dev/null || echo -1)
         printf '@@size %s\\n' "$sz"
-        head -c \(cap) \(qf) 2>/dev/null | base64 | tr -d '\\n'
+        if [ "$sz" -gt 0 ]; then
+        \(body)
+        fi
         fi
         """
-        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 20,
-                                            stdoutLimit: base64OutputLimit(cap))
-        return result.flatMap { parseRead(stripFraming($0), isImage: isImage, isPDF: isPDF, cap: cap) }
+    }
+
+    /// Lists an archive with python3 (zip and every tar), as
+    /// `size<TAB>modified<TAB>name` lines and an `@@total` line; without
+    /// python3, `unzip -l` or `tar -tvf` as they print it.
+    static func archiveListingScript(_ qf: String, zip: Bool) -> String {
+        let fallback = zip ? "unzip -l \(qf)" : "tar -tvf \(qf)"
+        return """
+        if command -v python3 >/dev/null 2>&1; then
+        python3 - \(qf) \(archiveEntryCap) <<'__AGENTMUX_PY__'
+        import sys, time, zipfile, tarfile
+        path, cap = sys.argv[1], int(sys.argv[2])
+        def clean(s): return s.replace("\\t", " ").replace("\\n", " ")
+        try:
+            if zipfile.is_zipfile(path):
+                infos = zipfile.ZipFile(path).infolist()
+                for i in infos[:cap]:
+                    print("%d\\t%04d-%02d-%02d %02d:%02d\\t%s" % ((i.file_size,) + i.date_time[:5] + (clean(i.filename),)))
+                print("@@total %d" % len(infos))
+            else:
+                count = 0
+                with tarfile.open(path, "r:*") as archive:
+                    for m in archive:
+                        count += 1
+                        if count > cap:
+                            break
+                        name = m.name + ("/" if m.isdir() else "")
+                        print("%d\\t%s\\t%s" % (m.size, time.strftime("%Y-%m-%d %H:%M", time.localtime(m.mtime)), clean(name)))
+                print("@@total %s" % (count if count <= cap else "more"))
+        except Exception as e:
+            print("@@err %s" % clean(str(e)))
+        __AGENTMUX_PY__
+        else
+        printf '@@raw\\n'; \(fallback) 2>&1 | head -n \(archiveEntryCap)
+        fi
+        """
     }
 
     public enum PathKind: Sendable, Equatable { case file, directory, missing }
@@ -408,7 +491,7 @@ public enum RemoteFileService {
         return .missing
     }
 
-    static func parseRead(_ output: String, isImage: Bool, isPDF: Bool = false, cap: Int) -> Result<RemoteFileContent, RemoteFailure> {
+    static func parseRead(_ output: String, format: PreviewFormat, cap: Int) -> Result<RemoteFileContent, RemoteFailure> {
         if output.split(separator: "\n").first == "@@dir" { return .success(.directory) }
         guard let newline = output.firstIndex(of: "\n") else {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "unreadable response"))
@@ -419,20 +502,48 @@ public enum RemoteFileService {
         }
         if size < 0 { return .failure(RemoteFailure(.remoteCommandFailed, detail: "not a readable file")) }
         if size == 0 { return .success(.empty) }
+        var body = output[output.index(after: newline)...]
+        if format == .archive { return parseArchive(body) }
 
-        let b64 = output[output.index(after: newline)...].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = Data(base64Encoded: b64) else {
+        let stream = body.hasPrefix("@@stream\n")
+        if stream { body = body.dropFirst("@@stream\n".count) }
+        guard var data = Data(base64Encoded: body.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "base64 decode failed"))
         }
-        if isPDF {
-            return size > cap ? .success(.tooLarge(byteCount: size)) : .success(.pdf(data))
+        switch format {
+        case .pdf: return .success(size > cap ? .tooLarge(byteCount: size) : .pdf(data))
+        case .image: return .success(size > cap ? .tooLarge(byteCount: size) : .image(data))
+        case .document: return .success(size > cap ? .tooLarge(byteCount: size) : .document(data))
+        case .text, .compressed, .archive: break
         }
-        if isImage {
-            return size > cap ? .success(.tooLarge(byteCount: size)) : .success(.image(data))
-        }
+        let truncated = stream ? data.count > cap : size > cap
+        if data.count > cap { data = data.prefix(cap) }
+        if stream, data.isEmpty { return .success(.empty) }
+        let total = stream ? nil : size
         // A NUL byte in the sample is the binary heuristic; otherwise decode
         // UTF-8 leniently so a byte-truncated tail doesn't fail the whole read.
-        if data.contains(0) { return .success(.binary(byteCount: size)) }
-        return .success(.text(String(decoding: data, as: UTF8.self), truncated: size > cap, byteCount: size))
+        if data.contains(0) { return .success(.binary(data.prefix(hexByteCap), byteCount: total)) }
+        return .success(.text(String(decoding: data, as: UTF8.self), truncated: truncated, byteCount: total))
+    }
+
+    static func parseArchive(_ output: Substring) -> Result<RemoteFileContent, RemoteFailure> {
+        if output.hasPrefix("@@raw\n") {
+            return .success(.text(String(output.dropFirst("@@raw\n".count)), truncated: false, byteCount: nil))
+        }
+        var entries: [ArchiveEntry] = []
+        var total: Int?
+        for line in output.split(separator: "\n") {
+            if line.hasPrefix("@@err ") {
+                return .failure(RemoteFailure(.remoteCommandFailed, detail: String(line.dropFirst("@@err ".count))))
+            }
+            if line.hasPrefix("@@total ") {
+                total = Int(line.dropFirst("@@total ".count))
+                continue
+            }
+            let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard fields.count == 3, let size = Int(fields[0]) else { continue }
+            entries.append(ArchiveEntry(name: String(fields[2]), size: size, modified: String(fields[1])))
+        }
+        return .success(.archive(entries, total: total))
     }
 }

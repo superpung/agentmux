@@ -1,13 +1,18 @@
 import AppKit
 import Foundation
 
-/// Lays a CSV / TSV file out as aligned columns for a preview text view: the
-/// first row as the header, each column on a tab stop as wide as its widest
-/// cell, lines that never wrap. Quoted fields may hold separators, doubled
-/// quotes and line breaks. Safe off the main thread.
+/// Lays a CSV / TSV file (or a sheet, or an archive listing) out as aligned
+/// columns for a preview text view: the first row as the header, each column
+/// on a tab stop as wide as its widest cell, lines that never wrap. Quoted
+/// fields may hold separators, doubled quotes and line breaks. Safe off the
+/// main thread.
 enum DelimitedTextRenderer {
     static func render(_ text: String, separator: Character) -> NSAttributedString {
-        let rows = parse(text, separator: separator)
+        render(rows: parse(text, separator: separator))
+    }
+
+    /// Rows as aligned columns, the first as the header.
+    static func render(rows: [[String]]) -> NSAttributedString {
         let font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
         let bold = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
         let gap: CGFloat = 16
