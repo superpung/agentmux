@@ -188,11 +188,16 @@ public enum InventoryProbe {
               # the last real turn AND any continuation pointer (the awk stops at
               # the first turn from the end, so idle/non-continued files cost the
               # same as before), hopping to the live successor so active/usage/
-              # model are not read from the stale file. Timestamps/ids only.
-              rts=""; re=""; hop=0
+              # model are not read from the stale file. When the last turn is an
+              # API error, it also reads on (at most 400 turns) to the last tool
+              # result before it: whether that moved since the previous error
+              # tells a continue that got work done from one that failed again.
+              # Timestamps/ids and record types only.
+              rts=""; re=""; pts=""; hop=0
               while [ -f "$lf" ] && [ "$hop" -lt 10 ]; do
-                chain=$(tac "$lf" 2>/dev/null | jq -rc 'if .type=="continued-in" then "C "+(.continuedInSessionId // "") elif (.type=="assistant" or .type=="user") then "T "+(.timestamp // "")+" "+(if .isApiErrorMessage then (.error // "unknown")+","+(.quotaLimits.status // "-")+","+((.quotaLimits.resetsAt // "-")|tostring)+","+(.quotaLimits.rateLimitType // "-") else "-" end) else empty end' 2>/dev/null | awk '/^C /{c=$2} /^T /{print "T "$2" "$3; print "C "c; exit}')
+                chain=$(tac "$lf" 2>/dev/null | jq -rc 'if .type=="continued-in" then "C "+(.continuedInSessionId // "") elif (.type=="assistant" or .type=="user") then "T "+(.timestamp // "")+" "+(if .isApiErrorMessage then (.error // "unknown")+","+(.quotaLimits.status // "-")+","+((.quotaLimits.resetsAt // "-")|tostring)+","+(.quotaLimits.rateLimitType // "-") else "-" end)+" "+(if .type=="user" and (.message.content|type)=="array" and any(.message.content[]; .type? == "tool_result") then "R" else "-" end) else empty end' 2>/dev/null | awk '/^C /{if(t=="")c=$2; next} /^T /{if(t==""){t=$2" "$3; if($3=="-")exit; next} if($4=="R"){p=$2; exit} if(++n>400)exit} END{if(t!=""){print "T "t; print "C "c; if(p!="")print "P "p}}')
                 rts=$(echo "$chain" | sed -n 's/^T //p' | cut -d' ' -f1)
+                pts=$(echo "$chain" | sed -n 's/^P //p')
                 cerr=$(echo "$chain" | sed -n 's/^T //p' | cut -d' ' -f2)
                 re=$(date -d "$rts" +%s 2>/dev/null)
                 { [ -n "$re" ] && [ $(( $(date +%s) - re )) -lt 3600 ]; } && break
@@ -213,7 +218,8 @@ public enum InventoryProbe {
               # The last real turn record is an API error (written once Claude's
               # own retries are spent), so the turn stopped on it. Only the
               # error code and quota fields are read, never the message.
-              case "$cerr" in ""|-) ;; *) [ -n "$clpane" ] && echo "@@fault $clpane claude $(printf '%s' "$cerr" | tr ',' ' ') ${re:--}" ;; esac
+              pe=""; [ -n "$pts" ] && pe=$(date -d "$pts" +%s 2>/dev/null)
+              case "$cerr" in ""|-) ;; *) [ -n "$clpane" ] && echo "@@fault $clpane claude $(printf '%s' "$cerr" | tr ',' ' ') ${re:--} ${pe:--}" ;; esac
               [ -n "$clpane" ] && [ -n "$re" ] && echo "@@active $clpane $(( $(date +%s) - re ))"
               # Context size = the last assistant turn's prompt (input + cached +
               # cache-creation tokens), from a bounded tail. Numbers only.
@@ -349,13 +355,20 @@ public enum InventoryProbe {
               # Reconnecting after a dropped stream, in its status line.
               printf '%s\\n' "$ccap" | tail -n 12 | grep -qE '\(codexRetryPattern)' && echo "@@retrying $cpane"
               cf=$(printf '%s\\n' "$ccap" | awk '/^[[:space:]]*• /{e=""} /^[[:space:]]*■ /{e=$0} END{print e}')
+              # The last tool output before it stopped (timestamp only), as
+              # for Claude, from a bounded tail of the rollout.
+              cpe=""; cpt=""
+              case "$cf" in ""|*[Ii]nterrupted*) ;; *)
+                [ -n "$crf" ] && cpt=$(tail -n 3000 "$crf" 2>/dev/null | jq -r 'select(.type=="response_item" and (.payload.type=="function_call_output" or .payload.type=="custom_tool_call_output")) | .timestamp // empty' 2>/dev/null | tail -n 1)
+                [ -n "$cpt" ] && cpe=$(date -d "$cpt" +%s 2>/dev/null) ;;
+              esac
               case "$cf" in
                 "") ;;
                 *[Ii]nterrupted*) ;;
-                *"usage limit"*|*"hit your"*) echo "@@fault $cpane codex usage_limit - - - -" ;;
-                *'"status":429'*|*'"status": 429'*|*" 429 "*) echo "@@fault $cpane codex error - - - -" ;;
-                *"context window"*|*context_length*|*[Uu]nauthorized*|*invalid_request*|*"Bad Request"*|*'"status":40'*|*'"status": 40'*) echo "@@fault $cpane codex fatal - - - -" ;;
-                *) echo "@@fault $cpane codex error - - - -" ;;
+                *"usage limit"*|*"hit your"*) echo "@@fault $cpane codex usage_limit - - - - ${cpe:--}" ;;
+                *'"status":429'*|*'"status": 429'*|*" 429 "*) echo "@@fault $cpane codex error - - - - ${cpe:--}" ;;
+                *"context window"*|*context_length*|*[Uu]nauthorized*|*invalid_request*|*"Bad Request"*|*'"status":40'*|*'"status": 40'*) echo "@@fault $cpane codex fatal - - - - ${cpe:--}" ;;
+                *) echo "@@fault $cpane codex error - - - - ${cpe:--}" ;;
               esac
             fi
           fi

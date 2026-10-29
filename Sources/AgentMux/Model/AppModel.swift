@@ -1022,7 +1022,7 @@ final class AppModel {
         for (paneID, now) in new {
             guard let before = old[paneID], before != now else { continue }
             if before == .working, now == .idle, faults[paneID] == nil {
-                nudgeAttempts["\(state.id)/\(paneID)"] = nil
+                continueTries.reset("\(state.id)/\(paneID)")
                 post(.finished, state, paneID)
             } else if !before.needsAttention, now.needsAttention {
                 post(.needsInput, state, paneID)
@@ -1117,9 +1117,9 @@ final class AppModel {
     }
 
     private(set) var pendingNudges: [PaneRef: PendingNudge] = [:]
-    /// Tries so far per "<target>/<pane>", reset by a turn that finishes
-    /// without a fault.
-    @ObservationIgnored private var nudgeAttempts: [String: Int] = [:]
+    /// Tries in a row per "<target>/<pane>": reset by a turn that finishes
+    /// without a fault, or by progress since the last try.
+    @ObservationIgnored private var continueTries = ContinueTries()
     /// A scheduled or in-flight try per agent; at most one at a time.
     @ObservationIgnored private var nudgeTasks: [PaneRef: Task<Void, Never>] = [:]
 
@@ -1148,11 +1148,11 @@ final class AppModel {
     private func scheduleNudge(_ state: TargetState, paneID: String, fault: AgentFault) -> String? {
         guard autoContinueEnabled, fault.isRetryable, state.target.access.allowsAttach else { return nil }
         let key = "\(state.id)/\(paneID)"
-        let attempt = (nudgeAttempts[key] ?? 0) + 1
+        let attempt = continueTries.next(key, for: fault)
         let limit = autoContinueAttempts
         guard attempt <= limit else {
             if attempt == limit + 1 {
-                nudgeAttempts[key] = attempt
+                continueTries.record(key, count: attempt, for: fault)
                 post(.gaveUp, state, paneID, detail: "Stopped after \(limit) \(limit == 1 ? "try" : "tries")")
             }
             state.faultTracker.abandon(paneID)
@@ -1219,7 +1219,7 @@ final class AppModel {
         if result != .success(.busy) { nudgeTasks[ref] = nil }
         switch result {
         case .success(.sent):
-            nudgeAttempts["\(state.id)/\(paneID)"] = attempt
+            continueTries.record("\(state.id)/\(paneID)", count: attempt, for: fault)
             state.faultTracker.noteNudge(paneID, at: Date())
             post(.autoContinued, state, paneID, detail: "Sent “\(message)” · try \(attempt) of \(autoContinueAttempts)", banner: false)
             state.refreshRequested = true

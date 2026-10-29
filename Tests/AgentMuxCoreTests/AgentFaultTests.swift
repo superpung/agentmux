@@ -50,8 +50,8 @@ import Testing
         @@tmux tmux 3.4
         @@server 1 2 /tmp/tmux-0/default
         @@section agents
-        @@fault %14 claude unknown - - - 1791690000
-        @@fault %6 codex error - - - -
+        @@fault %14 claude unknown - - - 1791690000 1791689990
+        @@fault %6 codex error - - - - -
         @@fault bad codex error - - - -
         @@end n0nce
         """
@@ -59,6 +59,55 @@ import Testing
         #expect(s.faults["%14"]?.code == "unknown")
         #expect(s.faults["%6"]?.kind == .error)
         #expect(s.faults.count == 2)
+    }
+
+    @Test func lastToolCallTimeParses() {
+        #expect(fault("claude unknown - - - 1793270956 1793270927")?.progressAt == 1_793_270_927)
+        #expect(fault("claude unknown - - - 1793270956 -")?.progressAt == nil)
+        #expect(fault("claude unknown - - - 1793270956")?.progressAt == nil)
+        #expect(fault("codex error - - - - 1793270100")?.progressAt == 1_793_270_100)
+    }
+
+    /// research-report (xp01, 2026-10-29): each "continue" got it working
+    /// again for 6, 26 and 7 minutes before the next connection error, but
+    /// a count that only a finished turn reset ran out on the fourth error.
+    /// Real error and last-tool-result times, from the replayed probe.
+    @Test func progressBetweenErrorsStartsTheCountOver() {
+        let errors = [(1_793_268_189, 1_793_268_077), (1_793_268_586, 1_793_268_541),
+                      (1_793_270_215, 1_793_270_199), (1_793_270_956, 1_793_270_927)]
+        var tries = ContinueTries()
+        var numbers: [Int] = []
+        for (at, progress) in errors {
+            let fault = AgentFault(kind: .error, code: "unknown", occurredAt: at, isRetryable: true, progressAt: progress)
+            let next = tries.next("xp01/%51", for: fault)
+            numbers.append(next)
+            tries.record("xp01/%51", count: next, for: fault)
+        }
+        #expect(numbers == [1, 1, 1, 1])
+    }
+
+    @Test func failingAgainWithoutProgressCountsInARow() {
+        var tries = ContinueTries()
+        var numbers: [Int] = []
+        for at in 0..<4 {
+            // The same last tool call each time: the continue got nowhere.
+            let fault = AgentFault(kind: .error, occurredAt: 1000 + at * 60, isRetryable: true, progressAt: 900)
+            let next = tries.next("t/%1", for: fault)
+            numbers.append(next)
+            tries.record("t/%1", count: next, for: fault)
+        }
+        #expect(numbers == [1, 2, 3, 4])
+        // No tool call known on either side counts in a row too.
+        var plain = ContinueTries()
+        plain.record("t/%2", count: 1, for: AgentFault(kind: .error, isRetryable: true))
+        #expect(plain.next("t/%2", for: AgentFault(kind: .error, isRetryable: true, progressAt: 900)) == 2)
+        #expect(plain.next("t/%2", for: AgentFault(kind: .error, isRetryable: true)) == 2)
+        // Once the agent gets work done again (the user stepped in), tries resume.
+        #expect(tries.next("t/%1", for: AgentFault(kind: .error, isRetryable: true, progressAt: 2000)) == 1)
+        // A turn that ends without a fault starts over as well.
+        tries.record("t/%1", count: 3, for: AgentFault(kind: .error, isRetryable: true, progressAt: 2000))
+        tries.reset("t/%1")
+        #expect(tries.next("t/%1", for: AgentFault(kind: .error, isRetryable: true, progressAt: 2000)) == 1)
     }
 
     @Test func trackerReportsEachOccurrenceOnce() throws {

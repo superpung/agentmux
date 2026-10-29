@@ -24,40 +24,47 @@ public struct AgentFault: Sendable, Hashable {
     /// a server error or a transient rate limit, but not a usage limit, an
     /// auth or billing problem, or a request the API rejects outright.
     public var isRetryable: Bool
+    /// When the agent's last tool call before it stopped completed, in epoch
+    /// seconds (the agent's own clock), if it made one. Whether this moved
+    /// on since the previous fault tells progress from failing again.
+    public var progressAt: Int?
 
     public init(kind: Kind, code: String? = nil, resetsAt: Int? = nil, limitWindow: String? = nil,
-                occurredAt: Int? = nil, isRetryable: Bool) {
+                occurredAt: Int? = nil, isRetryable: Bool, progressAt: Int? = nil) {
         self.kind = kind
         self.code = code
         self.resetsAt = resetsAt
         self.limitWindow = limitWindow
         self.occurredAt = occurredAt
         self.isRetryable = isRetryable
+        self.progressAt = progressAt
     }
 
     /// Claude error codes that a later attempt can get past.
     static let retryableClaudeCodes: Set<String> = ["server_error", "unknown", "rate_limit", "overloaded_error", "api_error", "timeout"]
 
     /// Parses the probe's `@@fault` fields after the pane id:
-    /// `<agent> <code> <quota status> <resets at> <limit window> <epoch>`,
-    /// with `-` for unknown.
+    /// `<agent> <code> <quota status> <resets at> <limit window> <epoch>
+    /// <last tool call epoch>`, with `-` for unknown.
     public static func parse<S: Sequence>(_ fields: S) -> AgentFault? where S.Element == Substring {
         let f = fields.map { $0 == "-" ? nil : String($0) }
         guard f.count >= 2, let agent = f[0], let code = f[1] else { return nil }
         func field(_ i: Int) -> String? { i < f.count ? f[i] : nil }
+        let progressAt = field(6).flatMap(Int.init)
         switch agent {
         case "claude":
             if code == "rate_limit", field(2) == "rejected" {
                 return AgentFault(kind: .usageLimit, code: code, resetsAt: field(3).flatMap(Int.init),
-                                  limitWindow: field(4), occurredAt: field(5).flatMap(Int.init), isRetryable: false)
+                                  limitWindow: field(4), occurredAt: field(5).flatMap(Int.init), isRetryable: false,
+                                  progressAt: progressAt)
             }
             return AgentFault(kind: .error, code: code, occurredAt: field(5).flatMap(Int.init),
-                              isRetryable: retryableClaudeCodes.contains(code))
+                              isRetryable: retryableClaudeCodes.contains(code), progressAt: progressAt)
         case "codex":
             switch code {
-            case "usage_limit": return AgentFault(kind: .usageLimit, isRetryable: false)
-            case "fatal": return AgentFault(kind: .error, code: "fatal", isRetryable: false)
-            default: return AgentFault(kind: .error, isRetryable: true)
+            case "usage_limit": return AgentFault(kind: .usageLimit, isRetryable: false, progressAt: progressAt)
+            case "fatal": return AgentFault(kind: .error, code: "fatal", isRetryable: false, progressAt: progressAt)
+            default: return AgentFault(kind: .error, isRetryable: true, progressAt: progressAt)
             }
         default:
             return nil
@@ -159,5 +166,44 @@ public struct FaultTracker: Sendable {
     /// The fault `pane` shows now, if any.
     public func fault(_ pane: String) -> AgentFault? {
         spells[pane]?.fault
+    }
+}
+
+/// How many times in a row each agent has been asked to continue. A try
+/// counts toward the limit only while the agent gets nowhere: if a tool call
+/// completed after the fault the last try was for, the try worked, and the
+/// agent's next fault starts over at the first try. A turn that ends without
+/// a fault starts over too.
+public struct ContinueTries: Sendable {
+    private struct Record: Sendable {
+        var count: Int
+        /// The last tool call behind the fault this count is for.
+        var progressAt: Int?
+    }
+
+    private var records: [String: Record] = [:]
+
+    public init() {}
+
+    /// The number of the next try for `key`, stopped by `fault` (1 for the
+    /// first).
+    public mutating func next(_ key: String, for fault: AgentFault) -> Int {
+        // Both times known: a tool call the probe missed the last time
+        // (beyond its window) must not pass for progress.
+        if let before = records[key]?.progressAt, let now = fault.progressAt, now > before {
+            records[key] = nil
+        }
+        return (records[key]?.count ?? 0) + 1
+    }
+
+    /// `count` tries so far for `key`, the last one for `fault` (also the
+    /// count past the limit when the tries were given up).
+    public mutating func record(_ key: String, count: Int, for fault: AgentFault) {
+        records[key] = Record(count: count, progressAt: fault.progressAt)
+    }
+
+    /// The agent finished a turn without a fault.
+    public mutating func reset(_ key: String) {
+        records[key] = nil
     }
 }
