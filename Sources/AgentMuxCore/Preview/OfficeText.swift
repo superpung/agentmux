@@ -358,6 +358,34 @@ public struct Presentation: Sendable, Equatable {
     }
 }
 
+/// A PowerPoint deck as Quick Look should get it.
+public enum PresentationPackage {
+    /// The deck without its speaker notes pages, which a slide preview never
+    /// shows: macOS's own PowerPoint previewer never finishes some decks whose
+    /// first slide has a notes page (seen with a PowerPoint for Mac deck on
+    /// macOS 15.3; the same deck without them renders at once). Nil when the
+    /// deck has none, or does not read as a ZIP.
+    public static func withoutSpeakerNotes(_ data: Data) -> Data? {
+        guard let zip = ZipArchive(data), zip.orderedNames.contains(where: isNotesPage) else { return nil }
+        var writer = ZipWriter()
+        for name in zip.orderedNames where !isNotesPage(name) {
+            guard var contents = zip.file(name) else { return nil }
+            if name.hasSuffix(".rels") || name == "[Content_Types].xml" {
+                var xml = String(decoding: contents, as: UTF8.self)
+                xml.replace(#/<Relationship\b[^>]*Type="[^"]*/notesSlide"[^>]*/>/#, with: "")
+                xml.replace(#/<Override\b[^>]*PartName="/ppt/notesSlides/[^"]*"[^>]*/>/#, with: "")
+                contents = Data(xml.utf8)
+            }
+            writer.add(name, contents)
+        }
+        return writer.finish()
+    }
+
+    private static func isNotesPage(_ name: String) -> Bool {
+        name.hasPrefix("ppt/notesSlides/")
+    }
+}
+
 // MARK: - XML helpers
 
 /// The part of an element name after its namespace prefix.

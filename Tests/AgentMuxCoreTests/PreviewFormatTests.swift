@@ -3,6 +3,9 @@ import Testing
 @testable import AgentMuxCore
 
 @Suite struct PreviewFormatTests {
+    /// Two slides, the second with a speaker notes page.
+    static let pptx = Data(base64Encoded: "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")!
+
     @Test func formatsByName() {
         #expect(PreviewFormat.of("/a/report.docx") == .document(.word))
         #expect(PreviewFormat.of("/a/data.XLSX") == .document(.spreadsheet))
@@ -53,7 +56,7 @@ import Testing
     }
 
     @Test func presentationText() throws {
-        let deck = try #require(Presentation(pptx: Data(base64Encoded: "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")!))
+        let deck = try #require(Presentation(pptx: Self.pptx))
         #expect(deck.slides.count == 2)
         #expect(deck.slides[0].title == "Plan 计划")
         #expect(deck.slides[0].paragraphs == [.init(level: 0, text: "Goals"), .init(level: 1, text: "Ship it"),
@@ -140,5 +143,26 @@ import Testing
         #expect(try RemoteFileService.parseRead("@@size 9\n@@raw\nlisting\n", format: .archive, cap: 1).get()
             == .text("listing\n", truncated: false, byteCount: nil))
         #expect((try? RemoteFileService.parseRead("@@size 9\n@@err not an archive\n", format: .archive, cap: 1).get()) == nil)
+    }
+
+    @Test func speakerNotesAreLeftOutForQuickLook() throws {
+        let stripped = try #require(PresentationPackage.withoutSpeakerNotes(Self.pptx))
+        let before = try #require(ZipArchive(Self.pptx)), after = try #require(ZipArchive(stripped))
+        #expect(before.orderedNames.contains { $0.hasPrefix("ppt/notesSlides/") })
+        #expect(!after.orderedNames.contains { $0.hasPrefix("ppt/notesSlides/") })
+        #expect(after.file("ppt/slides/_rels/slide2.xml.rels").map { String(decoding: $0, as: UTF8.self).contains("notesSlide") } == false)
+        for name in after.orderedNames where !name.hasSuffix(".rels") {
+            #expect(after.file(name) == before.file(name))
+        }
+        let deck = try #require(Presentation(pptx: stripped))
+        #expect(deck.slides.map(\.title) == ["Plan 计划", "Second"])
+        #expect(deck.slides.allSatisfy { $0.notes.isEmpty })
+        // Nothing to take out: the deck is used as it is.
+        #expect(PresentationPackage.withoutSpeakerNotes(stripped) == nil)
+        #expect(PresentationPackage.withoutSpeakerNotes(Data("not a zip".utf8)) == nil)
+    }
+
+    @Test func crc32MatchesTheStandard() {
+        #expect(CRC32.checksum(Data("123456789".utf8)) == 0xCBF4_3926)
     }
 }

@@ -39,9 +39,13 @@ final class PreviewFile {
 }
 
 /// A document shown by Quick Look, as in Finder: Office and iWork files.
+/// A PowerPoint deck goes without its speaker notes pages, which the slides
+/// don't show and on which macOS's previewer can stall for good.
 struct QuickLookPreview: NSViewRepresentable {
     let data: Data
     let name: String
+
+    private static let decks: Set<String> = ["pptx", "pptm", "ppsx", "potx"]
 
     func makeNSView(context: Context) -> QLPreviewView {
         let view = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
@@ -56,7 +60,9 @@ struct QuickLookPreview: NSViewRepresentable {
         guard context.coordinator.data != data else { return }
         context.coordinator.data = data
         context.coordinator.file?.remove()
-        context.coordinator.file = PreviewFile(data, name: name)
+        let isDeck = Self.decks.contains((name as NSString).pathExtension.lowercased())
+        let copy = isDeck ? PresentationPackage.withoutSpeakerNotes(data) ?? data : data
+        context.coordinator.file = PreviewFile(copy, name: name)
         view.previewItem = context.coordinator.file?.url as NSURL?
     }
 

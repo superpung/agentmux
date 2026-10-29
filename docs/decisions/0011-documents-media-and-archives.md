@@ -43,6 +43,9 @@ The Files preview showed text, images, PDFs and SVGs. Everything else was "Binar
 ## Consequences
 
 - An Office page stays white in dark mode (Quick Look draws it); the Text form follows the appearance.
+- macOS's own PowerPoint previewer (Office.qlgenerator) never finished a real deck saved by PowerPoint for Mac whose first slide had a speaker notes page. It used no CPU, showed only the file icon, and Apple's `qlmanage` stalled on it too. Bisecting the package ruled out the notes' text, the notes master, the slides, fonts, images, theme and ZIP layout. Notes on any other slide alone were fine, and other decks with notes on slide one previewed. Slides never show notes, so the copy handed to Quick Look leaves out every notes page (`PresentationPackage.withoutSpeakerNotes`, written uncompressed by `ZipWriter`). That deck then renders at once. The Text form still lists the notes.
+- A Quick Look preview is closed once, when SwiftUI removes it, not also with its window. Closing it twice failed Quick Look's assertion and aborted the app.
+- There is no general fallback when Quick Look stalls on another file. A thumbnail request fails at once rather than stalling, so it can't serve as a probe, and telling a drawn page from the icon needs Quick Look's private view classes. The Text form is one click away.
 - Files over 20 MB (most videos) show "Too large to preview".
 - Excel numbers show as stored, not in their display format (`0.30000000000000004`, no thousands separators); only dates are formatted.
 - Listing a large `.tar.gz` decompresses it on the remote up to the entry cap, within the read's timeout.
