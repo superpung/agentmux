@@ -27,6 +27,8 @@ public enum RemoteFileContent: Sendable, Equatable {
     case binary(byteCount: Int)
     case tooLarge(byteCount: Int)
     case empty
+    /// The path is a folder, not a file.
+    case directory
 }
 
 /// Read-only browsing and preview of files inside a target's container, over
@@ -51,7 +53,7 @@ public enum RemoteFileService {
     }
 
     /// Reads a file for preview: text (truncated past the cap), an image (under
-    /// the cap), or a marker for binary / too-large.
+    /// the cap), or a marker for binary / too-large / a folder.
     public static func read(
         _ path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
     ) async -> Result<RemoteFileContent, RemoteFailure> {
@@ -63,13 +65,27 @@ public enum RemoteFileService {
         let cap = (isImage || isPDF || ext == "svg") ? imageByteCap : textByteCap
         let qf = ShellQuote.command([path])
         let script = """
+        if [ -d \(qf) ]; then printf '@@dir\\n'; else
         sz=$(stat -c %s \(qf) 2>/dev/null || echo -1)
         printf '@@size %s\\n' "$sz"
         head -c \(cap) \(qf) 2>/dev/null | base64 | tr -d '\\n'
+        fi
         """
         let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 20,
                                             stdoutLimit: base64OutputLimit(cap))
         return result.flatMap { parseRead(stripFraming($0), isImage: isImage, isPDF: isPDF, cap: cap) }
+    }
+
+    public enum PathKind: Sendable, Equatable { case file, directory, missing }
+
+    /// Whether `path` is a folder, something else, or nothing. Read-only.
+    public static func kind(
+        of path: String, host: HostConfig, target: TargetConfig, options: SSHOptions = SSHOptions()
+    ) async -> Result<PathKind, RemoteFailure> {
+        let qf = ShellQuote.command([path])
+        let script = "if [ -d \(qf) ]; then printf '@@dir\\n'; elif [ -e \(qf) ]; then printf '@@file\\n'; else printf '@@missing\\n'; fi"
+        let result = await RemoteScript.run(script, host: host, target: target, options: options, timeoutSeconds: 15)
+        return result.map { parseKind(stripFraming($0)) }
     }
 
     /// The largest file the one-shot (non-chunked) download will transfer.
@@ -385,7 +401,15 @@ public enum RemoteFileService {
         }
     }
 
+    static func parseKind(_ output: String) -> PathKind {
+        let lines = output.split(separator: "\n")
+        if lines.contains("@@dir") { return .directory }
+        if lines.contains("@@file") { return .file }
+        return .missing
+    }
+
     static func parseRead(_ output: String, isImage: Bool, isPDF: Bool = false, cap: Int) -> Result<RemoteFileContent, RemoteFailure> {
+        if output.split(separator: "\n").first == "@@dir" { return .success(.directory) }
         guard let newline = output.firstIndex(of: "\n") else {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "unreadable response"))
         }

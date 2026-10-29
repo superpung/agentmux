@@ -29,23 +29,41 @@ struct FileBrowserWindow: View {
     }
 }
 
-/// Directory tree on the left, a wide resizable preview on the right.
+/// Directory tree on the left, a wide resizable preview on the right. Links
+/// in a preview open here: a file in the preview (its folder in the list), a
+/// folder in the list, a web page in the default browser. Back and Forward
+/// retrace the files shown.
 private struct FileBrowser: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     let spec: FilesWindowSpec
     let host: HostConfig
     let target: TargetConfig
     let deviceName: String
+    @State private var cwd: String
     @State private var selected: String?
+    @State private var history = BrowseHistory<String>()
+    /// Where in the next file to start: the `#name` of the link that opens it.
+    @State private var anchor: (path: String, name: String)?
+
+    init(spec: FilesWindowSpec, host: HostConfig, target: TargetConfig, deviceName: String) {
+        self.spec = spec
+        self.host = host
+        self.target = target
+        self.deviceName = deviceName
+        _cwd = State(initialValue: spec.root)
+    }
 
     private var root: String { spec.root }
 
     var body: some View {
         NavigationSplitView {
-            FileTree(host: host, target: target, root: root, selected: $selected)
+            FileTree(host: host, target: target, root: root, cwd: $cwd, selected: $selected) { show($0) }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 300, max: 480)
         } detail: {
-            FilePreviewView(host: host, target: target, path: selected)
+            FilePreviewView(host: host, target: target, path: selected,
+                            anchor: anchor.flatMap { $0.path == selected ? $0.name : nil },
+                            onLink: follow, onFolder: folderShown)
         }
         .background(PreviewFindRelay())
         .navigationTitle((root as NSString).lastPathComponent)
@@ -53,12 +71,102 @@ private struct FileBrowser: View {
         // folders apart.
         .navigationSubtitle([deviceName, selected.map { ($0 as NSString).lastPathComponent }]
             .compactMap { $0 }.joined(separator: " · "))
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button { goBack() } label: { Label("Back", systemImage: "chevron.left") }
+                    .help("Back")
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+                    .disabled(history.back.isEmpty)
+                Button { goForward() } label: { Label("Forward", systemImage: "chevron.right") }
+                    .help("Forward")
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+                    .disabled(history.forward.isEmpty)
+            }
+        }
         .onAppear { applyPreviewRequest() }
         .onChange(of: model.previewRequest) { _, _ in applyPreviewRequest() }
+        .onChange(of: selected) { _, path in reveal(path) }
     }
 
     private func applyPreviewRequest() {
-        if let req = model.previewRequest, req.spec == spec { selected = req.path }
+        if let req = model.previewRequest, req.spec == spec { show(req.path) }
+    }
+
+    // MARK: Navigation
+
+    /// Shows `path` in the preview, starting at `anchor` if given; Back
+    /// returns to the file shown before.
+    private func show(_ path: String, anchor name: String? = nil) {
+        anchor = name.map { (path, $0) }
+        guard path != selected else { return }
+        history.leave(selected)
+        selected = path
+    }
+
+    private func goBack() {
+        guard let path = history.goBack(from: selected) else { return }
+        anchor = nil
+        selected = path
+    }
+
+    private func goForward() {
+        guard let path = history.goForward(from: selected) else { return }
+        anchor = nil
+        selected = path
+    }
+
+    /// Lists the folder holding `path`, when it is inside this window's folder.
+    private func reveal(_ path: String?) {
+        guard let path else { return }
+        let folder = (path as NSString).deletingLastPathComponent
+        if folder != cwd, contains(folder) { cwd = folder }
+    }
+
+    /// Lists `folder` here, or in a Files window of its own when it is
+    /// outside this one's folder.
+    private func browse(_ folder: String) {
+        if contains(folder) {
+            cwd = folder
+        } else {
+            openWindow(value: FilesWindowSpec(targetID: spec.targetID, root: folder))
+        }
+    }
+
+    private func contains(_ path: String) -> Bool {
+        path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+    }
+
+    /// A link clicked in the preview.
+    private func follow(_ link: PreviewLink) {
+        switch link {
+        case let .web(url):
+            NSWorkspace.shared.open(url)
+        case let .file(path, name):
+            guard (path as NSString).pathExtension.isEmpty else { return show(path, anchor: name) }
+            // `docs` or `LICENSE`: only the remote knows which is a folder.
+            Task {
+                if case .success(.directory) = await RemoteFileService.kind(of: path, host: host, target: target) {
+                    browse(path)
+                } else {
+                    show(path, anchor: name)
+                }
+            }
+        case let .folder(path):
+            browse(path)
+        case .anchor:
+            break // The preview scrolls itself.
+        case .unsupported:
+            NSSound.beep()
+        }
+    }
+
+    /// The path shown turned out to be a folder: list it, and go back to
+    /// the file shown before.
+    private func folderShown(_ path: String) {
+        guard path == selected else { return }
+        browse(path)
+        anchor = nil
+        selected = history.retract()
     }
 }
 
@@ -108,9 +216,12 @@ private struct FileTree: View {
     let host: HostConfig
     let target: TargetConfig
     let root: String
+    /// The folder listed.
+    @Binding var cwd: String
     @Binding var selected: String?
+    /// Shows a file in the preview.
+    let open: (String) -> Void
 
-    @State private var cwd: String
     @State private var entries: [RemoteFileEntry] = []
     @State private var loading = false
     @State private var error: String?
@@ -128,14 +239,6 @@ private struct FileTree: View {
     @State private var dropTargeted = false
     /// The folder row a Finder drag hovers over (upload into that folder).
     @State private var dropFolder: String?
-
-    init(host: HostConfig, target: TargetConfig, root: String, selected: Binding<String?>) {
-        self.host = host
-        self.target = target
-        self.root = root
-        _selected = selected
-        _cwd = State(initialValue: root)
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -360,7 +463,7 @@ private struct FileTree: View {
             switch result {
             case .success(.done):
                 await load()
-                if !folder, directory == cwd { selected = path }
+                if !folder, directory == cwd { open(path) }
             case .success(.alreadyExists):
                 show(.failure(FileOperationFailure(title: "Couldn’t create “\(name)”", message: "“\(name)” already exists in this folder.")))
             case let .failure(f):
@@ -467,7 +570,7 @@ private struct FileTree: View {
             List {
                 ForEach(entries) { entry in
                     Button {
-                        if entry.isDirectory { cwd = entry.path } else { selected = entry.path }
+                        if entry.isDirectory { cwd = entry.path } else { open(entry.path) }
                     } label: {
                         HStack(spacing: 7) {
                             Image(systemName: entry.isDirectory ? "folder.fill" : icon(for: entry.name))
@@ -649,6 +752,11 @@ private struct FilePreviewView: View {
     let host: HostConfig
     let target: TargetConfig
     let path: String?
+    /// Where in the file to start, if it has that place.
+    let anchor: String?
+    let onLink: (PreviewLink) -> Void
+    /// The path is a folder.
+    let onFolder: (String) -> Void
 
     @State private var content: RemoteFileContent?
     @State private var loading = false
@@ -663,7 +771,8 @@ private struct FilePreviewView: View {
             } else if let error {
                 placeholder(error, "exclamationmark.triangle")
             } else if let content, let path {
-                PreviewPane(preview: FilePreview(path: path, content: content))
+                PreviewPane(preview: FilePreview(path: path, content: content), anchor: anchor)
+                    .environment(\.previewLinks, PreviewLinks(path: path, open: onLink))
             }
         }
         .task(id: path) { await load() }
@@ -684,6 +793,7 @@ private struct FilePreviewView: View {
         loading = true
         defer { loading = false }
         switch await RemoteFileService.read(path, host: host, target: target) {
+        case .success(.directory): onFolder(path)
         case let .success(c): content = c
         case let .failure(f): error = "\(f.kind.rawValue): \(f.detail)"
         }
@@ -693,6 +803,7 @@ private struct FilePreviewView: View {
 /// Renders a previewed file: highlighted text, an image, or a status message.
 private struct PreviewPane: View {
     let preview: FilePreview
+    let anchor: String?
 
     private var ext: String { (preview.path as NSString).pathExtension.lowercased() }
 
@@ -727,6 +838,8 @@ private struct PreviewPane: View {
             message("Too large to preview · \(sizeText(bytes))", "exclamationmark.magnifyingglass")
         case .empty:
             message("Empty file", "doc")
+        case .directory:
+            message("Folder", "folder")
         }
     }
 
@@ -736,17 +849,17 @@ private struct PreviewPane: View {
         switch ext {
         case "md", "markdown":
             SourceSwitch(source: text, language: "markdown") {
-                RenderedTextPreview(source: text, render: MarkdownRenderer.render)
+                RenderedTextPreview(source: text, anchor: anchor, render: MarkdownRenderer.render)
             }
         case "csv", "tsv":
             let separator: Character = ext == "csv" ? "," : "\t"
             SourceSwitch(source: text, language: "plaintext") {
-                RenderedTextPreview(source: text, wraps: false) { DelimitedTextRenderer.render($0, separator: separator) }
+                RenderedTextPreview(source: text, wraps: false, anchor: anchor) { DelimitedTextRenderer.render($0, separator: separator) }
             }
         case "svg":
             SourceSwitch(source: text, language: "xml") { SVGPreview(svg: text) }
         default:
-            CodePreview(text: text, language: CodeHighlighter.language(for: preview.path))
+            CodePreview(text: text, language: CodeHighlighter.language(for: preview.path), anchor: anchor)
         }
     }
 
@@ -767,6 +880,8 @@ private struct PreviewPane: View {
 private struct CodePreview: NSViewRepresentable {
     let text: String
     let language: String?
+    /// Lines to show first (`L12`, `L12-L20`), if any.
+    var anchor: String?
     @Environment(\.colorScheme) private var colorScheme
 
     fileprivate struct Key: Equatable {
@@ -785,7 +900,8 @@ private struct CodePreview: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         // Highlight again only for a new text or appearance, not on every update.
         let key = Key(text: text, language: language, dark: colorScheme == .dark)
-        guard context.coordinator.key != key, let tv = scroll.documentView as? NSTextView else { return }
+        guard context.coordinator.key != key, let tv = scroll.documentView as? PreviewTextView else { return }
+        let newText = context.coordinator.key?.text != text
         context.coordinator.key = key
         let highlighted = CodeHighlighter.shared.highlight(text, language: language)
         let styled = NSMutableAttributedString(attributedString: highlighted.string)
@@ -794,6 +910,9 @@ private struct CodePreview: NSViewRepresentable {
         styled.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: styled.length))
         tv.textStorage?.setAttributedString(styled)
         tv.backgroundColor = highlighted.background
+        if newText, let anchor {
+            Task { @MainActor in tv.scrollToAnchor(anchor) }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -897,10 +1016,12 @@ private struct SourceSwitch<Rendered: View>: View {
     }
 }
 
-/// Renders an SVG via WKWebView (JavaScript disabled, external navigation
-/// blocked). Suited to self-contained SVGs such as waveforms.
+/// Renders an SVG via WKWebView (JavaScript disabled, no navigation: a
+/// clicked link goes to the window). Suited to self-contained SVGs such as
+/// waveforms.
 private struct SVGPreview: NSViewRepresentable {
     let svg: String
+    @Environment(\.previewLinks) private var links
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -912,6 +1033,7 @@ private struct SVGPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ web: WKWebView, context: Context) {
+        context.coordinator.links = links
         guard context.coordinator.svg != svg else { return }
         context.coordinator.svg = svg
         context.coordinator.programmaticLoad = true
@@ -928,27 +1050,35 @@ private struct SVGPreview: NSViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         var svg: String?
         var programmaticLoad = false
+        var links: PreviewLinks?
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if programmaticLoad { programmaticLoad = false; decisionHandler(.allow) }
-            else { decisionHandler(.cancel) }
+            if programmaticLoad { programmaticLoad = false; decisionHandler(.allow); return }
+            decisionHandler(.cancel)
+            if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {
+                PreviewLinks.follow(PreviewLink.resolve(url.absoluteString, from: links?.path ?? "/"), with: links)
+            }
         }
     }
 }
 
-/// Renders a PDF with PDFKit, searchable with the system find bar.
+/// Renders a PDF with PDFKit, searchable with the system find bar. A link
+/// to a page in it scrolls there; any other goes to the window.
 private struct PDFPreview: NSViewRepresentable {
     let data: Data
+    @Environment(\.previewLinks) private var links
 
     func makeNSView(context: Context) -> FindablePDFView {
         let view = FindablePDFView()
         view.pdfView.autoScales = true
         view.pdfView.displayMode = .singlePageContinuous
         view.pdfView.backgroundColor = .clear
+        view.pdfView.delegate = context.coordinator
         return view
     }
 
     func updateNSView(_ view: FindablePDFView, context: Context) {
+        context.coordinator.links = links
         guard context.coordinator.data != data else { return }
         context.coordinator.data = data
         view.document = PDFDocument(data: data)
@@ -956,5 +1086,15 @@ private struct PDFPreview: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator { var data: Data? }
+    final class Coordinator: NSObject, PDFViewDelegate {
+        var data: Data?
+        var links: PreviewLinks?
+
+        func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
+            switch PreviewLink.resolve(url.absoluteString, from: links?.path ?? "/") {
+            case .anchor: break
+            case let link: PreviewLinks.follow(link, with: links)
+            }
+        }
+    }
 }

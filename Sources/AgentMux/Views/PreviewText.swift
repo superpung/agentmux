@@ -1,6 +1,43 @@
+import AgentMuxCore
 import AppKit
 import ObjectiveC
 import SwiftUI
+
+extension NSAttributedString.Key {
+    /// A place a link can lead to in a preview (`#name`): a heading's slug,
+    /// or an HTML anchor's name.
+    static let previewAnchor = NSAttributedString.Key("AgentMuxPreviewAnchor")
+}
+
+/// What a preview does with a clicked link: resolve it against the file shown
+/// and hand it to the window (open a file, a folder, a web page).
+struct PreviewLinks {
+    /// The previewed file, which relative links resolve against.
+    let path: String
+    let open: (PreviewLink) -> Void
+
+    /// Follows `link`; without a window to follow it, only a web page opens.
+    static func follow(_ link: PreviewLink, with links: PreviewLinks?) {
+        if let links {
+            links.open(link)
+        } else if case let .web(url) = link {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSSound.beep()
+        }
+    }
+}
+
+private struct PreviewLinksKey: EnvironmentKey {
+    static var defaultValue: PreviewLinks? { nil }
+}
+
+extension EnvironmentValues {
+    var previewLinks: PreviewLinks? {
+        get { self[PreviewLinksKey.self] }
+        set { self[PreviewLinksKey.self] = newValue }
+    }
+}
 
 /// The text view behind every text preview (code, Markdown, tables): read-only,
 /// selectable, with the system find bar. TextKit 1, because rendered Markdown
@@ -39,28 +76,110 @@ final class PreviewTextView: NSTextView {
         scroll.documentView = tv
         return scroll
     }
+
+    /// Scrolls a place to the top and flashes it: a heading or an HTML
+    /// anchor (matched as written, then as GitHub would slug it), or lines
+    /// (`L12`, `L12-L20`). An empty name is the top. False when the text has
+    /// no such place.
+    @discardableResult
+    func scrollToAnchor(_ name: String) -> Bool {
+        guard let storage = textStorage else { return false }
+        guard !name.isEmpty else {
+            scroll(.zero)
+            return true
+        }
+        var anchors: [(name: String, range: NSRange)] = []
+        storage.enumerateAttribute(.previewAnchor, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if let value = value as? String { anchors.append((value, range)) }
+        }
+        let candidates = [name, name.lowercased(), PreviewLink.slug(name)]
+        if let range = candidates.lazy.compactMap({ c in anchors.first { $0.name == c }?.range }).first {
+            return scrollTo(range)
+        }
+        if let lines = PreviewLink.lines(name), let range = range(ofLines: lines) {
+            return scrollTo(range)
+        }
+        return false
+    }
+
+    /// The characters of `lines` (first line 1), as far as the text goes.
+    private func range(ofLines lines: ClosedRange<Int>) -> NSRange? {
+        let string = self.string as NSString
+        var line = 1, start = 0
+        var first: Int?
+        while start < string.length {
+            let range = string.lineRange(for: NSRange(location: start, length: 0))
+            if line == lines.lowerBound { first = range.location }
+            if line == lines.upperBound || NSMaxRange(range) >= string.length {
+                return first.map { NSRange(location: $0, length: NSMaxRange(range) - $0) }
+            }
+            line += 1
+            start = NSMaxRange(range)
+        }
+        return nil
+    }
+
+    private func scrollTo(_ range: NSRange) -> Bool {
+        guard let storage = textStorage, let layoutManager, let textContainer,
+              let clip = enclosingScrollView?.contentView else { return false }
+        // Lay out everything above it, so the position is exact, and a
+        // screenful below, so a place near the end scrolls as far as it can.
+        let below = min(storage.length, NSMaxRange(range) + 20_000)
+        layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: below))
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        let top = NSPoint(x: clip.bounds.minX, y: max(0, rect.minY + textContainerOrigin.y - 8))
+        clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: top, size: clip.bounds.size)).origin)
+        enclosingScrollView?.reflectScrolledClipView(clip)
+        showFindIndicator(for: range)
+        return true
+    }
 }
 
-/// A finished attributed text in a preview text view.
+/// A finished attributed text in a preview text view. Its links follow the
+/// environment's `previewLinks`; a link to a place in the text scrolls there.
 struct TextPreview: NSViewRepresentable {
     let text: NSAttributedString
     var wraps = true
+    /// The place to show first (`#name` of a link that led here), if any.
+    var anchor: String?
 
     func makeNSView(context: Context) -> NSScrollView {
-        PreviewTextView.makeScrollView(wraps: wraps)
+        let scroll = PreviewTextView.makeScrollView(wraps: wraps)
+        (scroll.documentView as? NSTextView)?.delegate = context.coordinator
+        return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.links = context.environment.previewLinks
         // Only a new text resets the view (and its scroll position and find).
-        guard context.coordinator.text !== text, let tv = scroll.documentView as? NSTextView else { return }
+        guard context.coordinator.text !== text, let tv = scroll.documentView as? PreviewTextView else { return }
         context.coordinator.text = text
         tv.textStorage?.setAttributedString(text)
         tv.scroll(.zero)
+        if let anchor {
+            // Once the view has its size from this update's layout.
+            Task { @MainActor in tv.scrollToAnchor(anchor) }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator { var text: NSAttributedString? }
+    @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
+        var text: NSAttributedString?
+        var links: PreviewLinks?
+
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            guard let href = (link as? URL)?.absoluteString ?? link as? String else { return false }
+            switch PreviewLink.resolve(href, from: links?.path ?? "/") {
+            case let .anchor(name):
+                if (textView as? PreviewTextView)?.scrollToAnchor(name) != true { NSSound.beep() }
+            case let target:
+                PreviewLinks.follow(target, with: links)
+            }
+            return true
+        }
+    }
 }
 
 /// An attributed text built off the main thread (Markdown and tables can take
@@ -69,6 +188,7 @@ struct RenderedTextPreview: View {
     /// What the text is built from; a new source builds it again.
     let source: String
     var wraps = true
+    var anchor: String?
     let render: @Sendable (String) -> NSAttributedString
 
     @State private var rendered: Rendered?
@@ -81,7 +201,7 @@ struct RenderedTextPreview: View {
     var body: some View {
         Group {
             if let rendered, rendered.source == source {
-                TextPreview(text: rendered.text, wraps: wraps)
+                TextPreview(text: rendered.text, wraps: wraps, anchor: anchor)
             } else {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             }

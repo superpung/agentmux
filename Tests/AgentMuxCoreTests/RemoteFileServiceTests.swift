@@ -27,6 +27,17 @@ import Testing
         #expect(content == .text("hello world", truncated: false, byteCount: 11))
     }
 
+    @Test func readReportsAFolder() throws {
+        #expect(try RemoteFileService.parseRead("@@dir\n", isImage: false, cap: 1024).get() == .directory)
+    }
+
+    @Test func kindParsesEachMarker() {
+        #expect(RemoteFileService.parseKind("@@dir\n") == .directory)
+        #expect(RemoteFileService.parseKind("@@file\n") == .file)
+        #expect(RemoteFileService.parseKind("@@missing\n") == .missing)
+        #expect(RemoteFileService.parseKind("") == .missing)
+    }
+
     @Test func readFlagsTruncatedWhenSizeExceedsCap() throws {
         let out = "@@size 1000\n" + Data("abcd".utf8).base64EncodedString()
         let content = try RemoteFileService.parseRead(out, isImage: false, cap: 4).get()

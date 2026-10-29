@@ -116,6 +116,12 @@ docs/                  requirements, decision records, observed compatibility
   text view with the find bar; PDFs in `FindablePDFView`. `PreviewFindRelay`
   sits after the Files window in the responder chain and hands the Find menu
   to the preview while the file list has the keyboard. ADR 0009.
+- **Preview links.** `PreviewLink.resolve` (core, tested) turns a clicked
+  link into a web page, a place in the file, or a file or folder in the
+  container, relative to the file shown. Previews hand it to the window
+  through the `previewLinks` environment value; `FileBrowser` opens it and
+  keeps the Back / Forward history. Headings carry GitHub slugs in the
+  `.previewAnchor` attribute. ADR 0010.
 
 ## Compatibility and decisions
 
