@@ -1,7 +1,6 @@
 import AgentMuxCore
 import AppKit
 import Highlightr
-import MarkdownUI
 import PDFKit
 import SwiftUI
 import WebKit
@@ -48,6 +47,7 @@ private struct FileBrowser: View {
         } detail: {
             FilePreviewView(host: host, target: target, path: selected)
         }
+        .background(PreviewFindRelay())
         .navigationTitle((root as NSString).lastPathComponent)
         // Several Files windows can be open; the container tells same-named
         // folders apart.
@@ -699,12 +699,16 @@ private struct PreviewPane: View {
     var body: some View {
         switch preview.content {
         case let .text(text, truncated, bytes):
-            switch ext {
-            case "md", "markdown": MarkdownPreview(source: text)
-            case "csv": CSVPreview(text: text, separator: ",")
-            case "tsv": CSVPreview(text: text, separator: "\t")
-            case "svg": SVGPreview(svg: text)
-            default: codeText(text, truncated: truncated, bytes: bytes)
+            VStack(spacing: 0) {
+                if truncated {
+                    Label("Showing the first \(RemoteFileService.textByteCap / 1024) KB of \(sizeText(bytes))",
+                          systemImage: "scissors")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Theme.itemWash)
+                }
+                textPreview(text)
             }
         case let .image(data):
             ScrollView([.horizontal, .vertical]) {
@@ -726,16 +730,22 @@ private struct PreviewPane: View {
         }
     }
 
-    private func codeText(_ text: String, truncated: Bool, bytes: Int) -> some View {
-        VStack(spacing: 0) {
-            if truncated {
-                Label("Showing the first \(RemoteFileService.textByteCap / 1024) KB of \(sizeText(bytes))",
-                      systemImage: "scissors")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(Theme.itemWash)
+    /// Formats with a rendered form get a Rendered / Source switch; every text
+    /// view here, rendered or not, has the find bar.
+    @ViewBuilder private func textPreview(_ text: String) -> some View {
+        switch ext {
+        case "md", "markdown":
+            SourceSwitch(source: text, language: "markdown") {
+                RenderedTextPreview(source: text, render: MarkdownRenderer.render)
             }
+        case "csv", "tsv":
+            let separator: Character = ext == "csv" ? "," : "\t"
+            SourceSwitch(source: text, language: "plaintext") {
+                RenderedTextPreview(source: text, wraps: false) { DelimitedTextRenderer.render($0, separator: separator) }
+            }
+        case "svg":
+            SourceSwitch(source: text, language: "xml") { SVGPreview(svg: text) }
+        default:
             CodePreview(text: text, language: CodeHighlighter.language(for: preview.path))
         }
     }
@@ -753,40 +763,31 @@ private struct PreviewPane: View {
     }
 }
 
-/// A read-only, scrollable, syntax-highlighted text view.
+/// A read-only, syntax-highlighted text preview that wraps long lines.
 private struct CodePreview: NSViewRepresentable {
     let text: String
     let language: String?
+    @Environment(\.colorScheme) private var colorScheme
+
+    fileprivate struct Key: Equatable {
+        var text: String
+        var language: String?
+        var dark: Bool
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
-        scroll.hasHorizontalScroller = false
-        scroll.hasVerticalScroller = true
-        if let tv = scroll.documentView as? NSTextView {
-            tv.isEditable = false
-            tv.isSelectable = true
-            tv.isRichText = true
-            tv.usesFindBar = true
-            tv.isIncrementalSearchingEnabled = true
-            tv.textContainerInset = NSSize(width: 8, height: 8)
-            // Soft-wrap long lines to the (narrow) panel width so nothing runs
-            // off the right edge; the inspector is too narrow for horizontal
-            // scrolling to be readable.
-            tv.isHorizontallyResizable = false
-            tv.isVerticallyResizable = true
-            tv.autoresizingMask = [.width]
-            tv.textContainer?.widthTracksTextView = true
-            tv.textContainer?.lineBreakMode = .byCharWrapping
-            tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        }
+        let scroll = PreviewTextView.makeScrollView(wraps: true)
+        // Wrap anywhere, so even a long URL or key stays inside the panel.
+        (scroll.documentView as? NSTextView)?.textContainer?.lineBreakMode = .byCharWrapping
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let tv = scroll.documentView as? NSTextView else { return }
+        // Highlight again only for a new text or appearance, not on every update.
+        let key = Key(text: text, language: language, dark: colorScheme == .dark)
+        guard context.coordinator.key != key, let tv = scroll.documentView as? NSTextView else { return }
+        context.coordinator.key = key
         let highlighted = CodeHighlighter.shared.highlight(text, language: language)
-        // Force char-level wrapping across the whole text (keeps the highlight
-        // colours) so even a long URL / key wraps instead of overflowing.
         let styled = NSMutableAttributedString(attributedString: highlighted.string)
         let para = NSMutableParagraphStyle()
         para.lineBreakMode = .byCharWrapping
@@ -794,6 +795,10 @@ private struct CodePreview: NSViewRepresentable {
         tv.textStorage?.setAttributedString(styled)
         tv.backgroundColor = highlighted.background
     }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator { fileprivate var key: Key? }
 }
 
 /// A shared, main-actor wrapper over Highlightr with light/dark themes.
@@ -867,62 +872,27 @@ final class CodeHighlighter {
 
 // MARK: - Rich-format previews
 
-/// Markdown with a Rendered / Source toggle (rendered via swift-markdown-ui).
-private struct MarkdownPreview: View {
+/// A format shown rendered, with a switch to its source (Markdown, CSV, SVG).
+private struct SourceSwitch<Rendered: View>: View {
     let source: String
-    @State private var rendered = true
+    let language: String
+    @ViewBuilder let rendered: () -> Rendered
+    @State private var showsSource = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $rendered) {
-                Text("Rendered").tag(true)
-                Text("Source").tag(false)
+            Picker("", selection: $showsSource) {
+                Text("Rendered").tag(false)
+                Text("Source").tag(true)
             }
             .pickerStyle(.segmented).labelsHidden()
             .padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
-            if rendered {
-                ScrollView {
-                    Markdown(source)
-                        .textSelection(.enabled)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            if showsSource {
+                CodePreview(text: source, language: language)
             } else {
-                CodePreview(text: source, language: "markdown")
+                rendered()
             }
-        }
-    }
-}
-
-/// A CSV / TSV table (first row as header). Basic split — no quoted-field CSV.
-private struct CSVPreview: View {
-    let text: String
-    let separator: Character
-
-    private var rows: [[String]] {
-        text.split(separator: "\n", omittingEmptySubsequences: true).prefix(1000).map {
-            $0.split(separator: separator, omittingEmptySubsequences: false).map(String.init)
-        }
-    }
-
-    var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 3) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                    GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                            Text(cell)
-                                .font(.system(size: 11.5, design: .monospaced))
-                                .fontWeight(index == 0 ? .semibold : .regular)
-                                .foregroundStyle(index == 0 ? Theme.text : Theme.textSecondary)
-                                .lineLimit(1).fixedSize()
-                        }
-                    }
-                    if index == 0 { Divider() }
-                }
-            }
-            .padding(10)
         }
     }
 }

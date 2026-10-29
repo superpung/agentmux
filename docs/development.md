@@ -110,6 +110,12 @@ docs/                  requirements, decision records, observed compatibility
   no attached terminal had input in the last 30 s, and the input line holds no
   undimmed text. AgentMux's own control-mode mirrors do not update tmux's
   `client_activity`, so the app checks their last input itself.
+- **File previews.** Code, rendered Markdown (`MarkdownRenderer`, Foundation's
+  parser into paragraph styles and NSTextBlocks) and CSV/TSV
+  (`DelimitedTextRenderer`) all show in `PreviewTextView`, a read-only TextKit 1
+  text view with the find bar; PDFs in `FindablePDFView`. `PreviewFindRelay`
+  sits after the Files window in the responder chain and hands the Find menu
+  to the preview while the file list has the keyboard. ADR 0009.
 
 ## Compatibility and decisions
 

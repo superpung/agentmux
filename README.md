@@ -50,7 +50,7 @@ What makes it different:
 - 🔁 **Auto-continue.** Optionally sends `continue` to an agent stopped by a connection or server error, after a visible wait you can cancel, and never over your typing or an unsent draft. See [Notifications and auto-continue](#notifications-and-auto-continue).
 - 🔔 **Notification inbox.** Finished, needs you, usage limit, stopped on an error, auto-continued: each goes to a list behind the toolbar bell with unread state, filters and clear, a Dock badge, and a desktop banner when you are not already looking at that agent.
 - 🔬 **Resource inspector.** Per-agent CPU, memory and uptime, git working-tree status (branch, diff, ahead/behind), and host load, memory, disk and GPU.
-- 📁 **Files.** Browse the remote working directory with rich previews (syntax-highlighted code, Markdown, CSV/TSV, SVG, PDF, images). Drag files in from Finder to upload or out to Finder to download, and create, rename or delete files and folders.
+- 📁 **Files.** Browse the remote working directory with rich previews (syntax-highlighted code, Markdown, CSV/TSV, SVG, PDF, images). Markdown, CSV/TSV and SVG switch between rendered and source; ⌘F finds in every text and PDF preview, also while the file list has the keyboard. Drag files in from Finder to upload or out to Finder to download, and create, rename or delete files and folders.
 - 🧩 **tmux management.** Create or kill sessions, windows and panes, plus a throwaway shell with ⌘T.
 - 📍 **Menu-bar extra.** Agent counts, urgency, live CPU and memory, and jump to any agent without opening the main window.
 - 🔒 **Privacy-first.** Auto-refresh is read-only and structural, never conversation content, tokens, or credentials.
