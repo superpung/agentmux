@@ -491,7 +491,7 @@ struct PoppedTerminalWindow: View {
 
     var body: some View {
         ZStack {
-            GhosttyRuntime.terminalBackgroundColor
+            GhosttyRuntime.terminalBackground(for: model.terminalTheme)
             if let terminal = model.terminal(for: ref) {
                 MirroredSurfaceView(terminal: terminal)
             } else {
@@ -513,7 +513,7 @@ struct EphemeralTerminalWindow: View {
 
     var body: some View {
         ZStack {
-            GhosttyRuntime.terminalBackgroundColor
+            GhosttyRuntime.terminalBackground(for: model.terminalTheme)
             if let terminal = model.ephemeralTerminal(for: spec) {
                 EphemeralSurfaceView(terminal: terminal)
             } else {

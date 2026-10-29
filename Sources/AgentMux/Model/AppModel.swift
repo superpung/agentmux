@@ -221,6 +221,7 @@ final class AppModel {
     /// controller. All surfaces use the same scheme, so switching never flips it.
     func applyTerminalTheme() {
         for terminal in terminals.values { terminal.applyTheme(terminalTheme) }
+        for terminal in ephemeralTerminals.values { terminal.applyTheme(terminalTheme) }
         GhosttyRuntime.applyColorScheme(for: terminalTheme)
     }
 
@@ -1483,6 +1484,7 @@ final class AppModel {
         guard let state = state(spec.targetID),
               let terminal = try? EphemeralTerminal(host: state.host, target: state.target)
         else { return nil }
+        terminal.applyTheme(terminalTheme)
         ephemeralTerminals[spec.id] = terminal
         return terminal
     }

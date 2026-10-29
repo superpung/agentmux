@@ -29,6 +29,11 @@ final class EphemeralTerminal {
     private(set) var phase: Phase = .live
     @ObservationIgnored private let session: InMemoryTerminalSession
     @ObservationIgnored private var pty: PTYProcess?
+    /// The terminal theme, as for the agent mirrors. Every surface shares one
+    /// color scheme, so a surface left on the system appearance would flip all
+    /// of them when it appears.
+    @ObservationIgnored private var themePreference: TerminalThemePreference = .system
+    @ObservationIgnored private weak var surfaceView: PasteInterceptingTerminalView?
 
     init(host: HostConfig, target: TargetConfig) throws {
         let destination = try SSHDestination(host.sshDestination)
@@ -48,11 +53,13 @@ final class EphemeralTerminal {
         self.pty = pty
         self.session = session
 
-        state.makePlatformView = {
+        state.makePlatformView = { [weak self] in
             let view = PasteInterceptingTerminalView(frame: .zero)
             // No tmux here, so paste and Shift+Enter go straight to the pty.
             view.onPaste = { text in pty.write(Data(text.utf8)); return true }
             view.onShiftEnter = { pty.write(Data([0x0a])) }
+            view.appearance = self?.themePreference.appearance
+            self?.surfaceView = view
             return view
         }
         var options = TerminalSurfaceOptions(backend: .inMemory(session))
@@ -72,6 +79,12 @@ final class EphemeralTerminal {
         case .live: "Terminal · not in tmux, ends when closed"
         case let .ended(reason): "Ended: \(reason) · input disabled"
         }
+    }
+
+    /// Pins the palette, live and for a surface not created yet.
+    func applyTheme(_ preference: TerminalThemePreference) {
+        themePreference = preference
+        surfaceView?.appearance = preference.appearance
     }
 
     func setActive(_ active: Bool) {
