@@ -44,7 +44,12 @@ struct QuickLookPreview: NSViewRepresentable {
     let name: String
 
     func makeNSView(context: Context) -> QLPreviewView {
-        QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
+        let view = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
+        // Closed once, when SwiftUI removes it. Left to close with its window
+        // as well, closing the Files window closed it first, and the second
+        // close failed Quick Look's assertion and aborted the app.
+        view.shouldCloseWithWindow = false
+        return view
     }
 
     func updateNSView(_ view: QLPreviewView, context: Context) {
