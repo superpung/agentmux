@@ -45,6 +45,8 @@ private struct FileBrowser: View {
     /// Where in the next file to start: the `#name` of the link that opens it.
     @State private var anchor: (path: String, name: String)?
     @State private var opener = RemoteOpener()
+    @State private var watcher = FileWatcher()
+    @State private var onScreen = false
 
     init(spec: FilesWindowSpec, host: HostConfig, target: TargetConfig, deviceName: String) {
         self.spec = spec
@@ -58,14 +60,23 @@ private struct FileBrowser: View {
 
     var body: some View {
         NavigationSplitView {
-            FileTree(host: host, target: target, root: root, cwd: $cwd, selected: $selected, opener: opener) { show($0) }
+            FileTree(host: host, target: target, root: root, cwd: $cwd, selected: $selected, opener: opener,
+                     refresh: watcher.folderVersion) { show($0) }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 300, max: 480)
         } detail: {
-            FilePreviewView(host: host, target: target, path: selected,
+            FilePreviewView(host: host, target: target, path: selected, version: watcher.fileVersion,
                             anchor: anchor.flatMap { $0.path == selected ? $0.name : nil },
                             onLink: follow, onFolder: folderShown)
         }
         .background(PreviewFindRelay())
+        .background(WindowVisibility(visible: $onScreen))
+        // While the window is on screen, changes to the file shown and the
+        // folder listed load by themselves.
+        .task(id: WatchedPaths(file: selected, folder: cwd, onScreen: onScreen)) {
+            guard onScreen else { return watcher.stop() }
+            await watcher.watch(file: selected, folder: cwd, host: host, target: target)
+        }
+        .onDisappear { watcher.stop() }
         .navigationTitle((root as NSString).lastPathComponent)
         // Several Files windows can be open; the container tells same-named
         // folders apart.
@@ -177,6 +188,13 @@ private struct FileBrowser: View {
     }
 }
 
+/// What a Files window watches for changes, and whether it is on screen.
+private struct WatchedPaths: Hashable {
+    var file: String?
+    var folder: String
+    var onScreen: Bool
+}
+
 private struct FilePreview: Equatable {
     var path: String
     var content: RemoteFileContent
@@ -228,6 +246,8 @@ private struct FileTree: View {
     @Binding var selected: String?
     /// Opens files in Mac apps.
     let opener: RemoteOpener
+    /// Bumped when the folder changed remotely: list it again.
+    let refresh: Int
     /// Shows a file in the preview.
     let open: (String) -> Void
 
@@ -266,7 +286,7 @@ private struct FileTree: View {
                     }
                 }
         }
-        .task(id: cwd) { await load() }
+        .task(id: FolderLoad(folder: cwd, refresh: refresh)) { await load() }
         .onAppear { connectDragOut() }
         .onChange(of: host) { connectDragOut() }
         .onChange(of: target) { connectDragOut() }
@@ -774,11 +794,23 @@ private struct NameSheet: View {
     }
 }
 
+private struct FolderLoad: Hashable {
+    var folder: String
+    var refresh: Int
+}
+
+private struct FileLoad: Hashable {
+    var path: String?
+    var version: Int
+}
+
 /// Loads and shows the preview for one selected file path (right pane).
 private struct FilePreviewView: View {
     let host: HostConfig
     let target: TargetConfig
     let path: String?
+    /// Bumped when the file changed remotely: read it again, in place.
+    let version: Int
     /// Where in the file to start, if it has that place.
     let anchor: String?
     let onLink: (PreviewLink) -> Void
@@ -786,6 +818,8 @@ private struct FilePreviewView: View {
     let onFolder: (String) -> Void
 
     @State private var content: RemoteFileContent?
+    /// The path `content` is from.
+    @State private var shown: String?
     @State private var loading = false
     @State private var error: String?
 
@@ -803,7 +837,7 @@ private struct FilePreviewView: View {
                     .environment(\.previewImages, PreviewImages.remote(document: path, host: host, target: target))
             }
         }
-        .task(id: path) { await load() }
+        .task(id: FileLoad(path: path, version: version)) { await load() }
     }
 
     private func placeholder(_ text: String, _ icon: String) -> some View {
@@ -814,16 +848,23 @@ private struct FilePreviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding()
     }
 
+    /// Reads the file. Read again after a remote change, the file stays on
+    /// screen meanwhile and is replaced only if it differs; a failed reread
+    /// keeps what is shown.
     private func load() async {
-        content = nil
-        error = nil
+        let again = path != nil && path == shown && content != nil
+        if !again {
+            content = nil
+            error = nil
+            shown = path
+        }
         guard let path else { return }
-        loading = true
+        if !again { loading = true }
         defer { loading = false }
         switch await RemoteFileService.read(path, host: host, target: target) {
-        case .success(.directory): onFolder(path)
-        case let .success(c): content = c
-        case let .failure(f): error = "\(f.kind.rawValue): \(f.detail)"
+        case .success(.directory): if !again { onFolder(path) }
+        case let .success(c): if c != content { content = c }
+        case let .failure(f): if !again { error = "\(f.kind.rawValue): \(f.detail)" }
         }
     }
 }

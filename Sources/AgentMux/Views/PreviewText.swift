@@ -154,13 +154,23 @@ struct TextPreview: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.links = context.environment.previewLinks
         // Only a new text resets the view (and its scroll position and find).
+        // A newer version of the same file (it changed remotely) keeps the
+        // reader's place and the pictures already fetched.
         guard context.coordinator.text !== text, let tv = scroll.documentView as? PreviewTextView else { return }
+        let document = context.environment.previewLinks?.path
+        let refresh = document != nil && context.coordinator.text != nil && context.coordinator.document == document
         context.coordinator.text = text
-        tv.textStorage?.setAttributedString(text)
-        tv.scroll(.zero)
-        if let anchor {
-            // Once the view has its size from this update's layout.
-            Task { @MainActor in tv.scrollToAnchor(anchor) }
+        context.coordinator.document = document
+        if refresh {
+            tv.replaceKeepingPlace(with: PreviewTextView.withImages(context.coordinator.images, in: text))
+        } else {
+            context.coordinator.images = [:]
+            tv.textStorage?.setAttributedString(text)
+            tv.scroll(.zero)
+            if let anchor {
+                // Once the view has its size from this update's layout.
+                Task { @MainActor in tv.scrollToAnchor(anchor) }
+            }
         }
         context.coordinator.fetchImages(for: tv, with: context.environment.previewImages)
     }
@@ -173,8 +183,12 @@ struct TextPreview: NSViewRepresentable {
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
         var text: NSAttributedString?
+        /// The file `text` is from.
+        var document: String?
         var links: PreviewLinks?
         var imageTask: Task<Void, Never>?
+        /// The pictures fetched for `document`, by source.
+        var images: [String: Data] = [:]
 
         /// Fetches the text's pictures and puts them in, unless another text
         /// has replaced it meanwhile.
@@ -184,7 +198,8 @@ struct TextPreview: NSViewRepresentable {
             guard let images, !sources.isEmpty, let text else { return }
             imageTask = Task { [weak self, weak tv] in
                 await images.fetch(sources) { batch in
-                    guard !Task.isCancelled, let tv, self?.text === text else { return }
+                    guard !Task.isCancelled, let tv, let self, self.text === text else { return }
+                    self.images.merge(batch) { _, new in new }
                     tv.placeImages(batch)
                 }
             }

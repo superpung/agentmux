@@ -8,6 +8,13 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Added
+
+- **Files follow remote changes.** While a Files window is on screen, the file
+  shown and the folder listed update by themselves within about a second of
+  changing remotely. A text preview keeps your place, and follows new lines
+  when you are at the end, as `tail -f`.
+
 ## [0.3.0] - 2026-10-30
 
 ### Added

@@ -130,6 +130,20 @@ public enum RemoteCommand {
         return ShellQuote.command(dockerExec(docker, interactiveTTY: true, environment: env) + command)
     }
 
+    /// Runs `script` with `sh -c` in the context, leaving its stdin to the
+    /// script's own input, for at most `lifetimeSeconds` where `timeout`
+    /// exists. No `docker inspect` first: a long-lived session needs no
+    /// identity line.
+    public static func longLived(_ script: String, in context: ExecutionContext, lifetimeSeconds: Int) -> String {
+        let runner = [
+            "sh", "-c",
+            "if command -v timeout >/dev/null 2>&1; then exec timeout \(lifetimeSeconds) sh -c \"$1\"; else exec sh -c \"$1\"; fi",
+            "sh", script,
+        ]
+        guard let docker = context.container else { return ShellQuote.command(runner) }
+        return ShellQuote.command(dockerExec(docker, interactiveTTY: false, environment: [:]) + runner)
+    }
+
     static func dockerExec(_ docker: DockerExec, interactiveTTY: Bool, environment: [String: String]) -> [String] {
         var argv = ["docker", "exec", interactiveTTY ? "-it" : "-i"]
         if let user = docker.user {

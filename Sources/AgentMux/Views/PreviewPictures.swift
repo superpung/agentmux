@@ -168,27 +168,44 @@ extension PreviewTextView {
     /// decoded keeps its placeholder.
     func placeImages(_ fetched: [String: Data]) {
         guard let storage = textStorage else { return }
+        let places = Self.places(for: fetched, in: storage)
+        guard !places.isEmpty else { return }
+        keepingTop(edits: places.map { ($0.range, 1) }) {
+            Self.apply(places, to: storage)
+        }
+    }
+
+    /// `text` with the pictures in `fetched` already in place, for a newer
+    /// version of a text whose pictures arrived before.
+    static func withImages(_ fetched: [String: Data], in text: NSAttributedString) -> NSAttributedString {
+        let copy = NSMutableAttributedString(attributedString: text)
+        apply(places(for: fetched, in: copy), to: copy)
+        return copy
+    }
+
+    private static func places(for fetched: [String: Data], in text: NSAttributedString) -> [(range: NSRange, attachment: NSTextAttachment)] {
         var decoded: [String: NSImage] = [:]
         var places: [(range: NSRange, attachment: NSTextAttachment)] = []
-        storage.enumerateAttribute(.previewImage, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+        text.enumerateAttribute(.previewImage, in: NSRange(location: 0, length: text.length)) { value, range, _ in
             guard let ref = value as? PreviewImageRef, let data = fetched[ref.source] else { return }
             if decoded[ref.source] == nil { decoded[ref.source] = NSImage(data: data) }
             guard let image = decoded[ref.source],
                   let attachment = PreviewImageAttachment.make(image, width: ref.width, height: ref.height) else { return }
             places.append((range, attachment))
         }
-        guard !places.isEmpty else { return }
-        keepingTop(edits: places.map { ($0.range, 1) }) {
-            storage.beginEditing()
-            for place in places.reversed() {
-                // The placeholder's paragraph style, font and link carry over.
-                var attributes = storage.attributes(at: place.range.location, effectiveRange: nil)
-                attributes[.previewImage] = nil
-                attributes[.attachment] = place.attachment
-                storage.replaceCharacters(in: place.range, with: NSAttributedString(string: "\u{FFFC}", attributes: attributes))
-            }
-            storage.endEditing()
+        return places
+    }
+
+    private static func apply(_ places: [(range: NSRange, attachment: NSTextAttachment)], to text: NSMutableAttributedString) {
+        text.beginEditing()
+        for place in places.reversed() {
+            // The placeholder's paragraph style, font and link carry over.
+            var attributes = text.attributes(at: place.range.location, effectiveRange: nil)
+            attributes[.previewImage] = nil
+            attributes[.attachment] = place.attachment
+            text.replaceCharacters(in: place.range, with: NSAttributedString(string: "\u{FFFC}", attributes: attributes))
         }
+        text.endEditing()
     }
 
     /// Runs `body`, which replaces `edits` (each range by text of a new
