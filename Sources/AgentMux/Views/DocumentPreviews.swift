@@ -268,7 +268,8 @@ struct WebPreview: NSViewRepresentable {
     @Environment(\.previewLinks) private var links
 
     /// Relative links resolve against the previewed path under this scheme,
-    /// which nothing serves.
+    /// which nothing serves. It must still be registered: WebKit loads
+    /// nothing at all, not even the page, under an unknown scheme.
     private static let scheme = "agentmux-preview"
     private static let policy = """
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' data:; img-src data:; font-src data:">
@@ -277,6 +278,7 @@ struct WebPreview: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
+        config.setURLSchemeHandler(ServesNothing(), forURLScheme: Self.scheme)
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         if transparent { web.setValue(false, forKey: "drawsBackground") }
@@ -298,6 +300,15 @@ struct WebPreview: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// Answers every request under the preview scheme with an error.
+    private final class ServesNothing: NSObject, WKURLSchemeHandler {
+        func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
+            task.didFailWithError(URLError(.fileDoesNotExist))
+        }
+
+        func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
+    }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var html: String?
