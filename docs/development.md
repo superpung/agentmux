@@ -141,22 +141,31 @@ docs/                  requirements, decision records, observed compatibility
 
 ## Releasing
 
-Releases are automated by `.github/workflows/release.yml`, triggered by pushing a
-`v*` tag:
+Versions follow [Semantic Versioning](https://semver.org). Before 1.0 a minor
+version (0.3.0) adds features and may change behavior; a patch version (0.3.1)
+only fixes. `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and is written for users: what changed for them, grouped as Added, Changed,
+Fixed, Removed and Security, not a list of commit subjects.
 
-```sh
-git tag v0.2.0
-git push origin v0.2.0
-```
+1. As user-facing changes land, add them under `## [Unreleased]` in
+   `CHANGELOG.md`. A fix to something not yet released needs no entry.
+2. To release `X.Y.Z`:
+   - In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`,
+     add a new empty `## [Unreleased]` above it, and update the compare links
+     at the bottom.
+   - Set the default `VERSION` in `scripts/bundle-app.sh` to `X.Y.Z` (it
+     versions local builds; the release build takes it from the tag).
+   - Commit both as `chore(release): vX.Y.Z`, then tag and push:
 
-The workflow installs the pinned Swift toolchain, builds the release app, zips
-it as `AgentMux-<version>-macos-arm64.zip`, generates release notes from the
-Conventional-Commits history with [git-cliff](https://git-cliff.org) (config in
-`cliff.toml`), and publishes a GitHub Release with the zip attached. Keep
-`CFBundleShortVersionString` in `scripts/bundle-app.sh` in step with the tag.
+     ```sh
+     git tag -a vX.Y.Z -m "AgentMux vX.Y.Z"
+     git push origin main vX.Y.Z
+     ```
 
-Regenerate the changelog locally with:
-
-```sh
-git-cliff -o CHANGELOG.md
-```
+`.github/workflows/release.yml` runs on the tag. It first checks that
+`scripts/bundle-app.sh` defaults to the tag's version and that `CHANGELOG.md`
+has an entry for it, and fails before building if not. It then installs the
+pinned Swift toolchain, builds the release app, zips it as
+`AgentMux-<version>-macos-arm64.zip`, and publishes a GitHub Release with the
+zip attached. The release notes are the version's `CHANGELOG.md` entry plus a
+link to the full commit comparison with the previous tag.

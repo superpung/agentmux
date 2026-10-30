@@ -1,7 +1,9 @@
 name: Release
 
 # Build the macOS app and publish a GitHub Release when a v* tag is pushed.
-#   git tag v0.2.0 && git push origin v0.2.0
+# The release notes are the version's entry in CHANGELOG.md; see "Releasing"
+# in docs/development.md.
+#   git tag -a v0.3.0 -m "AgentMux v0.3.0" && git push origin v0.3.0
 
 on:
   push:
@@ -24,11 +26,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # full history for the changelog
+          fetch-depth: 0 # full history and tags, for the previous release
 
       - name: Derive version
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # Before the long build: the bundle's default version and CHANGELOG.md
+      # must already be at this version.
+      - name: Check version and changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          grep -qF "AGENTMUX_VERSION:-$VERSION}" scripts/bundle-app.sh \
+            || { echo "::error::scripts/bundle-app.sh does not default to $VERSION"; exit 1; }
+          awk -v v="$VERSION" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
+            on { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          grep -q '[^[:space:]]' RELEASE_NOTES.md \
+            || { echo "::error::CHANGELOG.md has no entry for $VERSION"; exit 1; }
+          PREVIOUS=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          if [ -n "$PREVIOUS" ]; then
+            printf '\n**Full changelog**: https://github.com/%s/compare/%s...%s\n' \
+              "$GITHUB_REPOSITORY" "$PREVIOUS" "$GITHUB_REF_NAME" >> RELEASE_NOTES.md
+          fi
 
       - name: Install Swift ${{ env.SWIFT_VERSION }} toolchain
         run: |
@@ -50,15 +74,6 @@ jobs:
           ZIP="AgentMux-${{ steps.version.outputs.version }}-macos-arm64.zip"
           ditto -c -k --sequesterRsrc --keepParent build/AgentMux.app "$ZIP"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
-
-      - name: Generate release notes
-        uses: orhun/git-cliff-action@v4
-        id: cliff
-        with:
-          config: cliff.toml
-          args: --latest --strip header
-        env:
-          OUTPUT: RELEASE_NOTES.md
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
