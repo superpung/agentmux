@@ -6,7 +6,7 @@ set -eu
 CONFIG="${1:-debug}"
 # Marketing version baked into Info.plist; the release workflow sets this from
 # the git tag, dev builds get the default.
-VERSION="${AGENTMUX_VERSION:-0.1.0}"
+VERSION="${AGENTMUX_VERSION:-0.3.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 . scripts/env.sh
