@@ -44,6 +44,7 @@ private struct FileBrowser: View {
     @State private var history = BrowseHistory<String>()
     /// Where in the next file to start: the `#name` of the link that opens it.
     @State private var anchor: (path: String, name: String)?
+    @State private var opener = RemoteOpener()
 
     init(spec: FilesWindowSpec, host: HostConfig, target: TargetConfig, deviceName: String) {
         self.spec = spec
@@ -57,7 +58,7 @@ private struct FileBrowser: View {
 
     var body: some View {
         NavigationSplitView {
-            FileTree(host: host, target: target, root: root, cwd: $cwd, selected: $selected) { show($0) }
+            FileTree(host: host, target: target, root: root, cwd: $cwd, selected: $selected, opener: opener) { show($0) }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 300, max: 480)
         } detail: {
             FilePreviewView(host: host, target: target, path: selected,
@@ -80,6 +81,13 @@ private struct FileBrowser: View {
                     .help("Forward")
                     .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
                     .disabled(history.forward.isEmpty)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if let path = selected {
+                    OpenWithButton(path: path, busy: opener.opening.contains(path)) { app in
+                        opener.open(path, in: app, host: host, target: target)
+                    }
+                }
             }
         }
         .onAppear { applyPreviewRequest() }
@@ -218,6 +226,8 @@ private struct FileTree: View {
     /// The folder listed.
     @Binding var cwd: String
     @Binding var selected: String?
+    /// Opens files in Mac apps.
+    let opener: RemoteOpener
     /// Shows a file in the preview.
     let open: (String) -> Void
 
@@ -261,6 +271,11 @@ private struct FileTree: View {
         .onChange(of: host) { connectDragOut() }
         .onChange(of: target) { connectDragOut() }
         .onDisappear { dragOut.disconnect() }
+        .onChange(of: opener.failure) { _, failure in
+            guard let failure else { return }
+            opener.failure = nil
+            show(.failure(FileOperationFailure(title: "Couldn’t open “\(failure.name)”", message: failure.message)))
+        }
         .sheet(item: $namePrompt) { prompt in
             NameSheet(prompt: prompt, taken: Set(entries.map(\.name))) { name in commit(prompt, name: name) }
         }
@@ -579,7 +594,7 @@ private struct FileTree: View {
                             Spacer(minLength: 4)
                             if entry.isDirectory {
                                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-                            } else if downloading.contains(entry.path) {
+                            } else if downloading.contains(entry.path) || opener.opening.contains(entry.path) {
                                 ProgressView().controlSize(.mini)
                             } else {
                                 Text(sizeText(entry.size)).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
@@ -593,6 +608,8 @@ private struct FileTree: View {
                     .listRowBackground(rowBackground(entry))
                     .contextMenu {
                         if !entry.isDirectory {
+                            OpenWithItems(path: entry.path) { app in opener.open(entry.path, in: app, host: host, target: target) }
+                            Divider()
                             Button("Download…", systemImage: "arrow.down.circle") { download(entry) }
                         }
                         Button("Rename…", systemImage: "pencil") { namePrompt = .rename(entry) }
