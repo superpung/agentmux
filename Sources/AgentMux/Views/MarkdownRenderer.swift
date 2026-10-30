@@ -9,9 +9,11 @@ import Foundation
 /// rule, a tinted box, an NSTextTable), lists become indents. Raw HTML keeps
 /// its text, links, anchors and images without the other tags. An image the
 /// document holds (a `data:` URI, as a notebook's plots) shows itself; any
-/// other shows as its alt text, linked to the image file: a preview reads no
-/// file other than the one it shows. Headings carry GitHub's anchors, so `#name`
-/// links find them. Safe off the main thread.
+/// other shows as its alt text, linked to the image file, and marked
+/// `.previewImage` for the text view to fetch and put in (`PreviewPictures`).
+/// A badge (an image inside a link) is read as HTML, which Foundation's parser
+/// would drop. Headings carry GitHub's anchors, so `#name` links find them.
+/// Safe off the main thread.
 enum MarkdownRenderer {
     static func render(_ source: String) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(
@@ -19,7 +21,7 @@ enum MarkdownRenderer {
             interpretedSyntax: .full,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        guard let parsed = try? AttributedString(markdown: source, options: options) else {
+        guard let parsed = try? AttributedString(markdown: MarkdownSource.unnestingLinkedImages(source), options: options) else {
             return NSAttributedString(string: source, attributes: [.font: Style.body, .foregroundColor: NSColor.labelColor])
         }
         var builder = Builder()
@@ -372,10 +374,18 @@ enum MarkdownRenderer {
                 var text = run.text
                 if i.contains(.lineBreak) { text = "\u{2028}" }
                 if i.contains(.inlineHTML) {
-                    // One tag a run: links, anchors, images and <br> act, the rest drops.
-                    if let (tag, _) = HTMLTag.prefix(of: text[...]),
-                       let piece = html.apply(tag, font: base, color: color, lineBreak: "\u{2028}") {
-                        result.append(piece)
+                    // Links, anchors, images and <br> act, other tags drop. Tags
+                    // side by side (a badge's <a><img></a>) arrive as one run.
+                    var rest = text[...]
+                    while let open = rest.firstIndex(of: "<") {
+                        guard let (tag, end) = HTMLTag.prefix(of: rest[open...]) else {
+                            rest = rest[rest.index(after: open)...]
+                            continue
+                        }
+                        if let piece = html.apply(tag, font: base, color: color, lineBreak: "\u{2028}") {
+                            result.append(piece)
+                        }
+                        rest = rest[end...]
                     }
                     continue
                 }
@@ -443,13 +453,14 @@ enum MarkdownRenderer {
             return block
         }
 
-        /// An image as an icon and its alt text, leading to `link`.
         /// An image: itself when the document holds it (a `data:` URI, as a
         /// notebook's plots), else an icon and its alt text leading to `link`
-        /// or to the image file.
+        /// or to the image file, marked for the text view to fetch the image.
+        /// `width` and `height` are the size an `<img>` asks for.
         fileprivate static func image(_ alt: String, source: String, link: Any?,
-                                      attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
-            if let embedded = embeddedImage(source) {
+                                      attributes: [NSAttributedString.Key: Any],
+                                      width: CGFloat? = nil, height: CGFloat? = nil) -> NSAttributedString {
+            if let embedded = embeddedImage(source, width: width, height: height) {
                 let piece = NSMutableAttributedString(attributedString: embedded)
                 if let link { piece.addAttribute(.link, value: link, range: NSRange(location: 0, length: piece.length)) }
                 return piece
@@ -461,6 +472,10 @@ enum MarkdownRenderer {
             let piece = NSMutableAttributedString(attributedString: imageGlyph(font))
             piece.append(NSAttributedString(string: alt, attributes: attributes))
             if let target { piece.addAttribute(.link, value: target, range: NSRange(location: 0, length: piece.length)) }
+            if !source.isEmpty {
+                piece.addAttribute(.previewImage, value: PreviewImageRef(source: source, width: width, height: height),
+                                   range: NSRange(location: 0, length: piece.length))
+            }
             return piece
         }
 
@@ -470,21 +485,14 @@ enum MarkdownRenderer {
             source.lowercased().hasPrefix("data:") ? nil : source
         }
 
-        /// The widest an embedded image is shown, in points.
-        private static let imageWidth: CGFloat = 640
-
-        /// A base64 `data:image/...` URI as an inline image, scaled down to
-        /// `imageWidth`.
-        private static func embeddedImage(_ source: String) -> NSAttributedString? {
+        /// A base64 `data:image/...` URI as an inline image (`PreviewImageAttachment`).
+        private static func embeddedImage(_ source: String, width: CGFloat?, height: CGFloat?) -> NSAttributedString? {
             guard source.lowercased().hasPrefix("data:image/"), let comma = source.firstIndex(of: ","),
                   source[..<comma].lowercased().hasSuffix(";base64"),
                   let data = Data(base64Encoded: String(source[source.index(after: comma)...]).removingPercentEncoding ?? "",
                                   options: .ignoreUnknownCharacters),
-                  let image = NSImage(data: data), image.size.width > 0 else { return nil }
-            let scale = min(1, imageWidth / image.size.width)
-            let attachment = NSTextAttachment()
-            attachment.image = image
-            attachment.bounds = CGRect(x: 0, y: 0, width: image.size.width * scale, height: image.size.height * scale)
+                  let image = NSImage(data: data),
+                  let attachment = PreviewImageAttachment.make(image, width: width, height: height) else { return nil }
             return NSAttributedString(attachment: attachment)
         }
 
@@ -604,6 +612,14 @@ enum MarkdownRenderer {
             }
         }
 
+        /// A size attribute in pixels (`200`, `200px`); not a percentage.
+        func length(_ name: String) -> CGFloat? {
+            guard var value = attributes[name]?.trimmingCharacters(in: .whitespaces).lowercased() else { return nil }
+            if value.hasSuffix("px") { value.removeLast(2) }
+            guard let number = Double(value), number > 0 else { return nil }
+            return CGFloat(number)
+        }
+
         /// The tag `text` starts with, and where it ends.
         static func prefix(of text: Substring) -> (tag: HTMLTag, end: Substring.Index)? {
             guard let match = text.prefixMatch(of: #/<(/?)([A-Za-z][A-Za-z0-9-]*)((?:\s[^<>]*)?)/?>/#) else { return nil }
@@ -635,7 +651,8 @@ enum MarkdownRenderer {
                 let source = tag.attributes["src"] ?? ""
                 let alt = tag.attributes["alt"].flatMap { $0.isEmpty ? nil : $0 } ?? (source as NSString).lastPathComponent
                 return Builder.image(alt, source: source, link: link,
-                                     attributes: [.font: font, .foregroundColor: color])
+                                     attributes: [.font: font, .foregroundColor: color],
+                                     width: tag.length("width"), height: tag.length("height"))
             case "br":
                 return NSAttributedString(string: lineBreak, attributes: [.font: font])
             default:

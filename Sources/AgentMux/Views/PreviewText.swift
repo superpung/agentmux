@@ -138,6 +138,7 @@ final class PreviewTextView: NSTextView {
 
 /// A finished attributed text in a preview text view. Its links follow the
 /// environment's `previewLinks`; a link to a place in the text scrolls there.
+/// Its pictures still to fetch come through `previewImages`.
 struct TextPreview: NSViewRepresentable {
     let text: NSAttributedString
     var wraps = true
@@ -161,6 +162,11 @@ struct TextPreview: NSViewRepresentable {
             // Once the view has its size from this update's layout.
             Task { @MainActor in tv.scrollToAnchor(anchor) }
         }
+        context.coordinator.fetchImages(for: tv, with: context.environment.previewImages)
+    }
+
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        coordinator.imageTask?.cancel()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -168,6 +174,21 @@ struct TextPreview: NSViewRepresentable {
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
         var text: NSAttributedString?
         var links: PreviewLinks?
+        var imageTask: Task<Void, Never>?
+
+        /// Fetches the text's pictures and puts them in, unless another text
+        /// has replaced it meanwhile.
+        func fetchImages(for tv: PreviewTextView, with images: PreviewImages?) {
+            imageTask?.cancel()
+            let sources = tv.pendingImageSources
+            guard let images, !sources.isEmpty, let text else { return }
+            imageTask = Task { [weak self, weak tv] in
+                await images.fetch(sources) { batch in
+                    guard !Task.isCancelled, let tv, self?.text === text else { return }
+                    tv.placeImages(batch)
+                }
+            }
+        }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             guard let href = (link as? URL)?.absoluteString ?? link as? String else { return false }

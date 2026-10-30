@@ -800,6 +800,7 @@ private struct FilePreviewView: View {
             } else if let content, let path {
                 PreviewPane(preview: FilePreview(path: path, content: content), anchor: anchor)
                     .environment(\.previewLinks, PreviewLinks(path: path, open: onLink))
+                    .environment(\.previewImages, PreviewImages.remote(document: path, host: host, target: target))
             }
         }
         .task(id: path) { await load() }
@@ -902,7 +903,7 @@ private struct PreviewPane: View {
                 RenderedTextPreview(source: text, anchor: anchor) { DocumentText.rich(Data($0.utf8), type: .rtf) }
             }
         case "html", "htm", "xhtml":
-            SourceSwitch(source: text, language: "xml", findsInSource: true) { WebPreview(html: text) }
+            SourceSwitch(source: text, language: "xml", findsInSource: true) { WebPreviewWithImages(html: text) }
         case "svg":
             SourceSwitch(source: text, language: "xml", findsInSource: true) {
                 WebPreview(html: """

@@ -1,6 +1,6 @@
 # ADR 0009: Text Previews in a Text View, with Find
 
-Date: 2026-10-29. Status: accepted. Checked in a separate test app (not AgentMux, which mirrors live agents): with the file list focused, the Find menu reaches the preview and opens the find bar; Markdown and CSV render as intended in light and dark; a 200 KB Markdown file renders in ~0.3 s off the main thread and scrolls with every step under 9 ms.
+Date: 2026-10-29. Status: accepted; images superseded by ADR 0013. Checked in a separate test app (not AgentMux, which mirrors live agents): with the file list focused, the Find menu reaches the preview and opens the find bar; Markdown and CSV render as intended in light and dark; a 200 KB Markdown file renders in ~0.3 s off the main thread and scrolls with every step under 9 ms.
 
 ## Context
 

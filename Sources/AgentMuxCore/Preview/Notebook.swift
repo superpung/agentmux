@@ -3,7 +3,8 @@ import Foundation
 /// A Jupyter notebook (nbformat 4) as one Markdown document: Markdown cells
 /// as they are, code cells as fenced code, and each code cell's outputs in a
 /// quote under it (text as plain code, images inline as data URIs, errors
-/// without terminal colors).
+/// without terminal colors). Images pasted into a Markdown cell
+/// (`attachment:name`) become data URIs too.
 public enum Notebook {
     public static func markdown(_ json: String) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
@@ -17,7 +18,7 @@ public enum Notebook {
             let source = text(cell["source"])
             switch cell["cell_type"] as? String {
             case "markdown":
-                parts.append(source)
+                parts.append(withAttachments(source, cell["attachments"] as? [String: Any]))
             case "code":
                 parts.append(fenced(source, language: language))
                 let outputs = (cell["outputs"] as? [[String: Any]] ?? []).compactMap(output)
@@ -42,18 +43,40 @@ public enum Notebook {
             return fenced(stripANSI(traceback ?? summary), language: "")
         case "execute_result", "display_data":
             guard let data = output["data"] as? [String: Any] else { return nil }
-            for type in ["image/png", "image/jpeg", "image/gif"] {
-                if let image = data[type] {
-                    let base64 = text(image).filter { !$0.isWhitespace }
-                    return "![output](data:\(type);base64,\(base64))"
-                }
-            }
+            if let uri = imageURI(data) { return "![output](\(uri))" }
             if let markdown = data["text/markdown"] { return text(markdown) }
             if let plain = data["text/plain"] { return fenced(text(plain), language: "") }
             return nil
         default:
             return nil
         }
+    }
+
+    /// The first image in a MIME bundle as a data URI. nbformat keeps
+    /// bitmaps as base64 and SVG as text.
+    private static func imageURI(_ bundle: [String: Any]) -> String? {
+        for type in ["image/png", "image/jpeg", "image/gif", "image/svg+xml"] {
+            guard let image = bundle[type] else { continue }
+            let base64 = type == "image/svg+xml"
+                ? Data(text(image).utf8).base64EncodedString()
+                : text(image).filter { !$0.isWhitespace }
+            return "data:\(type);base64,\(base64)"
+        }
+        return nil
+    }
+
+    /// A Markdown cell with its pasted images (`attachment:name`) as data URIs.
+    private static func withAttachments(_ source: String, _ attachments: [String: Any]?) -> String {
+        guard let attachments, source.contains("attachment:") else { return source }
+        var out = source
+        for (name, bundle) in attachments {
+            guard let bundle = bundle as? [String: Any], let uri = imageURI(bundle) else { continue }
+            let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+            for form in Set([name, encoded]) {
+                out = out.replacingOccurrences(of: "attachment:\(form)", with: uri)
+            }
+        }
+        return out
     }
 
     /// nbformat stores text as a string or a list of lines.
