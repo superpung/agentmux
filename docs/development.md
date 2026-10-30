@@ -167,5 +167,6 @@ Fixed, Removed and Security, not a list of commit subjects.
 has an entry for it, and fails before building if not. It then installs the
 pinned Swift toolchain, builds the release app, zips it as
 `AgentMux-<version>-macos-arm64.zip`, and publishes a GitHub Release with the
-zip attached. The release notes are the version's `CHANGELOG.md` entry plus a
-link to the full commit comparison with the previous tag.
+zip attached. The release notes are the install steps, the version's
+`CHANGELOG.md` entry, and a link to the full commit comparison with the
+previous tag.

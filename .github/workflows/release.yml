@@ -42,12 +42,26 @@ jobs:
           grep -qF "AGENTMUX_VERSION:-$VERSION}" scripts/bundle-app.sh \
             || { echo "::error::scripts/bundle-app.sh does not default to $VERSION"; exit 1; }
           awk -v v="$VERSION" '
-            index($0, "## [" v "]") == 1 { on = 1; next }
+            index($0, "## [" v "]") == 1 { on = 1; print; next }
             on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
             on { print }
-          ' CHANGELOG.md > RELEASE_NOTES.md
-          grep -q '[^[:space:]]' RELEASE_NOTES.md \
+          ' CHANGELOG.md > ENTRY.md
+          [ "$(grep -c '[^[:space:]]' ENTRY.md)" -gt 1 ] \
             || { echo "::error::CHANGELOG.md has no entry for $VERSION"; exit 1; }
+          {
+            echo "## Install"
+            echo
+            echo "1. Download \`AgentMux-$VERSION-macos-arm64.zip\` below, unzip it, and move **AgentMux.app** to \`/Applications\`."
+            echo "2. The app is ad-hoc signed and not notarized. On first launch, right-click it and choose **Open**, or run:"
+            echo
+            echo "   \`\`\`sh"
+            echo "   xattr -dr com.apple.quarantine /Applications/AgentMux.app"
+            echo "   \`\`\`"
+            echo
+            echo "Requires an Apple Silicon Mac on macOS 14 or later."
+            echo
+            cat ENTRY.md
+          } > RELEASE_NOTES.md
           PREVIOUS=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
           if [ -n "$PREVIOUS" ]; then
             printf '\n**Full changelog**: https://github.com/%s/compare/%s...%s\n' \
