@@ -21,6 +21,8 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
+    @AppStorage(NotificationSound.needsYouKey) private var needsYouSound = NotificationSound.needsYouDefault
+    @AppStorage(NotificationSound.doneKey) private var doneSound = NotificationSound.doneDefault
     @AppStorage("autoContinueEnabled") private var autoContinueEnabled = false
     @AppStorage("autoContinueMessage") private var autoContinueMessage = "continue"
     @AppStorage("autoContinueAttempts") private var autoContinueAttempts = 3
@@ -34,10 +36,22 @@ private struct GeneralSettings: View {
         return families
     }
 
+    private func soundPicker(_ title: String, _ selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            Text("None").tag("")
+            Divider()
+            ForEach(NotificationSound.names, id: \.self) { Text($0).tag($0) }
+        }
+        .disabled(!notificationsEnabled)
+        .onChange(of: selection.wrappedValue) { _, name in NotificationSound.preview(name) }
+    }
+
     var body: some View {
         Form {
             Section {
                 Toggle("Show banners for new notifications", isOn: $notificationsEnabled)
+                soundPicker("Needs you sound", $needsYouSound)
+                soundPicker("Done sound", $doneSound)
             }
             Section {
                 Toggle("Continue agents stopped by an error", isOn: $autoContinueEnabled)

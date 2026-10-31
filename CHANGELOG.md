@@ -16,6 +16,9 @@ features and may change behavior; a patch version only fixes). Commits follow
   after those that need you, and the dashboard's list of them is now Active.
 - **Working time.** A working agent shows for how long it has been working,
   kept across restarts.
+- **Two notification sounds**, one for an agent that needs you (or stopped on
+  an error or a limit) and one for a finished turn, each picked from the Mac's
+  alert sounds or turned off in Settings.
 - **Files follow remote changes.** While a Files window is on screen, the file
   shown and the folder listed update by themselves within about a second of
   changing remotely. A text preview keeps your place, and follows new lines

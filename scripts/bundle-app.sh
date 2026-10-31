@@ -23,6 +23,11 @@ for bundle in "$BIN"/*.bundle; do
 done
 cp Resources/Icons/*.svg "$APP/Contents/Resources/"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# The Mac's alert sounds, for notifications (a notification can only play a
+# sound from its app's bundle). IMA4 keeps the 14 of them under 1 MB.
+for sound in /System/Library/Sounds/*.aiff; do
+  afconvert -f caff -d ima4 "$sound" "$APP/Contents/Resources/$(basename "$sound" .aiff).caf"
+done
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

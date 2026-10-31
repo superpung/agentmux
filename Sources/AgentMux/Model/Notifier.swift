@@ -1,5 +1,5 @@
 import AgentMuxCore
-import Foundation
+import AppKit
 import UserNotifications
 
 /// Posts the OS banner for an inbox item (the inbox keeps every item; a
@@ -28,7 +28,7 @@ final class Notifier {
         let content = UNMutableNotificationContent()
         content.title = item.kind.bannerTitle
         content.body = [item.agent, item.detail, item.place].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-        content.sound = .default
+        content.sound = NotificationSound.forKind(item.kind)
         content.userInfo = [Self.inboxIDKey: item.id.uuidString]
         let request = UNNotificationRequest(identifier: item.id.uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
@@ -52,5 +52,42 @@ extension InboxItem.Kind {
         case .autoContinued: "Agent continued after an error"
         case .gaveUp: "Auto-continue stopped"
         }
+    }
+}
+
+/// The two notification sounds, set in Settings: one for an agent that needs
+/// you (it also stopped on an error or a limit), one for a finished turn.
+/// The choices are the Mac's alert sounds, copied into the app's bundle.
+enum NotificationSound {
+    static let needsYouKey = "needsYouSound"
+    static let doneKey = "doneSound"
+    static let needsYouDefault = "Ping"
+    static let doneDefault = "Glass"
+
+    /// The bundled sounds by name, sorted.
+    static var names: [String] {
+        (Bundle.main.urls(forResourcesWithExtension: "caf", subdirectory: nil) ?? [])
+            .map { $0.deletingPathExtension().lastPathComponent }
+            .sorted()
+    }
+
+    /// The chosen sound's name for `kind`; "" is none.
+    static func name(for kind: InboxItem.Kind) -> String {
+        let finished = kind == .finished
+        let key = finished ? doneKey : needsYouKey
+        return UserDefaults.standard.string(forKey: key) ?? (finished ? doneDefault : needsYouDefault)
+    }
+
+    static func forKind(_ kind: InboxItem.Kind) -> UNNotificationSound? {
+        let name = name(for: kind)
+        if name.isEmpty { return nil }
+        guard Bundle.main.url(forResource: name, withExtension: "caf") != nil else { return .default }
+        return UNNotificationSound(named: UNNotificationSoundName("\(name).caf"))
+    }
+
+    /// Plays `name` once, as when it is picked in Settings.
+    @MainActor static func preview(_ name: String) {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "caf") else { return }
+        NSSound(contentsOf: url, byReference: true)?.play()
     }
 }
