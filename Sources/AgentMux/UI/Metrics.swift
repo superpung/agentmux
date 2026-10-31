@@ -13,13 +13,17 @@ struct StatusChip: View {
     var showsIdle = false
     /// Working, but waiting out an API retry: "Retrying", in the warning tint.
     var retrying = false
+    /// Finished while no one was looking: "Done", in green.
+    var done = false
 
     var body: some View {
-        // Only working / needs-input / needs-approval / exited earn a chip in a
-        // list; idle is shown only where `showsIdle` is set.
+        // Only working / needs-input / needs-approval / done / exited earn a
+        // chip in a list; idle is shown only where `showsIdle` is set.
         let retrying = retrying && activity == .working
-        if (showsIdle || activity != .idle), let label = retrying ? "Retrying" : Theme.activityLabel(activity) {
-            let tint = retrying ? Theme.warning : Theme.activityColor(activity)
+        let done = done && activity != .working && !activity.needsAttention
+        if (showsIdle || done || activity != .idle),
+           let label = retrying ? "Retrying" : done ? "Done" : Theme.activityLabel(activity) {
+            let tint = retrying ? Theme.warning : done ? Theme.done : Theme.activityColor(activity)
             HStack(spacing: 4) {
                 if activity == .working {
                     SpinnerView(color: tint).frame(width: 8, height: 8)

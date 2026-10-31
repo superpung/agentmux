@@ -34,7 +34,12 @@ final class Inbox {
     static let capacity = 500
 
     private(set) var items: [InboxItem] = []
+    /// Agents with an unread "finished" item: done while no one was looking.
+    private(set) var unreadFinished: Set<PaneRef> = []
     @ObservationIgnored private let url: URL?
+    /// Items from before done marks existed were never marked read by
+    /// looking at their agent, so they don't make one.
+    @ObservationIgnored private let doneMarksSince: Date
 
     var unreadCount: Int { items.lazy.filter { !$0.isRead }.count }
 
@@ -42,11 +47,19 @@ final class Inbox {
     /// nil keeps it in memory only.
     init(url: URL? = AppSettings.defaultURL().deletingLastPathComponent().appendingPathComponent("inbox.json")) {
         self.url = url
+        let key = "doneMarksSince"
+        if let since = UserDefaults.standard.object(forKey: key) as? Date {
+            doneMarksSince = since
+        } else {
+            doneMarksSince = Date()
+            UserDefaults.standard.set(doneMarksSince, forKey: key)
+        }
         if let url, let data = try? Data(contentsOf: url) {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             items = (try? decoder.decode([InboxItem].self, from: data)) ?? []
         }
+        refreshUnreadFinished()
         refreshBadge()
     }
 
@@ -72,6 +85,18 @@ final class Inbox {
         changed()
     }
 
+    /// Marks read the unread items that `include` picks, and returns their ids.
+    @discardableResult
+    func markRead(where include: (InboxItem) -> Bool) -> [UUID] {
+        var ids: [UUID] = []
+        for index in items.indices where !items[index].isRead && include(items[index]) {
+            items[index].isRead = true
+            ids.append(items[index].id)
+        }
+        if !ids.isEmpty { changed() }
+        return ids
+    }
+
     func remove(_ id: UUID) {
         items.removeAll { $0.id == id }
         changed()
@@ -89,7 +114,13 @@ final class Inbox {
 
     private func changed() {
         save()
+        refreshUnreadFinished()
         refreshBadge()
+    }
+
+    private func refreshUnreadFinished() {
+        let refs = Set(items.lazy.filter { !$0.isRead && $0.kind == .finished && $0.date >= self.doneMarksSince }.map(\.ref))
+        if refs != unreadFinished { unreadFinished = refs }
     }
 
     private func save() {

@@ -10,6 +10,12 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Added
 
+- **Done marks.** An agent that finished while you were not looking is marked
+  Done (a green check) until you look at it, in the sidebar, the dashboard and
+  the menu bar, which gets a Done section with Clear. Done agents sort right
+  after those that need you, and the dashboard's list of them is now Active.
+- **Working time.** A working agent shows for how long it has been working,
+  kept across restarts.
 - **Files follow remote changes.** While a Files window is on screen, the file
   shown and the folder listed update by themselves within about a second of
   changing remotely. A text preview keeps your place, and follows new lines
@@ -17,11 +23,20 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Changed
 
+- **Rows.** In the sidebar a row's time sits at its top right and its status
+  mark at its bottom right, as Mail sets a message's date. In the menu bar and
+  the dashboard the time comes last, in a fixed width, so times and chips line
+  up. An open view is a small gray dot on the agent's icon, where it was a
+  green dot beside the time.
+- Green in an agent's status means done only: the idle chip is gray.
 - **Hover and motion.** Buttons without a border (in Files, Sessions, the
   inbox, Settings, tiles, the status bar and the menu bar) show a rounded wash
   under the pointer; agent rows in the menu bar and the dashboard highlight;
   controls shown on hover wait a moment before coming and going. Status marks,
   chips, spinners, loading states and lists change with a short fade.
+- A notification banner is skipped only while its agent is in a window that is
+  on screen; being selected in a hidden or covered window no longer counts.
+  Looking at an agent marks its notifications read.
 
 ## [0.3.0] - 2026-10-30
 

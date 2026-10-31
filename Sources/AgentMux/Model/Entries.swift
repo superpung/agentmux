@@ -60,7 +60,17 @@ struct AgentEntry: Identifiable, Hashable {
     var fault: AgentFault?
     /// Working, but waiting out an API retry.
     var isRetrying = false
+    /// Finished while no one was looking, and not looked at since.
+    var isDone = false
+    /// Was done when it came on screen: it keeps a done agent's place in
+    /// lists until it leaves the screen.
+    var holdsDonePlace = false
+    /// When its activity last changed, as seen by the app (nil if unknown).
+    var since: Date?
     var id: PaneRef { ref }
+
+    /// Done, or keeping a done agent's place: where lists put it.
+    var ranksAsDone: Bool { isDone || holdsDonePlace }
 
     /// The config dir shown in place of the generic kind label, e.g.
     /// ".claude-2" or ".codex" — identifies which account an agent uses.
@@ -224,7 +234,10 @@ extension AppModel {
                     effort: snapshot.efforts[pane.id],
                     accountKey: snapshot.accounts[pane.id],
                     fault: state.faults[pane.id],
-                    isRetrying: activity == .working && snapshot.retrying.contains(pane.id)
+                    isRetrying: activity == .working && snapshot.retrying.contains(pane.id),
+                    isDone: state.faults[pane.id] == nil && isDone(ref, activity),
+                    holdsDonePlace: heldDone.contains(ref),
+                    since: activitySince[ref]
                 )
             }
         }

@@ -4,6 +4,8 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var windowID = UUID()
+    @State private var onScreen = false
 
     var body: some View {
         @Bindable var model = model
@@ -54,6 +56,12 @@ struct RootView: View {
         .onChange(of: model.previewRequest) { _, request in
             if let request { openWindow(value: request.spec) }
         }
+        // Agents shown here count as seen only while the window is on screen.
+        .background(WindowVisibility(visible: $onScreen))
+        .onChange(of: onScreen, initial: true) { _, visible in model.setMainWindow(windowID, visible: visible) }
+        .onDisappear { model.setMainWindow(windowID, visible: false) }
+        // The palette fades in over a lightly dimmed window and settles
+        // down from a slightly smaller size; it fades out on close.
         .overlay {
             if model.showCommandPalette {
                 CommandPalette(isPresented: paletteBinding)

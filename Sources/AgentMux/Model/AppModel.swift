@@ -69,6 +69,7 @@ final class AppModel {
     var selection: PaneRef? {
         didSet {
             guard selection != oldValue else { return }
+            heldDone = []
             if let selection, tiles.contains(selection) {} else {
                 tiles = []
                 isZoomed = false
@@ -183,6 +184,18 @@ final class AppModel {
     var notificationsEnabled: Bool {
         UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
     }
+
+    /// Main windows on screen, each by its own id.
+    @ObservationIgnored private var visibleMainWindows: Set<UUID> = []
+    /// Agents in their own window that is on screen.
+    @ObservationIgnored private var visiblePopouts: Set<PaneRef> = []
+    /// Agents that were done when they came on screen. They keep a done
+    /// agent's place in the sidebar until they leave it, so a row does not
+    /// move away as it is clicked.
+    private(set) var heldDone: Set<PaneRef> = []
+    /// When each agent's activity last changed, as seen by the app.
+    private(set) var activitySince: [PaneRef: Date] = [:]
+    @ObservationIgnored private var savedSince = SavedSince.load()
 
     /// User labels keyed by `AgentEntry.identityKey`, persisted.
     private(set) var pinnedAgents: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "pinnedAgents") ?? [])
@@ -902,6 +915,7 @@ final class AppModel {
             state.snapshot = snapshot
             state.detections = AgentDetector.detect(snapshot)
             let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
+            noteActivitySince(state, old: state.activities, new: newActivities)
             // A fault only describes an agent that is not busy: a working or
             // waiting agent has moved past it.
             let newFaults = snapshot.faults.filter { pane, _ in
@@ -1053,12 +1067,79 @@ final class AppModel {
     /// next to its error, so it arrives read too.
     private func post(_ kind: InboxItem.Kind, _ state: TargetState, _ paneID: String, detail: String? = nil, banner: Bool = true) {
         guard let ref = state.ref(for: paneID) else { return }
-        let viewed = visibleRefs.contains(ref) || poppedOut.contains(ref)
+        let viewed = isOnScreen(ref)
         let name = agentEntry(ref).map { customName($0.identityKey) ?? $0.title } ?? agentTitle(state, paneID: paneID)
         let item = InboxItem(kind: kind, ref: ref, agent: name, place: state.device.name, detail: detail,
                              isRead: viewed || kind == .autoContinued)
         inbox.add(item)
         if banner, !viewed, notificationsEnabled { notifier.notify(item) }
+    }
+
+    // MARK: Done and seen
+
+    /// Whether `ref` is in a window on screen: not minimized, hidden or
+    /// fully covered.
+    func isOnScreen(_ ref: PaneRef) -> Bool {
+        if poppedOut.contains(ref) { return visiblePopouts.contains(ref) }
+        return !visibleMainWindows.isEmpty && visibleRefs.contains(ref)
+    }
+
+    /// A main window went on or off screen.
+    func setMainWindow(_ id: UUID, visible: Bool) {
+        if visible { visibleMainWindows.insert(id) } else { visibleMainWindows.remove(id) }
+        markOnScreenSeen()
+    }
+
+    /// An agent's own window went on or off screen.
+    func setPopout(_ ref: PaneRef, visible: Bool) {
+        if visible, poppedOut.contains(ref) { visiblePopouts.insert(ref) } else { visiblePopouts.remove(ref) }
+        markOnScreenSeen()
+    }
+
+    /// Done while no one was looking, and not busy since.
+    func isDone(_ ref: PaneRef, _ activity: AgentActivity) -> Bool {
+        activity != .working && !activity.needsAttention && inbox.unreadFinished.contains(ref)
+    }
+
+    /// Agents on screen have been seen: their notifications are read and
+    /// their banners withdrawn.
+    private func markOnScreenSeen() {
+        let onScreen = Set(visibleRefs + poppedOut).filter(isOnScreen)
+        let done = onScreen.intersection(inbox.unreadFinished)
+        if !onScreen.isEmpty { notifier.withdraw(inbox.markRead { onScreen.contains($0.ref) }) }
+        let held = heldDone.intersection(onScreen).union(done)
+        if held != heldDone { heldDone = held }
+    }
+
+    /// Clears every agent's done mark without opening them.
+    func markAllDoneSeen() {
+        notifier.withdraw(inbox.markRead { $0.kind == .finished })
+    }
+
+    /// Stamps when each agent's activity changed. On a target's first
+    /// refresh there is nothing to compare with, so an agent keeps the stamp
+    /// the last run saved if it is still doing the same thing, and has none
+    /// otherwise.
+    private func noteActivitySince(_ state: TargetState, old: [String: AgentActivity], new: [String: AgentActivity]) {
+        let now = Date()
+        var current: [PaneRef: AgentActivity] = [:]
+        for (paneID, activity) in new {
+            guard let ref = state.ref(for: paneID) else { continue }
+            current[ref] = activity
+            if old.isEmpty {
+                activitySince[ref] = savedSince.date(ref, activity)
+            } else if old[paneID] != activity {
+                activitySince[ref] = now
+            }
+        }
+        for ref in activitySince.keys where ref.targetID == state.id && current[ref] == nil {
+            activitySince[ref] = nil
+        }
+        var stamps: [PaneRef: SavedSince.Stamp] = [:]
+        for (ref, activity) in current {
+            if let at = activitySince[ref] { stamps[ref] = SavedSince.Stamp(activity: activity.rawValue, at: at) }
+        }
+        savedSince.replace(target: state.id, with: stamps)
     }
 
     /// Opens the agent an inbox item is about (if it is still there) and
@@ -1388,6 +1469,7 @@ final class AppModel {
             terminal.setVisible(shown.contains(terminal.ref))
         }
         if let selection, !poppedOut.contains(selection) { terminals[selection]?.focus() }
+        markOnScreenSeen()
     }
 
     /// Closes mirrors beyond the cap, oldest first, never one on screen or
@@ -1417,6 +1499,7 @@ final class AppModel {
     /// The window closed: the mirror returns to the main detail pane.
     func returnFromWindow(_ ref: PaneRef) {
         poppedOut.remove(ref)
+        visiblePopouts.remove(ref)
         applyVisibility()
     }
 

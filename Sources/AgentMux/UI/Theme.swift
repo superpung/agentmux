@@ -32,6 +32,9 @@ enum Theme {
     static let accent = dynamic(hex(0xC65A3E), hex(0xE07D5E))
     static let working = Color(nsColor: .systemBlue)
     static let success = Color(nsColor: .systemGreen)
+    /// Finished while no one was looking. Green means only this in agent
+    /// status; idle is neutral.
+    static let done = success
     static let warning = Color(nsColor: .systemOrange)
     static let danger = Color(nsColor: .systemRed)
 
@@ -63,7 +66,7 @@ enum Theme {
         switch activity {
         case .working: working
         case .waitingInput, .waitingApproval: warning
-        case .idle: success
+        case .idle: textSecondary
         case .exited, .unknown: textGhost
         }
     }
@@ -90,44 +93,94 @@ enum Theme {
     }
 }
 
-/// Spinner while working, a mark when the agent needs you, nothing otherwise.
+/// Spinner while working, a mark when the agent needs you or finished
+/// unseen, nothing otherwise.
 struct AgentStatusGlyph: View {
     let activity: AgentActivity
     /// Why an idle agent stopped short, shown in place of nothing.
     var fault: AgentFault? = nil
     /// Working, but waiting out an API retry: the spinner turns the warning tint.
     var retrying = false
+    /// Finished while no one was looking.
+    var done = false
+    /// On a highlighted (accent) row: the mark in the row's text color, as
+    /// menus draw their icons there, since status colors don't read on it.
+    var plain = false
+
+    /// One box for every mark, so marks of different shapes line up. With
+    /// no mark there is no box.
+    static let width: CGFloat = 14
 
     var body: some View {
-        if activity != .working, !activity.needsAttention, let fault {
-            Image(systemName: fault.kind == .usageLimit ? "hourglass" : "exclamationmark.triangle.fill")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(fault.kind == .usageLimit ? Color(nsColor: .systemPurple) : Theme.danger)
-                .help(fault.summary)
-        } else {
-            activityGlyph
+        Group {
+            if activity != .working, !activity.needsAttention, let fault {
+                Image(systemName: fault.kind == .usageLimit ? "hourglass" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint(fault.kind == .usageLimit ? Color(nsColor: .systemPurple) : Theme.danger))
+                    .help(fault.summary)
+            } else {
+                activityGlyph
+            }
         }
+        .frame(width: Self.width, height: Self.width)
+        // One mark gives way to the next (a spinner to a check) with a fade.
+        .animation(Motion.quick, value: "\(activity)\(done)\(retrying)\(fault?.kind == nil)")
+    }
+
+    private func tint(_ color: some ShapeStyle) -> AnyShapeStyle {
+        plain ? AnyShapeStyle(.primary) : AnyShapeStyle(color)
     }
 
     @ViewBuilder private var activityGlyph: some View {
         switch activity {
         case .working:
             if retrying {
-                SpinnerView(color: Theme.warning)
+                SpinnerView(color: tint(Theme.warning))
                     .frame(width: 12, height: 12)
                     .help("Retrying")
             } else {
                 // Same weight as the adjacent last-active time (.tertiary).
-                SpinnerView(color: .tertiary)
+                SpinnerView(color: tint(.tertiary))
                     .frame(width: 12, height: 12)
             }
         case .waitingInput, .waitingApproval:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.warning)
+                .foregroundStyle(tint(Theme.warning))
         case .idle, .exited, .unknown:
-            EmptyView()
+            if done {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint(Theme.done))
+                    .help("Done")
+            }
         }
+    }
+}
+
+/// How long an agent has been working, or how long ago it was last active.
+struct ActivityTime: View {
+    let entry: AgentEntry
+    /// At the end of a one-line row after a status chip: room for the
+    /// widest time ("23h"), right-aligned, so the chips before it line up.
+    var fixedWidth = false
+
+    var body: some View {
+        Group {
+            if entry.activity == .working {
+                if let since = entry.since {
+                    TimelineView(.periodic(from: since, by: 60)) { context in
+                        Text(RelativeTime.elapsed(Int(context.date.timeIntervalSince(since))))
+                    }
+                }
+            } else if let active = RelativeTime.short(entry.lastActiveSeconds) {
+                Text(active)
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .monospacedDigit()
+        .frame(minWidth: fixedWidth ? 24 : nil, alignment: .trailing)
     }
 }
 

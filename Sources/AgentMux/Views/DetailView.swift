@@ -148,7 +148,7 @@ struct DetailView: View {
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         if let ref = model.selection, let agent = model.agentEntry(ref), agent.activity != .unknown {
             ToolbarItem(placement: .navigation) {
-                StatusChip(activity: agent.activity, showsIdle: true, retrying: agent.isRetrying)
+                StatusChip(activity: agent.activity, showsIdle: true, retrying: agent.isRetrying, done: agent.isDone)
             }
         }
         if let ref = model.selection, let terminal = model.terminal(for: ref) {
@@ -497,6 +497,7 @@ private struct TileHeader: View {
 struct PoppedTerminalWindow: View {
     @Environment(AppModel.self) private var model
     let ref: PaneRef
+    @State private var onScreen = false
 
     var body: some View {
         ZStack {
@@ -509,6 +510,8 @@ struct PoppedTerminalWindow: View {
             }
         }
         .navigationTitle(model.agentEntry(ref)?.title ?? "Agent")
+        .background(WindowVisibility(visible: $onScreen))
+        .onChange(of: onScreen) { _, visible in model.setPopout(ref, visible: visible) }
         .onAppear { model.terminal(for: ref)?.setActive(true) }
         .onDisappear { model.returnFromWindow(ref) }
     }

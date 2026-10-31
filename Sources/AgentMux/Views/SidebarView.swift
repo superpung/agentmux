@@ -34,7 +34,7 @@ enum GroupBy: String, CaseIterable, Identifiable {
         case .container: return e.device.id
         case .project: return "\(e.space.targetID)\n\(e.space.path)"
         case .session: return "\(e.space.targetID)\n\(e.session)"
-        case .status: return SidebarView.statusBucket(e.activity).id
+        case .status: return SidebarView.statusBucket(e).id
         }
     }
 
@@ -43,7 +43,7 @@ enum GroupBy: String, CaseIterable, Identifiable {
         case .container: return e.device.name
         case .project: return SpaceLabel.label(e.space.path)
         case .session: return e.session.isEmpty ? "—" : e.session
-        case .status: return SidebarView.statusBucket(e.activity).label
+        case .status: return SidebarView.statusBucket(e).label
         }
     }
 }
@@ -72,11 +72,11 @@ enum AgentFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    func includes(_ activity: AgentActivity) -> Bool {
+    func includes(_ e: AgentEntry) -> Bool {
         switch self {
         case .all: return true
-        case .active: return activity == .working || activity.needsAttention
-        case .attention: return activity.needsAttention
+        case .active: return e.activity == .working || e.activity.needsAttention || e.ranksAsDone
+        case .attention: return e.activity.needsAttention
         }
     }
 }
@@ -233,7 +233,7 @@ struct SidebarView: View {
 
     private var matchedAgents: [AgentEntry] {
         model.agentEntries.filter { agent in
-            filter.includes(agent.activity)
+            filter.includes(agent)
                 && matches("\(agent.title) \(agent.kind.label) \(agent.configLabel) \(agent.space.path) \(agent.session) \(agent.device.name)")
         }
     }
@@ -272,7 +272,7 @@ struct SidebarView: View {
         return result
     }
 
-    /// Within a group: pinned first, then needs-attention, then working, then
+    /// Within a group: pinned first, then needs-attention, done, working, and
     /// the rest — each tier most-recently-active first (unknown ages last).
     private func sorted(_ agents: [AgentEntry]) -> [AgentEntry] {
         agents.sorted { rank($0) < rank($1) }
@@ -283,16 +283,20 @@ struct SidebarView: View {
     /// keys (e.g. several agents sharing a last-active second) keep a fixed
     /// order instead of reshuffling on every refresh.
     private func rank(_ agent: AgentEntry) -> (Int, Int, Int, String) {
-        (model.isPinned(agent.identityKey) ? 0 : 1, Self.activityRank(agent.activity), agent.lastActiveSeconds ?? .max, agent.identityKey)
+        (model.isPinned(agent.identityKey) ? 0 : 1, Self.activityRank(agent), agent.lastActiveSeconds ?? .max, agent.identityKey)
     }
 
-    static func activityRank(_ activity: AgentActivity) -> Int {
-        if activity.needsAttention { return 0 }
-        return activity == .working ? 1 : 2
+    /// Needs you, done, working, the rest.
+    static func activityRank(_ agent: AgentEntry) -> Int {
+        if agent.activity.needsAttention { return 0 }
+        if agent.ranksAsDone { return 1 }
+        return agent.activity == .working ? 2 : 3
     }
 
-    nonisolated static func statusBucket(_ activity: AgentActivity) -> (id: String, label: String) {
+    static func statusBucket(_ agent: AgentEntry) -> (id: String, label: String) {
+        let activity = agent.activity
         if activity.needsAttention { return ("attention", "Needs attention") }
+        if agent.ranksAsDone { return ("done", "Done") }
         switch activity {
         case .working: return ("working", "Working")
         case .idle: return ("idle", "Idle")
@@ -302,7 +306,7 @@ struct SidebarView: View {
     }
 
     static func statusRank(_ bucketID: String) -> Int {
-        ["attention": 0, "working": 1, "idle": 2, "exited": 3, "unknown": 4][bucketID] ?? 5
+        ["attention": 0, "done": 1, "working": 2, "idle": 3, "exited": 4, "unknown": 5][bucketID] ?? 6
     }
 
     private var filteredPanes: [PaneEntry] {
@@ -330,6 +334,11 @@ struct SidebarView: View {
 
 /// Compact relative durations like "now", "45s", "12m", "3h", "2d".
 enum RelativeTime {
+    /// A running duration: "<1m", "12m", "3h", "2d".
+    static func elapsed(_ seconds: Int) -> String {
+        seconds < 60 ? "<1m" : short(seconds) ?? "<1m"
+    }
+
     static func short(_ seconds: Int?) -> String? {
         guard let seconds, seconds >= 0 else { return nil }
         switch seconds {
@@ -384,12 +393,13 @@ private struct AgentRow: View {
     var body: some View {
         HStack(spacing: 8) {
             agentIcon
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                // No per-row pin glyph: pinned agents live under the "Pinned"
-                // section header, so marking each row too is redundant.
+                .frame(width: 18, height: 18)
+                .overlay(alignment: .bottomTrailing) { OpenMark(ref: entry.ref) }
+            // No per-row pin glyph: pinned agents live under the "Pinned"
+            // section header, so marking each row too is redundant.
+            TwoLineRow {
                 Text(model.customName(entry.identityKey) ?? entry.title)
-                    .lineLimit(1)
+            } detail: {
                 HStack(spacing: 6) {
                     Text(entry.configLabel)
                     if showProject {
@@ -411,34 +421,17 @@ private struct AgentRow: View {
                         }
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            } time: {
+                // Working: for how long; otherwise: how long ago it was last active.
+                ActivityTime(entry: entry)
+            } status: {
+                // A waiting auto-continue shows its ring in place of the mark.
+                if let pending = model.pendingNudges[entry.ref] {
+                    NudgeRing(start: pending.start, fireAt: pending.fireAt)
+                } else {
+                    AgentStatusGlyph(activity: entry.activity, fault: entry.fault, retrying: entry.isRetrying, done: entry.isDone)
+                }
             }
-            Spacer(minLength: 0)
-            // Marks agents whose mirror is currently open in the app.
-            if model.poppedOut.contains(entry.ref) {
-                Image(systemName: "macwindow.on.rectangle")
-                    .imageScale(.small)
-                    .foregroundStyle(.secondary)
-                    .help("Open in its own window")
-            } else if model.terminal(for: entry.ref) != nil {
-                Circle()
-                    .fill(Theme.success)
-                    .frame(width: 6, height: 6)
-                    .help("Open")
-            }
-            // While working, the spinner already says "active now"; the time
-            // would be redundant. A waiting auto-continue shows its ring.
-            if let pending = model.pendingNudges[entry.ref] {
-                NudgeRing(start: pending.start, fireAt: pending.fireAt)
-            } else if entry.activity != .working, let active = RelativeTime.short(entry.lastActiveSeconds) {
-                Text(active)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
-            }
-            AgentStatusGlyph(activity: entry.activity, fault: entry.fault, retrying: entry.isRetrying)
         }
         .padding(.vertical, 2)
     }
@@ -448,6 +441,24 @@ private struct AgentRow: View {
             BrandIcon(resource: resource, size: 15)
         } else {
             Image(systemName: "terminal")
+        }
+    }
+}
+
+/// Whether an agent's view is open, here or in its own window: a small gray
+/// dot on the icon's bottom corner, as chat apps mark someone present on
+/// their picture. It takes no room of its own and is not a status color.
+private struct OpenMark: View {
+    @Environment(AppModel.self) private var model
+    let ref: PaneRef
+
+    var body: some View {
+        if model.terminal(for: ref) != nil {
+            Circle()
+                .fill(.secondary)
+                .frame(width: 6, height: 6)
+                .offset(x: 2, y: 2)
+                .help(model.poppedOut.contains(ref) ? "Open in its own window" : "Open")
         }
     }
 }

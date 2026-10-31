@@ -19,13 +19,13 @@ struct DashboardView: View {
                                valueTint: working.isEmpty ? Theme.textTertiary : Theme.working, fillHeight: true)
                     MetricCard(icon: "exclamationmark.circle.fill", title: "Needs attention", value: "\(attention.count)",
                                valueTint: attention.isEmpty ? Theme.textTertiary : Theme.warning, fillHeight: true)
-                    MetricCard(icon: "checkmark.circle", title: "Idle", value: "\(idleCount)",
-                               valueTint: idleCount == 0 ? Theme.textTertiary : Theme.success, fillHeight: true)
+                    MetricCard(icon: "checkmark.circle", title: "Done", value: "\(done.count)",
+                               valueTint: done.isEmpty ? Theme.textTertiary : Theme.done, fillHeight: true)
                 }
                 containersSection
                 if !accounts.isEmpty { AccountsSection(accounts: accounts) }
                 if !actionableAgents.isEmpty {
-                    AgentListSection(title: "Needs you & working", systemImage: "bolt.fill",
+                    AgentListSection(title: "Active", systemImage: "bolt.fill",
                                      agents: actionableAgents)
                 }
             }
@@ -42,13 +42,13 @@ struct DashboardView: View {
     private var agents: [AgentEntry] { model.allAgentEntries }
     private var working: [AgentEntry] { agents.filter { $0.activity == .working } }
     private var attention: [AgentEntry] { agents.filter { $0.activity.needsAttention } }
-    private var idleCount: Int { agents.filter { $0.activity == .idle }.count }
+    private var done: [AgentEntry] { agents.filter(\.isDone) }
     private var serverCount: Int { Set(model.targets.map(\.host.id)).count }
 
-    /// Urgency first (needs-attention, then working), then most-recently active.
+    /// Urgency first (needs-attention, done, working), then most-recently active.
     private var sortedAgents: [AgentEntry] {
         agents.sorted { a, b in
-            let ra = rank(a.activity), rb = rank(b.activity)
+            let ra = rank(a), rb = rank(b)
             if ra != rb { return ra < rb }
             let la = a.lastActiveSeconds ?? .max, lb = b.lastActiveSeconds ?? .max
             if la != lb { return la < lb }
@@ -56,15 +56,15 @@ struct DashboardView: View {
         }
     }
 
-    private func rank(_ activity: AgentActivity) -> Int {
-        activity.needsAttention ? 0 : (activity == .working ? 1 : 2)
+    private func rank(_ agent: AgentEntry) -> Int {
+        agent.activity.needsAttention ? 0 : agent.isDone ? 1 : agent.activity == .working ? 2 : 3
     }
 
-    /// The actionable subset for the overview: agents that need attention or are
-    /// working. The full roster is the sidebar's job; re-listing every idle agent
-    /// here only duplicated it.
+    /// The actionable subset for the overview: agents that need attention, are
+    /// done or working. The full roster is the sidebar's job; re-listing every
+    /// idle agent here only duplicated it.
     private var actionableAgents: [AgentEntry] {
-        sortedAgents.filter { $0.activity.needsAttention || $0.activity == .working }
+        sortedAgents.filter { $0.activity.needsAttention || $0.isDone || $0.activity == .working }
     }
 
     /// Rate limits are per-account (one login, shared by every agent on it), not
@@ -207,10 +207,10 @@ private struct DashAgentRow: View {
                 if let usage = model.usage(for: agent.ref) {
                     UsageBadges(usage: usage)
                 }
-                if agent.activity != .working, let active = RelativeTime.short(agent.lastActiveSeconds) {
-                    Text(active).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
-                }
-                StatusChip(activity: agent.activity, retrying: agent.isRetrying)
+                // One line, the time last in a fixed width: times and the
+                // chips before them line up.
+                StatusChip(activity: agent.activity, retrying: agent.isRetrying, done: agent.isDone)
+                ActivityTime(entry: agent, fixedWidth: true)
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 12)
@@ -463,6 +463,7 @@ private struct ContainerSummaryCard: View {
         HStack(spacing: 8) {
             pill(count: agents.filter { $0.activity == .working }.count, color: Theme.working, label: "working")
             pill(count: agents.filter { $0.activity.needsAttention }.count, color: Theme.warning, label: "attention")
+            pill(count: agents.filter(\.isDone).count, color: Theme.done, label: "done")
             (Text("\(agents.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 + Text(" agent\(agents.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.tertiary))
                 .rollingNumber(agents.count)

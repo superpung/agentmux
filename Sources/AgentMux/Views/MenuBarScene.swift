@@ -3,18 +3,23 @@ import AgentMuxCore
 import SwiftUI
 
 /// The always-on menu-bar item. Its glyph reflects the most urgent state, with
-/// a count; the popover lists the agents that need you and those working, and
-/// clicking one brings AgentMux forward on that agent.
+/// a count; the popover lists the agents that need you, are done or working,
+/// and clicking one brings AgentMux forward on that agent.
 struct MenuBarLabel: View {
     let model: AppModel
 
     var body: some View {
-        let attention = model.allAgentEntries.filter { $0.activity.needsAttention }.count
-        let working = model.allAgentEntries.filter { $0.activity == .working }.count
+        let agents = model.allAgentEntries
+        let attention = agents.filter { $0.activity.needsAttention }.count
+        let done = agents.filter(\.isDone).count
+        let working = agents.filter { $0.activity == .working }.count
         HStack(spacing: 3) {
             if attention > 0 {
                 Image(systemName: "exclamationmark.circle.fill")
                 Text("\(attention)")
+            } else if done > 0 {
+                Image(systemName: "checkmark.circle.fill")
+                Text("\(done)")
             } else if working > 0 {
                 Image(systemName: "bolt.fill")
                 Text("\(working)")
@@ -31,7 +36,10 @@ struct MenuBarContent: View {
     private var agents: [AgentEntry] { model.allAgentEntries }
     private var attention: [AgentEntry] { agents.filter { $0.activity.needsAttention } }
     private var working: [AgentEntry] { agents.filter { $0.activity == .working } }
-    private var idleCount: Int { agents.filter { $0.activity == .idle }.count }
+    /// Most recently finished first.
+    private var done: [AgentEntry] {
+        agents.filter(\.isDone).sorted { ($0.lastActiveSeconds ?? .max) < ($1.lastActiveSeconds ?? .max) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -56,8 +64,14 @@ struct MenuBarContent: View {
                             .padding(14)
                     }
                     section("Needs attention", attention)
+                    section("Done", done) {
+                        Button("Clear") { model.markAllDoneSeen() }
+                            .buttonStyle(.hover)
+                            .font(.caption2)
+                    }
                     section("Working", working)
                 }
+                .animation(Motion.list, value: (attention + done + working).map(\.id))
             }
             .frame(maxHeight: 300)
 
@@ -70,7 +84,7 @@ struct MenuBarContent: View {
     }
 
     private var countsText: String {
-        "\(working.count) working · \(attention.count) need you"
+        "\(working.count) working · \(attention.count) need you · \(done.count) done"
     }
 
     // A condensed fleet dashboard: KPI counts + per-container live meters.
@@ -79,7 +93,7 @@ struct MenuBarContent: View {
             HStack(spacing: 0) {
                 kpi("Working", working.count, working.isEmpty ? Theme.textTertiary : Theme.working)
                 kpi("Attention", attention.count, attention.isEmpty ? Theme.textTertiary : Theme.warning)
-                kpi("Idle", idleCount, idleCount == 0 ? Theme.textTertiary : Theme.success)
+                kpi("Done", done.count, done.isEmpty ? Theme.textTertiary : Theme.done)
             }
             ForEach(model.targets) { state in containerLine(state) }
         }
@@ -122,11 +136,16 @@ struct MenuBarContent: View {
         }
     }
 
-    @ViewBuilder private func section(_ title: String, _ list: [AgentEntry]) -> some View {
+    @ViewBuilder private func section(_ title: String, _ list: [AgentEntry],
+                                      @ViewBuilder accessory: () -> some View = { EmptyView() }) -> some View {
         if !list.isEmpty {
-            Text(title.uppercased())
-                .font(.caption2).foregroundStyle(.tertiary)
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 2)
+            HStack {
+                Text(title.uppercased())
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                accessory()
+            }
+            .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 2)
             ForEach(list) { agent in
                 Button { jump(to: agent.ref) } label: {
                     HStack(spacing: 8) {
@@ -136,7 +155,10 @@ struct MenuBarContent: View {
                             Text(agent.device.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 4)
-                        StatusChip(activity: agent.activity, retrying: agent.isRetrying)
+                        // One line, the time last in a fixed width: times and the
+                        // chips before them line up.
+                        StatusChip(activity: agent.activity, retrying: agent.isRetrying, done: agent.isDone)
+                        ActivityTime(entry: agent, fixedWidth: true)
                     }
                     .contentShape(Rectangle())
                     .padding(.horizontal, 8).padding(.vertical, 5)
