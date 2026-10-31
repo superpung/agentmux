@@ -23,6 +23,9 @@ features and may change behavior; a patch version only fixes). Commits follow
   with its highlights that opens the release page; AgentMux ▸ Check for
   Updates… checks at once. No update window and nothing installed for you; the
   daily check can be turned off in Settings.
+- **Menu bar without resources.** Settings ▸ General ▸ Menu bar ▸ Container CPU
+  and memory hides the containers' meters in the menu bar, which then stops
+  polling them.
 - **Files follow remote changes.** While a Files window is on screen, the file
   shown and the folder listed update by themselves within about a second of
   changing remotely. A text preview keeps your place, and follows new lines
@@ -44,6 +47,11 @@ features and may change behavior; a patch version only fixes). Commits follow
 - A notification banner is skipped only while its agent is in a window that is
   on screen; being selected in a hidden or covered window no longer counts.
   Looking at an agent marks its notifications read.
+
+### Fixed
+
+- The menu bar's list of agents could be cut short; it now takes its agents'
+  height, and scrolls past about seven.
 
 ## [0.3.0] - 2026-10-30
 

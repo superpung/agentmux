@@ -32,6 +32,15 @@ struct MenuBarLabel: View {
 
 struct MenuBarContent: View {
     let model: AppModel
+    /// Settings: each container's CPU and memory under the counts.
+    @AppStorage(Self.showsResourcesKey) private var showsResources = true
+    static let showsResourcesKey = "menuBarShowsResources"
+    /// The agents' list at its full height, measured: the popover sizes
+    /// itself to its content, and a scroll view has no height of its own.
+    @State private var listHeight: CGFloat = 0
+    /// Whether this popover started resource polling (ended as it closes).
+    @State private var monitoring = false
+    static let maxListHeight: CGFloat = 420
 
     private var agents: [AgentEntry] { model.allAgentEntries }
     private var attention: [AgentEntry] { agents.filter { $0.activity.needsAttention } }
@@ -72,15 +81,20 @@ struct MenuBarContent: View {
                     section("Working", working)
                 }
                 .animation(Motion.list, value: (attention + done + working).map(\.id))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
             }
-            .frame(maxHeight: 300)
+            // As tall as the list, up to a cap; past it, the list scrolls.
+            .frame(height: min(listHeight, Self.maxListHeight))
 
             Divider()
             footer
         }
         .frame(width: 320)
-        .onAppear { model.beginResourceMonitoring() }
-        .onDisappear { model.endResourceMonitoring() }
+        .onAppear {
+            monitoring = showsResources
+            if monitoring { model.beginResourceMonitoring() }
+        }
+        .onDisappear { if monitoring { model.endResourceMonitoring() } }
     }
 
     private var countsText: String {
@@ -95,7 +109,9 @@ struct MenuBarContent: View {
                 kpi("Attention", attention.count, attention.isEmpty ? Theme.textTertiary : Theme.warning)
                 kpi("Done", done.count, done.isEmpty ? Theme.textTertiary : Theme.done)
             }
-            ForEach(model.targets) { state in containerLine(state) }
+            if showsResources {
+                ForEach(model.targets) { state in containerLine(state) }
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
     }

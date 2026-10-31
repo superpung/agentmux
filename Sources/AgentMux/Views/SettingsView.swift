@@ -25,6 +25,7 @@ private struct GeneralSettings: View {
     @AppStorage(NotificationSound.doneKey) private var doneSound = NotificationSound.doneDefault
     @AppStorage("autoContinueEnabled") private var autoContinueEnabled = false
     @AppStorage(UpdateChecker.enabledKey) private var checkForUpdates = true
+    @AppStorage(MenuBarContent.showsResourcesKey) private var menuBarShowsResources = true
     @AppStorage("autoContinueMessage") private var autoContinueMessage = "continue"
     @AppStorage("autoContinueAttempts") private var autoContinueAttempts = 3
 
@@ -97,6 +98,11 @@ private struct GeneralSettings: View {
                         ), in: 8 ... 32).labelsHidden()
                     }
                 }
+            }
+            Section {
+                Toggle("Container CPU and memory", isOn: $menuBarShowsResources)
+            } header: {
+                Text("Menu bar")
             }
             Section {
                 ForEach(StatusBarField.allCases, id: \.self) { field in
