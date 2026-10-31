@@ -10,6 +10,11 @@ struct DetailView: View {
     /// The tile arrangement in use, kept across window resizes unless another
     /// is clearly better (see `TileLayout.best`).
     @State private var arrangement: TileLayout.Arrangement?
+    /// A tile being dragged by its header onto another, to swap places.
+    @State private var drag: TileDrag?
+    /// The layout the surfaces were last shown in. While the cards move to a
+    /// new one, the surfaces wait hidden.
+    @State private var settledLayout: String?
 
     /// A requested account switch awaiting confirmation (it stops and relaunches
     /// the agent, so it is confirmed first).
@@ -83,54 +88,106 @@ struct DetailView: View {
     /// so hiding it does not resize its remote window. A mirror shown in its
     /// own window is not rendered here, so its single surface never lives in
     /// two hierarchies.
+    ///
+    /// Two layers, so the layout can move without resizing live terminals
+    /// every frame (each resize reflows the terminal and its remote window):
+    /// cards (frame, header, focus ring) animate to their new places, while
+    /// each surface takes its final size at once, hidden, and fades in when
+    /// the cards have settled.
     @ViewBuilder private func terminals(in area: CGRect) -> some View {
         let tiles = model.tiles
-        let current = TileLayout.best(count: tiles.count, in: area.size, cell: GhosttyRuntime.approximateCellSize,
-                                      chrome: TileHeader.height, gap: Self.tileGap, current: arrangement)
-        let frames = Dictionary(uniqueKeysWithValues: zip(tiles, TileLayout.frames(current, in: area, gap: Self.tileGap)))
+        let tiled = model.isTiled
+        // Tiles are cards on the window's background, a gap apart and from
+        // its edges; a zoomed tile is one card filling the same space.
+        let inner = tiled ? area.insetBy(dx: Self.tileGap, dy: Self.tileGap) : area
+        let current = TileLayout.best(count: tiles.count, in: inner.size, cell: GhosttyRuntime.approximateCellSize,
+                                      chrome: TileCard.chromeHeight, gap: Self.tileGap, current: arrangement)
+        let frames = Dictionary(uniqueKeysWithValues: zip(tiles, TileLayout.frames(current, in: inner, gap: Self.tileGap)))
         let shown = Set(model.visibleRefs)
         let zoomed = model.isZoomed
-        let frame = { (ref: PaneRef) in zoomed && shown.contains(ref) ? area : frames[ref] ?? area }
+        let cardFrame = { (ref: PaneRef) in zoomed && shown.contains(ref) ? inner : frames[ref] ?? area }
+        // A tile's surface sits in its card under the header; otherwise it
+        // fills the area.
+        let surfaceFrame = { (ref: PaneRef) in tiled && tiles.contains(ref) ? TileCard.content(of: cardFrame(ref)) : area }
+        // The tiles' cards, or a bare card for the one agent shown alone, so
+        // it can grow into a tile and back.
+        let cards = (tiled ? tiles : model.selection.map { [$0] } ?? []).filter { !model.poppedOut.contains($0) }
+        // What moves the cards: which tiles, zoom, and the arrangement. Not
+        // the window's size, which resizes everything live as before.
+        let layout = "\(tiles.map(\.paneID))|\(tiled)|\(zoomed)|\(current.axis)\(current.lines)"
+        let settled = settledLayout == layout
+        let header = { (ref: PaneRef) in
+            TileHeader(ref: ref, onDrag: { location in
+                drag = TileDrag(ref: ref, target: zoomed ? nil : frames.first { $0.value.contains(location) }?.key)
+            }, onDrop: {
+                if let drag, let target = drag.target { model.swapTiles(drag.ref, target) }
+                drag = nil
+            })
+        }
         ZStack(alignment: .topLeading) {
-            if model.isTiled, !model.isZoomed {
-                Color(nsColor: .separatorColor)
+            Color(nsColor: .windowBackgroundColor)
+                .opacity(tiled ? 1 : 0)
+                .animation(Motion.panel, value: tiled)
+            ZStack(alignment: .topLeading) {
+                ForEach(cards, id: \.self) { ref in
+                    let rect = tiled ? cardFrame(ref) : area
+                    TileCardView(on: tiled, focused: model.selection == ref,
+                                 placeholder: tiled && model.terminal(for: ref) == nil ? ref : nil,
+                                 header: header(ref))
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                        // A tile behind a zoomed one keeps its place, unseen.
+                        .opacity(!tiled || shown.contains(ref) ? 1 : 0)
+                        .allowsHitTesting(!tiled || shown.contains(ref))
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
+            .animation(Motion.panel, value: layout)
             ForEach(Array(model.terminals.values), id: \.ref) { terminal in
                 if !model.poppedOut.contains(terminal.ref) {
-                    let rect = frame(terminal.ref)
+                    let rect = surfaceFrame(terminal.ref)
                     let visible = shown.contains(terminal.ref)
-                    VStack(spacing: 0) {
-                        if model.isTiled, visible { TileHeader(ref: terminal.ref) }
-                        MirroredSurfaceView(terminal: terminal)
-                    }
-                    .background(GhosttyRuntime.terminalBackground(for: model.terminalTheme))
-                    .frame(width: rect.width, height: rect.height)
-                    .position(x: rect.midX, y: rect.midY)
-                    // Resizing a live surface every animation frame would
-                    // reflow it (and its remote window) over and over.
-                    .animation(nil, value: rect)
-                    .opacity(visible ? 1 : 0)
-                    .allowsHitTesting(visible)
+                    MirroredSurfaceView(terminal: terminal)
+                        .background(GhosttyRuntime.terminalBackground(for: model.terminalTheme))
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                        // Resizing a live surface every animation frame would
+                        // reflow it (and its remote window) over and over.
+                        .animation(nil, value: rect)
+                        .opacity(visible && settled ? 1 : 0)
+                        .allowsHitTesting(visible)
                 }
             }
-            // Tiles with no mirror yet, or on a view-only target.
-            if model.isTiled {
-                ForEach(model.visibleRefs.filter { model.terminal(for: $0) == nil }, id: \.self) { ref in
-                    let rect = frame(ref)
-                    VStack(spacing: 0) {
-                        TileHeader(ref: ref)
-                        PanePlaceholderView(ref: ref)
-                    }
-                    .background(GhosttyRuntime.terminalBackground(for: model.terminalTheme))
+            // Where a dragged tile would go.
+            if let target = drag?.target, target != drag?.ref, let rect = frames[target] {
+                RoundedRectangle(cornerRadius: TileCard.radius)
+                    .fill(Color.accentColor.opacity(0.18))
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
                     .frame(width: rect.width, height: rect.height)
                     .position(x: rect.midX, y: rect.midY)
-                }
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
         }
+        .animation(Motion.quick, value: drag?.target)
+        .coordinateSpace(.named(TileHeader.space))
         .onChange(of: current, initial: true) { _, new in arrangement = new }
+        .task(id: layout) {
+            // The first layout shows at once; a change waits for the cards.
+            if settledLayout != nil {
+                try? await Task.sleep(for: TileCard.settleDelay)
+                guard !Task.isCancelled else { return }
+            }
+            withAnimation(Motion.quick) { settledLayout = layout }
+        }
     }
 
-    private static let tileGap: CGFloat = 1
+    private static let tileGap: CGFloat = 6
+
+    private struct TileDrag {
+        var ref: PaneRef
+        var target: PaneRef?
+    }
 
     private func performSwitch(_ pending: PendingSwitch) {
         let ref = pending.ref
@@ -430,14 +487,71 @@ private struct Meter: View {
     }
 }
 
-/// A tile's title strip: status, name and container, with zoom and close on
-/// hover. The focused tile, which gets the keys, is marked with an accent
-/// underline. Double-click zooms.
+/// A tile card's measures.
+private enum TileCard {
+    static let radius: CGFloat = 8
+    /// The surface keeps clear of the rounded corners: a Metal layer ignores
+    /// SwiftUI clipping.
+    static let surfaceInsets = EdgeInsets(top: 2, leading: 4, bottom: 4, trailing: 4)
+    /// All of a card's height that is not its terminal.
+    static var chromeHeight: CGFloat { TileHeader.height + surfaceInsets.top + surfaceInsets.bottom }
+    /// How long surfaces wait for the cards to settle before fading in.
+    static let settleDelay: Duration = .milliseconds(200)
+
+    /// Where a card's terminal goes: under the header, inside the insets.
+    static func content(of card: CGRect) -> CGRect {
+        CGRect(x: card.minX + surfaceInsets.leading,
+               y: card.minY + TileHeader.height + surfaceInsets.top,
+               width: max(0, card.width - surfaceInsets.leading - surfaceInsets.trailing),
+               height: max(0, card.height - chromeHeight))
+    }
+}
+
+/// A tile's card: rounded, in the terminal's color, with a hairline border,
+/// the header, and a focus ring on the tile that gets the keys. Off (one
+/// agent shown alone) it is bare, so it can grow into a tile and back.
+private struct TileCardView<Header: View>: View {
+    @Environment(AppModel.self) private var model
+    let on: Bool
+    let focused: Bool
+    /// A tile with no mirror yet, or on a view-only target.
+    let placeholder: PaneRef?
+    let header: Header
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: on ? TileCard.radius : 0)
+        VStack(spacing: 0) {
+            if on { header.transition(.opacity) }
+            if let placeholder {
+                PanePlaceholderView(ref: placeholder)
+            } else {
+                Color.clear
+            }
+        }
+        .background(GhosttyRuntime.terminalBackground(for: model.terminalTheme).opacity(on ? 1 : 0), in: shape)
+        .overlay {
+            shape
+                .strokeBorder(focused ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: focused ? 1.5 : 1)
+                .opacity(on ? 1 : 0)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+/// A tile's title strip: the agent's icon, name, folder and container, how
+/// long it has worked or been idle, and its status, with zoom and close on
+/// hover. Click focuses the tile, double-click zooms it, and dragging the
+/// strip onto another tile swaps the two.
 private struct TileHeader: View {
-    static let height: CGFloat = 26
+    static let height: CGFloat = 28
+    /// The coordinate space of the tiles, for finding where a drag is.
+    static let space = "tiles"
 
     @Environment(AppModel.self) private var model
     let ref: PaneRef
+    /// The drag's location in `space`.
+    let onDrag: (CGPoint) -> Void
+    let onDrop: () -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -445,22 +559,24 @@ private struct TileHeader: View {
         HStack(spacing: 6) {
             if let agent = model.agentEntry(ref) {
                 if let resource = BrandIconLoader.agentIcon(for: agent.kind) {
-                    BrandIcon(resource: resource, size: 12)
+                    BrandIcon(resource: resource, size: 13)
                 }
-                Text(model.customName(agent.identityKey) ?? agent.title).lineLimit(1).truncationMode(.tail)
-                StatusChip(activity: agent.activity, compact: true, retrying: agent.isRetrying)
-                AgentStatusGlyph(activity: .idle, fault: agent.activity == .working ? nil : agent.fault)
+                name(model.customName(agent.identityKey) ?? agent.title, focused: focused)
+                place("\(agent.spaceLabel) · \(agent.device.name)")
+                Spacer(minLength: 4)
                 if let pending = model.pendingNudges[ref] {
                     NudgeRing(start: pending.start, fireAt: pending.fireAt)
+                } else {
+                    ActivityTime(entry: agent)
                 }
-                Text(agent.device.name).foregroundStyle(.tertiary).lineLimit(1)
+                AgentStatusGlyph(activity: agent.activity, fault: agent.fault, retrying: agent.isRetrying, done: agent.isDone)
             } else if let pane = model.paneEntry(ref) {
                 Image(systemName: "terminal").foregroundStyle(.tertiary)
-                Text(pane.title).lineLimit(1).truncationMode(.tail)
-                Text(pane.device.name).foregroundStyle(.tertiary).lineLimit(1)
+                name(pane.title, focused: focused)
+                place("\(pane.spaceLabel) · \(pane.device.name)")
+                Spacer(minLength: 4)
             }
-            Spacer(minLength: 4)
-            if hovering || focused {
+            if hovering {
                 Button {
                     model.focusTile(ref)
                     model.toggleZoom()
@@ -472,23 +588,40 @@ private struct TileHeader: View {
                     .help("Close")
             }
         }
-        .buttonStyle(.borderless)
-        .font(.callout.weight(focused ? .medium : .regular))
-        .foregroundStyle(focused ? .primary : .secondary)
+        .animation(Motion.quick, value: hovering)
+        .buttonStyle(.hover)
+        .font(.callout)
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity)
         .frame(height: Self.height)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            if focused { Theme.accent.frame(height: 2) }
-        }
+        .background(.bar, in: UnevenRoundedRectangle(topLeadingRadius: TileCard.radius, topTrailingRadius: TileCard.radius))
         .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.space))
+                .onChanged { onDrag($0.location) }
+                .onEnded { _ in onDrop() }
+        )
         .onTapGesture(count: 2) {
             model.focusTile(ref)
             model.toggleZoom()
         }
         .onTapGesture { model.focusTile(ref) }
-        .onHover { hovering = $0 }
+        .debouncedHover { hovering = $0 }
+    }
+
+    private func name(_ text: String, focused: Bool) -> some View {
+        Text(text)
+            .fontWeight(.medium)
+            .foregroundStyle(focused ? .primary : .secondary)
+            .lineLimit(1)
+            .layoutPriority(1)
+    }
+
+    private func place(_ text: String) -> some View {
+        Text(text)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .truncationMode(.middle)
     }
 }
 

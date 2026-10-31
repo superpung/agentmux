@@ -1447,6 +1447,12 @@ final class AppModel {
         applyVisibility()
     }
 
+    /// Swaps two tiles' places (a header dragged onto another tile).
+    func swapTiles(_ a: PaneRef, _ b: PaneRef) {
+        guard let i = tiles.firstIndex(of: a), let j = tiles.firstIndex(of: b), i != j else { return }
+        tiles.swapAt(i, j)
+    }
+
     func toggleZoom() {
         guard isTiled else { return }
         isZoomed.toggle()

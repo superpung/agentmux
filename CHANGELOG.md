@@ -37,6 +37,12 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Changed
 
+- **Tiles are cards.** Agents side by side sit on rounded cards a little apart.
+  The header shows the agent's icon, name, folder and container, its working
+  or idle time and status, with zoom and close on hover. The focused tile has
+  an accent ring, and dragging a header onto another tile swaps the two.
+  Going from one agent to several and back, zooming, closing or swapping
+  moves the cards, and the terminals fade in at their new size.
 - **Rows.** In the sidebar a row's time sits at its top right and its status
   mark at its bottom right, as Mail sets a message's date. In the menu bar and
   the dashboard the time comes last, in a fixed width, so times and chips line

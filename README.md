@@ -117,7 +117,9 @@ To see Claude context and rate-limit usage, copy [`scripts/agentmux-statusline.s
 ⌘-click (or ⇧-click) up to four agents in the sidebar and they share the detail area; a plain click goes back to one.
 
 - **Layout** follows the area's shape and keeps every tile wide enough for an agent's TUI (about 80 columns) when it can. On a landscape window: two side by side, three as one tall tile beside two stacked, four as a 2×2 grid. On a portrait or narrow window they stack top to bottom. Resizing the window does not flip the layout back and forth near the switch point.
-- **Focus.** Keys go to one tile at a time, marked by an accent line under its header. Click a tile, or use ⌘] / ⌘[, to move focus. ⇧⌘↩ zooms the focused tile to the full area and back; the others keep running and keep their size.
+- **Cards.** Each tile is a card whose header shows the agent's icon, name, folder and container, how long it has been working or idle, and its status; zoom and close appear on hover.
+- **Focus.** Keys go to one tile at a time, the one with the accent ring. Click a tile, or use ⌘] / ⌘[, to move focus. ⇧⌘↩ (or double-clicking a header) zooms the focused tile to the full area and back; the others keep running and keep their size.
+- **Rearranging.** Drag a tile's header onto another tile to swap the two. Tiles move into place as they join, leave, zoom or swap; their terminals take their new size once and fade in.
 - **Closing.** A tile's × (or ⌘-clicking its row again) takes it out; its mirror stays warm like any recently viewed agent.
 - Each tile sizes its agent's tmux window to the tile, as the single view does with the full area. If you also have that window attached elsewhere, you see it at the tile's size while the tile is open.
 
