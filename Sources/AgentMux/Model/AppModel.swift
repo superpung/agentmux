@@ -91,7 +91,7 @@ final class AppModel {
     var showDevicePanel = false
     var showSearch = false
     /// The palette on screen: agents (⌘K) or commands (⇧⌘P).
-    var palette: PaletteMode?
+    var palette: PaletteMode? = AppModel.paletteFromEnvironment()
     /// The agent whose rename sheet is open.
     var renaming: AgentEntry?
     private(set) var terminals: [PaneRef: PaneTerminal] = [:]
@@ -384,10 +384,29 @@ final class AppModel {
     @ObservationIgnored private var pendingOpen = AppModel.paneFromEnvironment("AGENTMUX_OPEN")
     /// AGENTMUX_SELECT=<target-id>/<pane-id>: only select it (no attach).
     @ObservationIgnored private var pendingSelect = AppModel.paneFromEnvironment("AGENTMUX_SELECT")
+    /// AGENTMUX_TILES=<target-id>/<pane-id>,…: show those panes side by side
+    /// once all are found, to look at tiles without clicking.
+    @ObservationIgnored private var pendingTiles = (ProcessInfo.processInfo.environment["AGENTMUX_TILES"] ?? "")
+        .split(separator: ",").compactMap { item -> (targetID: String, paneID: String)? in
+            let text = String(item)
+            guard let slash = text.lastIndex(of: "/") else { return nil }
+            return (String(text[..<slash]), String(text[text.index(after: slash)...]))
+        }
+
+    /// AGENTMUX_PALETTE=agents|commands: the palette is open at launch, to
+    /// look at it without pressing keys.
+    private static func paletteFromEnvironment() -> PaletteMode? {
+        switch ProcessInfo.processInfo.environment["AGENTMUX_PALETTE"] {
+        case "agents": .agents
+        case "commands": .commands
+        default: nil
+        }
+    }
 
     private static func paneFromEnvironment(_ name: String) -> (targetID: String, paneID: String)? {
+        // Target ids hold slashes ("lab/xp01"); pane ids ("%8") don't.
         guard let value = ProcessInfo.processInfo.environment[name],
-              let slash = value.firstIndex(of: "/") else { return nil }
+              let slash = value.lastIndex(of: "/") else { return nil }
         return (String(value[..<slash]), String(value[value.index(after: slash)...]))
     }
 
@@ -953,6 +972,16 @@ final class AppModel {
             {
                 pendingOpen = nil
                 select(ref)
+            }
+            if !pendingTiles.isEmpty {
+                let refs = pendingTiles.compactMap { pending -> PaneRef? in
+                    guard let state = self.state(pending.targetID), state.snapshot?.pane(pending.paneID) != nil else { return nil }
+                    return state.ref(for: pending.paneID)
+                }
+                if refs.count == pendingTiles.count {
+                    pendingTiles = []
+                    show(Set(refs), sidebarOrder: refs)
+                }
             }
         case let .failure(failure):
             state.lastFailure = failure

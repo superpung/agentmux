@@ -30,6 +30,26 @@ struct MenuBarLabel: View {
     }
 }
 
+/// AGENTMUX_PREVIEW=menubar: the menu-bar popover's content in a plain
+/// window, to look at it without clicking the menu bar.
+@MainActor
+enum MenuBarPreview {
+    private static var window: NSWindow?
+
+    static func showIfAsked(_ model: AppModel) {
+        guard window == nil, ProcessInfo.processInfo.environment["AGENTMUX_PREVIEW"] == "menubar" else { return }
+        // Sized by the content's own ideal size, as the menu-bar popover is.
+        let hosting = NSHostingController(rootView: MenuBarContent(model: model))
+        hosting.sizingOptions = [.preferredContentSize]
+        let preview = NSWindow(contentViewController: hosting)
+        preview.styleMask = [.titled, .closable]
+        preview.title = "Menu Bar Preview"
+        preview.isReleasedWhenClosed = false
+        preview.orderFront(nil)
+        window = preview
+    }
+}
+
 struct MenuBarContent: View {
     let model: AppModel
     /// Settings: each container's CPU and memory under the counts.

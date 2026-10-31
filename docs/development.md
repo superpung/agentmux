@@ -47,6 +47,13 @@ result. The app is Apple Silicon only.
 Scripted app check:
 `AGENTMUX_OPEN=<target>/<pane> AGENTMUX_SMOKE_INPUT=<text> AGENTMUX_SMOKE_DUMP=<file>`
 opens the pane, pastes the text, writes the visible screen to the file and quits.
+`AGENTMUX_PALETTE=agents` (or `commands`) opens the palette at launch, to look
+at it without pressing keys: `open --env AGENTMUX_PALETTE=commands build/AgentMux.app`.
+`AGENTMUX_APPEARANCE=light` (or `dark`) runs the app in that appearance,
+whatever the Mac's. `AGENTMUX_PREVIEW=menubar` shows the menu-bar popover's
+content in a window, to look at it without clicking the menu bar.
+`AGENTMUX_TILES=<target>/<pane>,<target>/<pane>` shows those panes side by
+side once they are found.
 
 ## Source layout
 

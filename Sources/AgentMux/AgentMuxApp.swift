@@ -17,6 +17,7 @@ struct AgentMuxApp: App {
                     model.startPolling()
                     model.requestNotificationAuthorization()
                     model.startUpdateChecks()
+                    MenuBarPreview.showIfAsked(model)
                     Task { await model.discoverAll() }
                 }
         }
@@ -191,6 +192,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         MainActor.assumeIsolated { AppDelegate.shared = self }
         // Needed when launched as a bare executable rather than from a bundle.
         NSApp.setActivationPolicy(.regular)
+        // AGENTMUX_APPEARANCE=light|dark: one appearance for this run, to
+        // look at both without changing the Mac's.
+        switch ProcessInfo.processInfo.environment["AGENTMUX_APPEARANCE"] {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: break
+        }
         NSApp.activate(ignoringOtherApps: true)
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().delegate = self
