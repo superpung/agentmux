@@ -24,6 +24,7 @@ private struct GeneralSettings: View {
     @AppStorage(NotificationSound.needsYouKey) private var needsYouSound = NotificationSound.needsYouDefault
     @AppStorage(NotificationSound.doneKey) private var doneSound = NotificationSound.doneDefault
     @AppStorage("autoContinueEnabled") private var autoContinueEnabled = false
+    @AppStorage(UpdateChecker.enabledKey) private var checkForUpdates = true
     @AppStorage("autoContinueMessage") private var autoContinueMessage = "continue"
     @AppStorage("autoContinueAttempts") private var autoContinueAttempts = 3
 
@@ -52,6 +53,7 @@ private struct GeneralSettings: View {
                 Toggle("Show banners for new notifications", isOn: $notificationsEnabled)
                 soundPicker("Needs you sound", $needsYouSound)
                 soundPicker("Done sound", $doneSound)
+                Toggle("Check for updates", isOn: $checkForUpdates)
             }
             Section {
                 Toggle("Continue agents stopped by an error", isOn: $autoContinueEnabled)

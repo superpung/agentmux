@@ -176,6 +176,7 @@ final class AppModel {
     }
     private var releasedOrphans: Set<String> = []
     @ObservationIgnored private let notifier = Notifier()
+    @ObservationIgnored private lazy var updates = UpdateChecker(notifier: notifier)
     /// Every notification, with read state (the toolbar bell).
     let inbox = Inbox()
     var showInbox = false
@@ -1073,6 +1074,14 @@ final class AppModel {
                              isRead: viewed || kind == .autoContinued)
         inbox.add(item)
         if banner, !viewed, notificationsEnabled { notifier.notify(item) }
+    }
+
+    // MARK: Updates
+
+    func startUpdateChecks() { updates.start() }
+
+    func checkForUpdates() {
+        Task { await updates.check(manual: true) }
     }
 
     // MARK: Done and seen

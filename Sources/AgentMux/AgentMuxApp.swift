@@ -16,11 +16,15 @@ struct AgentMuxApp: App {
                     model.inbox.refreshBadge()
                     model.startPolling()
                     model.requestNotificationAuthorization()
+                    model.startUpdateChecks()
                     Task { await model.discoverAll() }
                 }
         }
         .defaultSize(width: 1100, height: 720)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { model.checkForUpdates() }
+            }
             SidebarCommands()
             // Edit ▸ Find (⌘F, ⌘G, ⇧⌘G, ⌘E) for the Files previews. Items stay
             // disabled where no responder handles them, so a focused terminal
@@ -173,13 +177,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         MainActor.assumeIsolated { model?.inbox.refreshBadge() }
     }
 
-    /// Clicking a banner opens its agent and marks the inbox item read.
+    /// Clicking a banner opens its agent and marks the inbox item read, or
+    /// opens the release page of an update.
     func userNotificationCenter(
         _: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let raw = response.notification.request.content.userInfo[Notifier.inboxIDKey] as? String
+        let info = response.notification.request.content.userInfo
+        if let link = info[Notifier.releaseURLKey] as? String, let url = URL(string: link) {
+            NSWorkspace.shared.open(url)
+        }
+        let raw = info[Notifier.inboxIDKey] as? String
         if let raw, let id = UUID(uuidString: raw) {
             AppDelegate.performOnMainRunLoop {
                 NSApp.activate(ignoringOtherApps: true)

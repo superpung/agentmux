@@ -55,6 +55,7 @@ What makes it different:
 - 🧩 **tmux management.** Create or kill sessions, windows and panes, plus a throwaway shell with ⌘T.
 - 📍 **Menu-bar extra.** The agents that need you, are done or are working, live CPU and memory, and jump to any agent without opening the main window.
 - 🔒 **Privacy-first.** Auto-refresh is read-only and structural, never conversation content, tokens, or credentials.
+- 🆕 **Update notifications.** A new release is announced once in a notification that opens its page; no update window, nothing installed for you. AgentMux ▸ Check for Updates… asks at once.
 
 ## How it compares
 
@@ -158,6 +159,7 @@ Each refresh makes one read-only SSH connection that inventories processes and t
 - **You make every change.** Writes happen only when you act: opening a terminal and typing, sending a prompt, launching, resuming or switching an agent, managing tmux, or working with files. The one automatic write is auto-continue, and only after you turn it on: it types its message into an agent stopped on an error, under the checks above.
 - **No conversation content.** Only structural log fields (event type, error code, token counts, timestamps) are read, never message text. Screen checks (working or idle, an error line, an empty input line) run inside the container and return only a verdict.
 - **No secrets.** Tokens and credentials are never read. Account de-duplication uses only non-secret account id fields.
+- **One outside request.** About once a day the app reads this repository's public release feed on github.com to learn of a new version (Settings ▸ General ▸ Check for updates turns it off). Nothing about you or your agents is sent.
 
 ## Development
 

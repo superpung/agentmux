@@ -8,6 +8,7 @@ import UserNotifications
 @MainActor
 final class Notifier {
     nonisolated static let inboxIDKey = "inboxID"
+    nonisolated static let releaseURLKey = "releaseURL"
 
     private var requested = false
     /// UNUserNotificationCenter needs a real app bundle; running the raw binary
@@ -32,6 +33,30 @@ final class Notifier {
         content.userInfo = [Self.inboxIDKey: item.id.uuidString]
         let request = UNNotificationRequest(identifier: item.id.uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    /// A newer AgentMux and what it brings; clicking opens its release page.
+    func notifyUpdate(_ release: ReleaseEntry) {
+        let content = UNMutableNotificationContent()
+        content.title = "AgentMux \(release.version) available"
+        content.body = release.highlights.joined(separator: " · ")
+        content.userInfo = [Self.releaseURLKey: release.url.absoluteString]
+        post(content, id: "update")
+    }
+
+    /// The answer to a check the user asked for.
+    func notifyAbout(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        post(content, id: "update")
+    }
+
+    /// One at a time: a newer one replaces the last.
+    private func post(_ content: UNMutableNotificationContent, id: String) {
+        guard available else { return }
+        requestAuthorizationIfNeeded()
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
     /// Takes the banners of items that were read or deleted in the app out of

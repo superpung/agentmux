@@ -19,6 +19,10 @@ features and may change behavior; a patch version only fixes). Commits follow
 - **Two notification sounds**, one for an agent that needs you (or stopped on
   an error or a limit) and one for a finished turn, each picked from the Mac's
   alert sounds or turned off in Settings.
+- **Update notifications.** A new release is announced once, in a notification
+  with its highlights that opens the release page; AgentMux ▸ Check for
+  Updates… checks at once. No update window and nothing installed for you; the
+  daily check can be turned off in Settings.
 - **Files follow remote changes.** While a Files window is on screen, the file
   shown and the folder listed update by themselves within about a second of
   changing remotely. A text preview keeps your place, and follows new lines
