@@ -57,6 +57,7 @@ struct InboxView: View {
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
+                .animation(Motion.list, value: sections.flatMap { $0.items.map { "\($0.id)\($0.isRead)" } })
             }
         }
         .frame(width: 400, height: 520)
@@ -76,7 +77,7 @@ struct InboxView: View {
             Button { model.markAllInboxRead() } label: {
                 Image(systemName: "checkmark.circle")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.hover)
             .help("Mark All as Read")
             .disabled(model.inbox.unreadCount == 0)
             Menu {
@@ -97,6 +98,8 @@ struct InboxView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .frame(minWidth: 24, minHeight: 22)
+            .hoverBackground()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -135,6 +138,7 @@ private struct InboxRow: View {
                             .monospacedDigit()
                     }
                 }
+                .animation(Motion.quick, value: hovering)
                 (Text(item.kind.label) + Text([item.detail, item.place].compactMap { $0 }.map { " · \($0)" }.joined()))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -144,7 +148,7 @@ private struct InboxRow: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
-        .onHover { hovering = $0 }
+        .debouncedHover { hovering = $0 }
         .help(item.date.formatted(date: .abbreviated, time: .shortened))
         .contextMenu {
             Button("Open Agent", action: open)
@@ -176,7 +180,7 @@ private struct InboxRow: View {
             }
             .help("Delete")
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.hover)
         .font(.caption)
         .foregroundStyle(.secondary)
     }

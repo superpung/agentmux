@@ -49,7 +49,9 @@ struct DetailView: View {
                 DashboardView()
             }
         }
-        .animation(.easeInOut(duration: 0.16), value: model.selection)
+        .animation(Motion.quick, value: model.selection)
+        // "Connecting…" gives way to the terminal with a fade.
+        .animation(Motion.quick, value: model.selection.map { model.terminal(for: $0) != nil })
         .navigationTitle(title)
         .toolbar { toolbarContent }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -228,12 +230,17 @@ private struct StatusBar: View {
                         Button("Send Now") { model.sendNudgeNow(ref) }
                         Button("Cancel") { model.cancelNudge(ref) }
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.hover)
                     .layoutPriority(1)
+                    .transition(.opacity)
                 }
                 if let problem = content?.problem {
-                    Circle().fill(problem.color).frame(width: 7, height: 7)
-                    Text(problem.text).lineLimit(1).layoutPriority(1)
+                    HStack(spacing: 10) {
+                        Circle().fill(problem.color).frame(width: 7, height: 7)
+                        Text(problem.text).lineLimit(1)
+                    }
+                    .layoutPriority(1)
+                    .transition(.opacity)
                 }
                 if model.showsStatusField(.usage), let usage = content?.usage {
                     UsageView(usage: usage).layoutPriority(1)
@@ -242,6 +249,8 @@ private struct StatusBar: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
             .lineLimit(1)
+            .animation(Motion.quick, value: model.pendingNudges[ref] != nil)
+            .animation(Motion.quick, value: content?.problem?.text)
             .padding(.horizontal, 12)
             .statusStripChrome()
             .help(content?.tooltip ?? "")

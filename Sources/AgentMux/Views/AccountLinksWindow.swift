@@ -19,6 +19,7 @@ struct AccountLinksWindow: View {
             header
             Divider()
             content
+                .animation(Motion.quick, value: "\(loading)\(groups.isEmpty)\(error ?? "")")
         }
         .onAppear { Task { await load() } }
         .onChange(of: targetID) { _, _ in
@@ -38,6 +39,7 @@ struct AccountLinksWindow: View {
                 .help("Re-scan this container")
                 .disabled(loading || model.state(targetID) == nil)
         }
+        .animation(Motion.quick, value: loading)
         .padding(.horizontal, 14).padding(.vertical, 8)
     }
 

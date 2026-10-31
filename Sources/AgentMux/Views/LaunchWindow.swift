@@ -38,6 +38,7 @@ struct LaunchWindow: View {
             header
             Divider()
             content
+                .animation(Motion.quick, value: "\(loading)\(shown.isEmpty)\(error ?? "")")
         }
         .onAppear { if sessions.isEmpty { Task { await load() } } }
         .onChange(of: targetID) { _, _ in sessions = []; configDirs = []; Task { await load() } }
@@ -68,6 +69,7 @@ struct LaunchWindow: View {
                 .help("Re-scan this container")
                 .disabled(loading || model.state(targetID) == nil)
         }
+        .animation(Motion.quick, value: loading)
         .padding(.horizontal, 14).padding(.vertical, 8)
     }
 
@@ -181,7 +183,11 @@ private struct ConversationRow: View {
         .padding(.vertical, 4)
     }
 
-    @ViewBuilder private var resumeControl: some View {
+    private var resumeControl: some View {
+        Group { resumeChoice }.animation(Motion.quick, value: launching)
+    }
+
+    @ViewBuilder private var resumeChoice: some View {
         if launching {
             ProgressView().controlSize(.small).frame(width: 96, alignment: .trailing)
         } else if accounts.count <= 1 {

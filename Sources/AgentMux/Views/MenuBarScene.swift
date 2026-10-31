@@ -139,9 +139,10 @@ struct MenuBarContent: View {
                         StatusChip(activity: agent.activity, retrying: agent.isRetrying)
                     }
                     .contentShape(Rectangle())
-                    .padding(.horizontal, 14).padding(.vertical, 5)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.row)
+                .padding(.horizontal, 6)
             }
         }
     }
@@ -151,11 +152,10 @@ struct MenuBarContent: View {
             Button("Open AgentMux") { activate() }
             Spacer()
             Button("Quit") { NSApplication.shared.terminate(nil) }
-                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .font(.caption)
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, 9).padding(.vertical, 5)
     }
 
     @ViewBuilder private func brandIcon(_ kind: AgentKind) -> some View {

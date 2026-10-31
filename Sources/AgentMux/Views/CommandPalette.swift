@@ -97,18 +97,19 @@ struct CommandPalette: View {
                 .onKeyPress(.return) { sendMessage(); return .handled }
                 .onKeyPress(.escape) { close(); return .handled }
                 .disabled(highlightedAgent == nil)
-            if sending { ProgressView().controlSize(.small) }
+            if sending { ProgressView().controlSize(.small).transition(.opacity) }
             Button {
                 sendMessage()
             } label: {
                 Image(systemName: "arrow.up.circle.fill").font(.title2)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(HoverButtonStyle(keepsColor: true))
             .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
             .disabled(!canSend)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .animation(Motion.quick, value: sending)
     }
 
     private var footer: some View {

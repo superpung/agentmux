@@ -56,6 +56,7 @@ struct SessionsWindow: View {
             Spacer()
             newMenu
         }
+        .animation(Motion.quick, value: busy)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
@@ -188,6 +189,8 @@ struct SessionsWindow: View {
         .menuIndicator(.hidden)
         .tint(Theme.textSecondary)
         .fixedSize()
+        .frame(minWidth: 24, minHeight: 22)
+        .hoverBackground()
     }
 
     @ViewBuilder private func paneIcon(_ kind: AgentKind?) -> some View {
@@ -409,6 +412,7 @@ private struct LaunchAgentSheet: View {
         }
         .padding(18)
         .frame(width: 540, height: 580)
+        .animation(Motion.quick, value: "\(loadingDirs)\(launching)\(loadingSessions)\(error ?? "")")
         .task { await loadDirs() }
     }
 
@@ -444,6 +448,8 @@ private struct LaunchAgentSheet: View {
                         }
                     } label: { Image(systemName: "clock.arrow.circlepath") }
                         .menuStyle(.borderlessButton).fixedSize()
+                        .frame(minWidth: 24, minHeight: 22)
+                        .hoverBackground()
                         .help("Existing project directories on this container")
                 }
                 Button { browsing = true } label: { Image(systemName: "folder") }
@@ -575,11 +581,12 @@ private struct RemoteDirPicker: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Button { up() } label: { Image(systemName: "chevron.up") }
-                    .buttonStyle(.borderless).disabled(cwd == "/")
+                    .buttonStyle(.hover).disabled(cwd == "/")
                 Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                 Spacer()
                 if loading { ProgressView().controlSize(.mini) }
             }
+            .animation(Motion.quick, value: loading)
             .padding(.horizontal, 10).padding(.vertical, 8)
             Divider()
             Group {

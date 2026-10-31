@@ -178,6 +178,13 @@ struct OpenWithButton: View {
 
     var body: some View {
         let apps = LocalApps.forFile(named: (path as NSString).lastPathComponent)
+        Group {
+            content(apps)
+        }
+        .animation(Motion.quick, value: busy)
+    }
+
+    @ViewBuilder private func content(_ apps: (preferred: LocalApp?, others: [LocalApp])) -> some View {
         if busy {
             ProgressView().controlSize(.small)
         } else {

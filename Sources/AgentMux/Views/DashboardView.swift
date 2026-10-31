@@ -185,6 +185,7 @@ private struct AgentListSection: View {
                 }
             }
             .background(Theme.itemWash, in: RoundedRectangle(cornerRadius: 10))
+            .animation(Motion.list, value: agents.map(\.id))
         }
     }
 }
@@ -215,7 +216,7 @@ private struct DashAgentRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.row)
     }
 
     @ViewBuilder private var brandIcon: some View {

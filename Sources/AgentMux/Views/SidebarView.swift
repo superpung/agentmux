@@ -132,7 +132,7 @@ struct SidebarView: View {
                 }
             }
         }
-        .animation(.snappy(duration: 0.28), value: groups.map { g in g.agents.map { "\($0.id)" }.joined(separator: ",") }.joined(separator: "|"))
+        .animation(Motion.list, value: groups.map { g in g.agents.map { "\($0.id)" }.joined(separator: ",") }.joined(separator: "|"))
         .searchable(text: $query, placement: .sidebar, prompt: "Search agents")
         .navigationTitle("AgentMux")
         .toolbar {
@@ -478,25 +478,9 @@ private struct PaneRow: View {
 /// Connection summary pinned to the bottom of the sidebar.
 /// Comfortable hit area + hover highlight for a sidebar-footer icon button, so
 /// two adjacent icons read as distinct buttons instead of cramped glyphs.
-private struct FooterIconChrome: ViewModifier {
-    @State private var hovering = false
-
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 12.5))
-            .foregroundStyle(hovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-            .frame(width: 24, height: 22)
-            .background(hovering ? Color.primary.opacity(0.08) : .clear,
-                        in: RoundedRectangle(cornerRadius: 5))
-            .contentShape(Rectangle())
-            .onHover { hovering = $0 }
-    }
-}
-
 private struct StatusFooter: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @State private var countHover = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -507,24 +491,21 @@ private struct StatusFooter: View {
                     Text(statusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .padding(.horizontal, 5).padding(.vertical, 2)
-                .contentShape(Rectangle())
-                .background(countHover ? Color.primary.opacity(0.08) : .clear,
-                            in: RoundedRectangle(cornerRadius: 5))
+                .hoverBackground()
             }
             .buttonStyle(.plain)
-            .onHover { countHover = $0 }
             .help("Show the dashboard")
             Spacer(minLength: 8)
             HStack(spacing: 4) {
                 Button { openWindow(id: "sessions") } label: {
-                    Image(systemName: "rectangle.split.3x1").modifier(FooterIconChrome())
+                    Image(systemName: "rectangle.split.3x1").font(.system(size: 12.5))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
                 .help("Manage tmux sessions")
                 SettingsLink {
-                    Image(systemName: "gearshape").modifier(FooterIconChrome())
+                    Image(systemName: "gearshape").font(.system(size: 12.5))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
                 .help("Settings")
             }
         }

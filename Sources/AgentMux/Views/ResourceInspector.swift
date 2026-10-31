@@ -9,6 +9,13 @@ import SwiftUI
 struct ResourceInspector: View {
     @Environment(AppModel.self) private var model
 
+    /// What has loaded for the agent shown: sections fade in as their data
+    /// arrives instead of popping in.
+    private var loaded: String {
+        guard let ref = model.selection, let state = model.state(ref.targetID) else { return "" }
+        return "\(ref.paneID)\(model.resources[state.host.id] != nil)\(model.gitStatus(for: ref) != nil)\(model.agentResources(for: ref) != nil)"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -31,6 +38,7 @@ struct ResourceInspector: View {
                     }
                     if let host {
                         hostSection(server: state.host.displayName.isEmpty ? state.host.sshDestination : state.host.displayName, host: host)
+                            .transition(.opacity)
                     } else {
                         HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading resources…").foregroundStyle(.secondary) }
                             .font(.caption)
@@ -48,6 +56,7 @@ struct ResourceInspector: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(Motion.quick, value: loaded)
         }
         .onAppear { model.beginResourceMonitoring() }
         .onDisappear { model.endResourceMonitoring() }
@@ -420,8 +429,9 @@ private struct GitChangesButton: View {
             }
             .foregroundStyle(.secondary)
             .contentShape(Rectangle())
+            .padding(.vertical, 3)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.row)
         .popover(isPresented: $open, arrowEdge: .leading) {
             ChangesPopover(files: files, ref: ref)
         }
@@ -481,9 +491,10 @@ private struct FileDiffRow: View {
                     }
                 }
                 .contentShape(Rectangle())
+                .padding(.horizontal, 6).padding(.vertical, 7)
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 12).padding(.vertical, 7)
+            .buttonStyle(.row)
+            .padding(.horizontal, 6)
 
             if expanded {
                 Group {
@@ -500,8 +511,10 @@ private struct FileDiffRow: View {
                             .padding(.horizontal, 14).padding(.bottom, 8)
                     }
                 }
+                .transition(.opacity)
             }
         }
+        .animation(Motion.quick, value: "\(expanded)\(loading)\(diff != nil)\(error ?? "")")
     }
 
     private func toggle() {

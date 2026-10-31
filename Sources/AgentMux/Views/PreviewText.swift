@@ -242,6 +242,7 @@ struct RenderedTextPreview<Source: Equatable & Sendable>: View {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .animation(Motion.quick, value: rendered?.source == source)
         .task(id: source) {
             let source = source, render = render
             rendered = await Task.detached(priority: .userInitiated) {

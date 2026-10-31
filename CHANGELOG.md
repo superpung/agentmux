@@ -15,6 +15,14 @@ features and may change behavior; a patch version only fixes). Commits follow
   changing remotely. A text preview keeps your place, and follows new lines
   when you are at the end, as `tail -f`.
 
+### Changed
+
+- **Hover and motion.** Buttons without a border (in Files, Sessions, the
+  inbox, Settings, tiles, the status bar and the menu bar) show a rounded wash
+  under the pointer; agent rows in the menu bar and the dashboard highlight;
+  controls shown on hover wait a moment before coming and going. Status marks,
+  chips, spinners, loading states and lists change with a short fade.
+
 ## [0.3.0] - 2026-10-30
 
 ### Added

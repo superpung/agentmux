@@ -139,7 +139,7 @@ private struct HostsSettings: View {
                     Button("Edit…") { editor = .edit(host) }
                 }
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.hover)
             .padding(10)
         }
         .sheet(item: $editor) { target in
@@ -250,6 +250,7 @@ private struct ContainersSettings: View {
             Text("\(model.monitoredCount) monitored")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .animation(Motion.quick, value: model.isDiscovering)
             Spacer()
             Button {
                 Task { await model.discoverAll() }

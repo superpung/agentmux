@@ -34,6 +34,7 @@ struct StatusChip: View {
             .padding(.vertical, 2)
             .background(tint.opacity(0.12), in: Capsule())
             .help(label)
+            .animation(Motion.quick, value: label)
         }
     }
 }

@@ -283,8 +283,10 @@ private struct FileTree: View {
                     if dropTargeted, dropFolder == nil {
                         RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.accent, lineWidth: 2)
                             .padding(3).allowsHitTesting(false)
+                            .transition(.opacity)
                     }
                 }
+                .animation(Motion.quick, value: dropTargeted)
         }
         .task(id: FolderLoad(folder: cwd, refresh: refresh)) { await load() }
         .onAppear { connectDragOut() }
@@ -562,12 +564,12 @@ private struct FileTree: View {
     private var header: some View {
         HStack(spacing: 6) {
             Button { navigateUp() } label: { Image(systemName: "chevron.up").font(.caption.weight(.semibold)) }
-                .buttonStyle(.borderless).disabled(cwd == root).opacity(cwd == root ? 0.35 : 1)
+                .buttonStyle(.hover).disabled(cwd == root)
             Text(displayPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
             Spacer(minLength: 4)
-            if loading || busy > 0 { ProgressView().controlSize(.mini) }
+            if loading || busy > 0 { ProgressView().controlSize(.mini).transition(.opacity) }
             Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise").font(.caption.weight(.semibold)) }
-                .buttonStyle(.borderless).disabled(loading)
+                .buttonStyle(.hover).disabled(loading)
                 .help("Reload this folder")
             Menu {
                 Button("New File…", systemImage: "doc.badge.plus") { namePrompt = .newFile }
@@ -576,11 +578,14 @@ private struct FileTree: View {
                 Image(systemName: "plus").font(.caption.weight(.semibold))
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .frame(minWidth: 24, minHeight: 22)
+            .hoverBackground()
             .help("New file or folder")
             Button { startUpload() } label: { Image(systemName: "square.and.arrow.up").font(.caption.weight(.semibold)) }
-                .buttonStyle(.borderless)
+                .buttonStyle(.hover)
                 .help("Upload files into this folder")
         }
+        .animation(Motion.quick, value: loading || busy > 0)
         .padding(.horizontal, 10).padding(.vertical, 6)
     }
 
@@ -620,6 +625,7 @@ private struct FileTree: View {
                                 Text(sizeText(entry.size)).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                             }
                         }
+                        .animation(Motion.quick, value: downloading.contains(entry.path) || opener.opening.contains(entry.path))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -837,6 +843,7 @@ private struct FilePreviewView: View {
                     .environment(\.previewImages, PreviewImages.remote(document: path, host: host, target: target))
             }
         }
+        .animation(Motion.quick, value: "\(path ?? "")\(loading)\(error ?? "")")
         .task(id: FileLoad(path: path, version: version)) { await load() }
     }
 
