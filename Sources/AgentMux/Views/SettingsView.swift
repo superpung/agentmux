@@ -5,14 +5,24 @@ import SwiftUI
 /// the SSH hosts here, then picks which of each host's auto-discovered
 /// containers to monitor. There is no hand-edited config file.
 struct SettingsView: View {
+    /// The tab shown; Help ▸ Keyboard Shortcuts opens on its tab.
+    @AppStorage(Self.tabKey) private var tab = "general"
+    static let tabKey = "settingsTab"
+
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             GeneralSettings()
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag("general")
             HostsSettings()
                 .tabItem { Label("Hosts", systemImage: "server.rack") }
+                .tag("hosts")
             ContainersSettings()
                 .tabItem { Label("Containers", systemImage: "shippingbox") }
+                .tag("containers")
+            ShortcutsSettings()
+                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+                .tag("shortcuts")
         }
         .frame(width: 540, height: 480)
     }

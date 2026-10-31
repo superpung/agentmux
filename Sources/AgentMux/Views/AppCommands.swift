@@ -37,6 +37,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case showActive
     case showAttention
     case settings
+    case keyboardShortcuts
     case checkForUpdates
 
     var id: String { rawValue }
@@ -94,6 +95,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .showActive: AgentFilter.active.systemImage
         case .showAttention: AgentFilter.attention.systemImage
         case .settings: "gearshape"
+        case .keyboardShortcuts: "keyboard"
         case .checkForUpdates: "arrow.down.circle"
         }
     }
@@ -131,6 +133,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .showActive: "Show Active Agents"
         case .showAttention: "Show Agents That Need Attention"
         case .settings: "Settings"
+        case .keyboardShortcuts: "Keyboard Shortcuts"
         case .checkForUpdates: "Check for Updates"
         }
     }
@@ -212,6 +215,9 @@ struct CommandRunner {
         case .showActive: SidebarPreferences.filter = .active
         case .showAttention: SidebarPreferences.filter = .attention
         case .settings: openSettings()
+        case .keyboardShortcuts:
+            UserDefaults.standard.set("shortcuts", forKey: SettingsView.tabKey)
+            openSettings()
         case .checkForUpdates: model.checkForUpdates()
         }
     }

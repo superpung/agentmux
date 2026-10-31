@@ -27,6 +27,10 @@ struct AgentMuxApp: App {
             }
             // Nothing here prints, and ⇧⌘P is the command palette.
             CommandGroup(replacing: .printItem) {}
+            // There is no help book; the shortcuts are what Help can show.
+            CommandGroup(replacing: .help) {
+                KeyboardShortcutsButton(model: model)
+            }
             SidebarCommands()
             // Edit ▸ Find (⌘F, ⌘G, ⇧⌘G, ⌘E) for the Files previews. Items stay
             // disabled where no responder handles them, so a focused terminal
@@ -149,6 +153,19 @@ private struct NewTerminalButton: View {
         }
         .shortcut(.newTerminal)
         .disabled(model.selection == nil)
+    }
+}
+
+/// Opens Settings on its Shortcuts tab.
+private struct KeyboardShortcutsButton: View {
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+    let model: AppModel
+
+    var body: some View {
+        Button("Keyboard Shortcuts") {
+            CommandRunner(model: model, openWindow: openWindow, openSettings: openSettings).perform(.keyboardShortcuts)
+        }
     }
 }
 

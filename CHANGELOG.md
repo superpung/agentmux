@@ -25,6 +25,8 @@ features and may change behavior; a patch version only fixes). Commits follow
   daily check can be turned off in Settings.
 - **Command palette** (⇧⌘P): every command with its key, filtered as you type.
   ⌘K still jumps to an agent; a leading `>` switches it to commands.
+- **Keyboard shortcuts** in Settings ▸ Shortcuts (also Help ▸ Keyboard
+  Shortcuts): every key the app answers to.
 - **Menu bar without resources.** Settings ▸ General ▸ Menu bar ▸ Container CPU
   and memory hides the containers' meters in the menu bar, which then stops
   polling them.
