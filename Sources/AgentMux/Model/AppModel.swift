@@ -90,8 +90,10 @@ final class AppModel {
     var spaceFilter: SpaceKey?
     var showDevicePanel = false
     var showSearch = false
-    /// Toggled by ⌘K; RootView shows the command palette overlay.
-    var showCommandPalette = false
+    /// The palette on screen: agents (⌘K) or commands (⇧⌘P).
+    var palette: PaletteMode?
+    /// The agent whose rename sheet is open.
+    var renaming: AgentEntry?
     private(set) var terminals: [PaneRef: PaneTerminal] = [:]
     /// Mirrors shown in their own window; the main detail renders a placeholder
     /// for these so a single surface is never in two view hierarchies.

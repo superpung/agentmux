@@ -84,9 +84,8 @@ enum AgentFilter: String, CaseIterable, Identifiable {
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @State private var query = ""
-    @AppStorage("sidebarGroupBy") private var groupingRaw = GroupBy.project.rawValue
-    @AppStorage("sidebarFilter") private var filterRaw = AgentFilter.all.rawValue
-    @State private var renaming: AgentEntry?
+    @AppStorage(SidebarPreferences.groupingKey) private var groupingRaw = GroupBy.project.rawValue
+    @AppStorage(SidebarPreferences.filterKey) private var filterRaw = AgentFilter.all.rawValue
 
     private var grouping: GroupBy { GroupBy(rawValue: groupingRaw) ?? .project }
     private var filter: AgentFilter { AgentFilter(rawValue: filterRaw) ?? .all }
@@ -147,11 +146,15 @@ struct SidebarView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter() }
-        .sheet(item: $renaming) { agent in
+        .sheet(item: renaming) { agent in
             RenameSheet(current: model.customName(agent.identityKey) ?? "", placeholder: agent.title) { name in
                 model.setCustomName(agent.identityKey, name)
             }
         }
+    }
+
+    private var renaming: Binding<AgentEntry?> {
+        Binding(get: { model.renaming }, set: { model.renaming = $0 })
     }
 
     /// One row fills the detail area; ⌘- or ⇧-clicking more rows shows them
@@ -175,7 +178,7 @@ struct SidebarView: View {
         Button(model.isPinned(agent.identityKey) ? "Unpin" : "Pin") {
             model.togglePin(agent.identityKey)
         }
-        Button("Rename…") { renaming = agent }
+        Button("Rename…") { model.renaming = agent }
         if model.customName(agent.identityKey) != nil {
             Button("Reset Name") { model.setCustomName(agent.identityKey, "") }
         }

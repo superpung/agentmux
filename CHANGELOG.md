@@ -23,6 +23,8 @@ features and may change behavior; a patch version only fixes). Commits follow
   with its highlights that opens the release page; AgentMux ▸ Check for
   Updates… checks at once. No update window and nothing installed for you; the
   daily check can be turned off in Settings.
+- **Command palette** (⇧⌘P): every command with its key, filtered as you type.
+  ⌘K still jumps to an agent; a leading `>` switches it to commands.
 - **Menu bar without resources.** Settings ▸ General ▸ Menu bar ▸ Container CPU
   and memory hides the containers' meters in the menu bar, which then stops
   polling them.
@@ -39,6 +41,8 @@ features and may change behavior; a patch version only fixes). Commits follow
   up. An open view is a small gray dot on the agent's icon, where it was a
   green dot beside the time.
 - Green in an agent's status means done only: the idle chip is gray.
+- **The ⌘K palette** is an opaque panel with the system's highlight, and opens
+  and closes with motion.
 - **Hover and motion.** Buttons without a border (in Files, Sessions, the
   inbox, Settings, tiles, the status bar and the menu bar) show a rounded wash
   under the pointer; agent rows in the menu bar and the dashboard highlight;
@@ -52,6 +56,8 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 - The menu bar's list of agents could be cut short; it now takes its agents'
   height, and scrolls past about seven.
+- The ⌘K palette could list an agent twice, or highlight a different agent
+  than the one a message would go to.
 
 ## [0.3.0] - 2026-10-30
 

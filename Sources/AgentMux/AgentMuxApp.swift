@@ -25,32 +25,36 @@ struct AgentMuxApp: App {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { model.checkForUpdates() }
             }
+            // Nothing here prints, and ⇧⌘P is the command palette.
+            CommandGroup(replacing: .printItem) {}
             SidebarCommands()
             // Edit ▸ Find (⌘F, ⌘G, ⇧⌘G, ⌘E) for the Files previews. Items stay
             // disabled where no responder handles them, so a focused terminal
             // still receives these keys.
             TextEditingCommands()
             CommandGroup(after: .toolbar) {
-                Button("Command Palette") { model.showCommandPalette = true }
-                    .keyboardShortcut("k", modifiers: .command)
+                Button("Go to Agent") { model.palette = .agents }
+                    .shortcut(.goToAgent)
+                Button("Command Palette") { model.palette = .commands }
+                    .shortcut(.commandPalette)
                 Button("Dashboard") { model.selection = nil }
-                    .keyboardShortcut("0", modifiers: .command)
+                    .shortcut(.dashboard)
                 OpenSessionsButton(model: model)
                 OpenAccountsButton(model: model)
                 NewTerminalButton(model: model)
                 Button("Refresh") { model.refreshAll() }
-                    .keyboardShortcut("r", modifiers: .command)
+                    .shortcut(.refresh)
                 Button("Next Agent") { model.selectAdjacentAgent(1) }
-                    .keyboardShortcut("]", modifiers: .command)
+                    .shortcut(.nextAgent)
                 Button("Previous Agent") { model.selectAdjacentAgent(-1) }
-                    .keyboardShortcut("[", modifiers: .command)
+                    .shortcut(.previousAgent)
                 // With several agents shown (⌘-click in the sidebar), the
                 // focused one fills the area until toggled back.
-                Button(model.isZoomed ? "Show All Agents" : "Zoom Agent") { model.toggleZoom() }
-                    .keyboardShortcut(.return, modifiers: [.command, .shift])
+                Button(AppCommand.zoom.title(model)) { model.toggleZoom() }
+                    .shortcut(.zoom)
                     .disabled(!model.isTiled)
                 Button("Notifications") { model.showInbox = true }
-                    .keyboardShortcut("n", modifiers: [.command, .option])
+                    .shortcut(.notifications)
                 Divider()
                 OpenFilesButton(model: model)
                 Divider()
@@ -116,7 +120,7 @@ private struct OpenSessionsButton: View {
             model.containerTab = .sessions
             openWindow(id: "sessions")
         }
-        .keyboardShortcut("s", modifiers: [.command, .shift])
+        .shortcut(.sessions)
     }
 }
 
@@ -143,7 +147,7 @@ private struct NewTerminalButton: View {
         Button("New Terminal") {
             if let spec = model.newTerminalSpec() { openWindow(value: spec) }
         }
-        .keyboardShortcut("t", modifiers: .command)
+        .shortcut(.newTerminal)
         .disabled(model.selection == nil)
     }
 }
@@ -156,7 +160,7 @@ private struct OpenFilesButton: View {
 
     var body: some View {
         Button("Files") { if let spec = model.selectedFilesSpec { openWindow(value: spec) } }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .shortcut(.files)
             .disabled(model.selectedFilesSpec == nil)
     }
 }

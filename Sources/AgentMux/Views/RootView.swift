@@ -63,14 +63,22 @@ struct RootView: View {
         // The palette fades in over a lightly dimmed window and settles
         // down from a slightly smaller size; it fades out on close.
         .overlay {
-            if model.showCommandPalette {
-                CommandPalette(isPresented: paletteBinding)
-                    .transition(.opacity)
+            ZStack(alignment: .top) {
+                if model.palette != nil {
+                    Color.black.opacity(0.12)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.palette = nil }
+                        .transition(.opacity)
+                }
+                if let mode = model.palette {
+                    CommandPalette(mode: mode)
+                        .padding(.top, 90)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                }
             }
+            .animation(Motion.panel, value: model.palette != nil)
         }
     }
 
-    private var paletteBinding: Binding<Bool> {
-        Binding(get: { model.showCommandPalette }, set: { model.showCommandPalette = $0 })
-    }
 }

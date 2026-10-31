@@ -300,6 +300,10 @@ extension AppModel {
         deviceFilter == nil && Set(paneEntries.map(\.device.name)).count > 1
     }
 
+    var selectedAgent: AgentEntry? {
+        selection.flatMap(agentEntry)
+    }
+
     func agentEntry(_ ref: PaneRef) -> AgentEntry? {
         allAgentEntries.first { $0.ref == ref }
     }
