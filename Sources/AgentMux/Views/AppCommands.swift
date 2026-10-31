@@ -258,6 +258,30 @@ extension KeyboardShortcut {
     }
 }
 
+extension KeyboardShortcut {
+    /// The same key in Ghostty's keybind syntax: "super+shift+p".
+    var ghosttyTrigger: String {
+        var parts: [String] = []
+        if modifiers.contains(.control) { parts.append("ctrl") }
+        if modifiers.contains(.option) { parts.append("alt") }
+        if modifiers.contains(.shift) { parts.append("shift") }
+        if modifiers.contains(.command) { parts.append("super") }
+        switch key {
+        case .return: parts.append("enter")
+        case .escape: parts.append("escape")
+        case .delete: parts.append("backspace")
+        case .tab: parts.append("tab")
+        case .space: parts.append("space")
+        case .upArrow: parts.append("arrow_up")
+        case .downArrow: parts.append("arrow_down")
+        case .leftArrow: parts.append("arrow_left")
+        case .rightArrow: parts.append("arrow_right")
+        default: parts.append(String(key.character).lowercased())
+        }
+        return parts.joined(separator: "+")
+    }
+}
+
 extension View {
     /// The command's key, if it has one.
     @ViewBuilder func shortcut(_ command: AppCommand) -> some View {

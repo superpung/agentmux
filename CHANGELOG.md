@@ -54,6 +54,10 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Fixed
 
+- With a terminal focused, ⌘K, ⌘T, ⌘] / ⌘[, ⌘0, ⇧⌘F, ⇧⌘↩ and ⌘, did nothing,
+  and neither did ⌘Q, ⌘W, ⌘N or ⌃⌘F: the terminal took them first. They now
+  reach the menus. In a terminal, ⌘K no longer clears its screen and ⌘0 no
+  longer resets its text size.
 - The menu bar's list of agents could be cut short; it now takes its agents'
   height, and scrolls past about seven.
 - The ⌘K palette could list an agent twice, or highlight a different agent

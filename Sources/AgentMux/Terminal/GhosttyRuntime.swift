@@ -95,12 +95,26 @@ enum GhosttyRuntime {
             builder.withWindowPaddingY(0)
             // ⌘V is handled by PasteInterceptingTerminalView (paste through tmux).
             builder.withCustom("keybind", "super+v=unbind")
+            for trigger in appOwnedKeys {
+                builder.withCustom("keybind", "\(trigger)=unbind")
+            }
             // Option as Meta, for readline chords in shells and agent TUIs.
             builder.withCustom("macos-option-as-alt", "true")
             builder.withCustom("copy-on-select", "clipboard")
             // Shift always selects locally, even when the remote app captures the mouse.
             builder.withCustom("mouse-shift-capture", "never")
         }
+    }
+
+    /// Keys the app's menus and macOS own. A focused terminal sees keys before
+    /// the menus, and Ghostty's defaults take many of these: for actions an
+    /// embedded terminal never performs (quit, close or open a window, full
+    /// screen, its own palette, tabs and splits), or for its own use where
+    /// the app's command should win (⌘K clears the screen, ⌘0 resets the
+    /// font size). Unbound, they reach the menus.
+    static var appOwnedKeys: [String] {
+        AppCommand.allCases.compactMap(\.shortcut).map(\.ghosttyTrigger)
+            + ["super+q", "super+w", "super+n", "ctrl+super+f"]
     }
 
     /// About one terminal cell at the current font, for choosing how to tile
