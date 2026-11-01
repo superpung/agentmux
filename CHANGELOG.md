@@ -27,6 +27,10 @@ features and may change behavior; a patch version only fixes). Commits follow
   ⌘K still jumps to an agent; a leading `>` switches it to commands.
 - **Keyboard shortcuts** in Settings ▸ Shortcuts (also Help ▸ Keyboard
   Shortcuts): every key the app answers to.
+- **Launch from the main window.** The + in the sidebar (⌘N, or Launch Agent
+  in the palette) opens the launch sheet with a container picker, starting
+  fresh; once the new agent's pane is up it is selected and opened, wherever
+  it was launched from.
 - **Menu bar without resources.** Settings ▸ General ▸ Menu bar ▸ Container CPU
   and memory hides the containers' meters in the menu bar, which then stops
   polling them.
@@ -49,6 +53,9 @@ features and may change behavior; a patch version only fixes). Commits follow
   up. An open view is a small gray dot on the agent's icon, where it was a
   green dot beside the time.
 - Green in an agent's status means done only: the idle chip is gray.
+- The Sessions window's Launch tab is now History. Refresh leaves the sidebar's
+  toolbar for the +; ⌘R and the View menu keep it. ⌘N launches an agent
+  instead of opening another main window.
 - **The ⌘K palette** is an opaque panel with the system's highlight, and opens
   and closes with motion.
 - **Hover and motion.** Buttons without a border (in Files, Sessions, the

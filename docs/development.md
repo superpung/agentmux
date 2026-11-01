@@ -53,7 +53,7 @@ at it without pressing keys: `open --env AGENTMUX_PALETTE=commands build/AgentMu
 whatever the Mac's. `AGENTMUX_PREVIEW=menubar` shows the menu-bar popover's
 content in a window, to look at it without clicking the menu bar.
 `AGENTMUX_TILES=<target>/<pane>,<target>/<pane>` shows those panes side by
-side once they are found.
+side once they are found. `AGENTMUX_LAUNCH=1` opens the Launch Agent sheet.
 
 ## Source layout
 

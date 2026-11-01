@@ -114,7 +114,7 @@ enum GhosttyRuntime {
     /// font size). Unbound, they reach the menus.
     static var appOwnedKeys: [String] {
         AppCommand.allCases.compactMap(\.shortcut).map(\.ghosttyTrigger)
-            + ["super+q", "super+w", "super+n", "ctrl+super+f"]
+            + ["super+q", "super+w", "ctrl+super+f"]
     }
 
     /// About one terminal cell at the current font, for choosing how to tile

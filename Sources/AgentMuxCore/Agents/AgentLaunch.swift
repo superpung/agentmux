@@ -273,42 +273,54 @@ public extension AgentSessionProbe {
 }
 
 /// Starts or resumes an agent by creating a tmux session/window and typing the
-/// launch command into its interactive shell. Only ever invoked from the
-/// Sessions window.
+/// launch command into its interactive shell. Each returns the new pane's id
+/// (`%12`), so the app can show the agent once it is up.
 public enum AgentLauncher {
     /// Creates `name` at `cwd` and runs `command` in it.
-    public static func launchInNewSession(host: HostConfig, target: TargetConfig, name: String, cwd: String, command: String) async -> Result<Void, RemoteFailure> {
+    public static func launchInNewSession(host: HostConfig, target: TargetConfig, name: String, cwd: String, command: String) async -> Result<String, RemoteFailure> {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return .failure(RemoteFailure(.remoteCommandFailed, detail: "empty session name")) }
-        return await run(host, target, [
-            ["new-session", "-d", "-s", trimmed, "-c", cwd],
-            ["send-keys", "-t", trimmed, "-l", command],
-            ["send-keys", "-t", trimmed, "Enter"],
-        ])
+        return await run(host, target, create: ["new-session", "-d", "-s", trimmed, "-c", cwd], command: command)
     }
 
     /// Opens a new window in `sessionID` at `cwd` and runs `command` in it.
-    public static func launchInNewWindow(host: HostConfig, target: TargetConfig, sessionID: String, cwd: String, command: String) async -> Result<Void, RemoteFailure> {
+    public static func launchInNewWindow(host: HostConfig, target: TargetConfig, sessionID: String, cwd: String, command: String) async -> Result<String, RemoteFailure> {
         guard TmuxQuote.id(sessionID) != nil else {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "invalid tmux id: \(sessionID)"))
         }
-        return await run(host, target, [
-            ["new-window", "-t", sessionID, "-c", cwd],
-            ["send-keys", "-t", sessionID, "-l", command],
-            ["send-keys", "-t", sessionID, "Enter"],
-        ])
+        return await run(host, target, create: ["new-window", "-t", sessionID, "-c", cwd], command: command)
     }
 
-    /// Runs each tmux command (raw args, shell-quoted here) in order.
-    private static func run(_ host: HostConfig, _ target: TargetConfig, _ commands: [[String]]) async -> Result<Void, RemoteFailure> {
+    /// The shell script: `create` (a tmux command that makes a pane) prints
+    /// the new pane's id, `command` is typed into that pane, and the id is
+    /// reported as `@@pane <id>`.
+    static func script(tmux: [String], create: [String], command: String) -> String {
+        let made = ShellQuote.command(tmux + [create[0], "-P", "-F", "#{pane_id}"] + create.dropFirst())
+        let typed = ShellQuote.command(tmux + ["send-keys", "-t"]) + " \"$p\" -l " + ShellQuote.word(command)
+        let enter = ShellQuote.command(tmux + ["send-keys", "-t"]) + " \"$p\" Enter"
+        return "p=$(\(made)) && \(typed) && \(enter) && printf '@@pane %s\\n' \"$p\""
+    }
+
+    /// The pane id the script reported.
+    static func paneID(in output: String) -> String? {
+        output.split(whereSeparator: \.isNewline).lazy
+            .compactMap { $0.hasPrefix("@@pane ") ? String($0.dropFirst(7)) : nil }
+            .first { TmuxQuote.id($0) != nil }
+    }
+
+    private static func run(_ host: HostConfig, _ target: TargetConfig, create: [String], command: String) async -> Result<String, RemoteFailure> {
         let tmux: TmuxInvocation
         do {
             tmux = try target.executionContext().tmux
         } catch {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "\(error)"))
         }
-        let script = commands.map { ShellQuote.command(tmux.argv + $0) }.joined(separator: " && ")
-        return (await RemoteScript.run("\(script) 2>&1", host: host, target: target, timeoutSeconds: 15)).map { _ in () }
+        let result = await RemoteScript.run("\(script(tmux: tmux.argv, create: create, command: command)) 2>&1",
+                                            host: host, target: target, timeoutSeconds: 15)
+        return result.flatMap { output in
+            paneID(in: output).map(Result.success)
+                ?? .failure(RemoteFailure(.remoteCommandFailed, detail: output.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
     }
 }
 

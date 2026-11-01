@@ -2,11 +2,11 @@ import SwiftUI
 
 /// Which view the combined container window shows.
 enum ContainerTab: String, CaseIterable, Sendable {
-    case sessions, launch, accounts
+    case sessions, history, accounts
     var label: String {
         switch self {
         case .sessions: return "Sessions"
-        case .launch: return "Launch"
+        case .history: return "History"
         case .accounts: return "Accounts"
         }
     }
@@ -38,7 +38,7 @@ struct ContainerWindow: View {
             Divider()
             switch model.containerTab {
             case .sessions: SessionsWindow(targetID: $targetID)
-            case .launch: LaunchWindow(targetID: $targetID)
+            case .history: LaunchWindow(targetID: $targetID)
             case .accounts: AccountLinksWindow(targetID: $targetID)
             }
         }

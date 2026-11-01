@@ -19,7 +19,7 @@ struct ShortcutsSettings: View {
 
     private var sections: [(String, [Row])] {
         [
-            ("Agents", commands([.goToAgent, .nextAgent, .previousAgent, .zoom, .dashboard, .refresh])
+            ("Agents", commands([.launchAgent, .goToAgent, .nextAgent, .previousAgent, .zoom, .dashboard, .refresh])
                 + [Row(title: "Show Side by Side", keys: "⌘-Click")]),
             ("Windows", commands([.commandPalette, .files, .newTerminal, .sessions, .notifications, .toggleSidebar, .settings])),
             ("Terminal", [

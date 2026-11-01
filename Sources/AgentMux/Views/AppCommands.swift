@@ -14,6 +14,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case zoom
     case files
     case newTerminal
+    case launchAgent
     case openInWindow
     case redraw
     case closeView
@@ -52,6 +53,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .zoom: KeyboardShortcut(.return, modifiers: [.command, .shift])
         case .files: KeyboardShortcut("f", modifiers: [.command, .shift])
         case .newTerminal: KeyboardShortcut("t", modifiers: .command)
+        case .launchAgent: KeyboardShortcut("n", modifiers: .command)
         case .notifications: KeyboardShortcut("n", modifiers: [.command, .option])
         case .sessions: KeyboardShortcut("s", modifiers: [.command, .shift])
         case .refresh: KeyboardShortcut("r", modifiers: .command)
@@ -72,6 +74,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .zoom: "arrow.up.left.and.arrow.down.right"
         case .files: "folder"
         case .newTerminal: "terminal"
+        case .launchAgent: "plus"
         case .openInWindow: "macwindow.on.rectangle"
         case .redraw: "arrow.triangle.2.circlepath"
         case .closeView: "xmark.circle"
@@ -110,6 +113,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .zoom: model.isZoomed ? "Show All Agents" : "Zoom Agent"
         case .files: "Files"
         case .newTerminal: "New Terminal"
+        case .launchAgent: "Launch Agent"
         case .openInWindow: "Open in New Window"
         case .redraw: "Redraw"
         case .closeView: "Close View"
@@ -160,6 +164,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .showAll: return SidebarPreferences.filter != .all
         case .showActive: return SidebarPreferences.filter != .active
         case .showAttention: return SidebarPreferences.filter != .attention
+        case .launchAgent: return !model.targets.isEmpty
         case .checkForUpdates: return UpdateChecker.current != nil
         default: return true
         }
@@ -184,6 +189,7 @@ struct CommandRunner {
         case .zoom: model.toggleZoom()
         case .files: if let spec = model.selectedFilesSpec { openWindow(value: spec) }
         case .newTerminal: if let spec = model.newTerminalSpec() { openWindow(value: spec) }
+        case .launchAgent: model.showLaunch = true
         case .openInWindow:
             if let selection {
                 model.popOut(selection)

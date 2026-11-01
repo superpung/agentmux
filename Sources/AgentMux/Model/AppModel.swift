@@ -94,6 +94,9 @@ final class AppModel {
     var palette: PaletteMode? = AppModel.paletteFromEnvironment()
     /// The agent whose rename sheet is open.
     var renaming: AgentEntry?
+    /// The main window's Launch Agent sheet is open (AGENTMUX_LAUNCH=1 opens
+    /// it at launch, to look at it without clicking).
+    var showLaunch = ProcessInfo.processInfo.environment["AGENTMUX_LAUNCH"] == "1"
     private(set) var terminals: [PaneRef: PaneTerminal] = [:]
     /// Mirrors shown in their own window; the main detail renders a placeholder
     /// for these so a single surface is never in two view hierarchies.
@@ -849,14 +852,14 @@ final class AppModel {
     }
 
     /// Starts (or resumes) one agent in its own new tmux session. Returns nil on
-    /// success, else an error string.
+    /// success, else an error string. The new agent is shown once it is up.
     func launchAgent(_ targetID: String, kind: AgentKind, configDir: String, cwd: String, resumeID: String?) async -> String? {
         guard let s = state(targetID) else { return "unknown target" }
         guard let command = AgentCommand.launch(kind: kind, configDir: configDir, resumeID: resumeID) else {
             return "Couldn't build a launch command for this agent."
         }
         let name = uniqueSessionName(targetID, base: SpaceLabel.label(cwd))
-        return adminResult(await AgentLauncher.launchInNewSession(host: s.host, target: s.target, name: name, cwd: cwd, command: command), targetID: targetID)
+        return launched(await AgentLauncher.launchInNewSession(host: s.host, target: s.target, name: name, cwd: cwd, command: command), targetID: targetID)
     }
 
     /// Starts (or resumes) one agent in a new window of an existing session.
@@ -865,7 +868,14 @@ final class AppModel {
         guard let command = AgentCommand.launch(kind: kind, configDir: configDir, resumeID: resumeID) else {
             return "Couldn't build a launch command for this agent."
         }
-        return adminResult(await AgentLauncher.launchInNewWindow(host: s.host, target: s.target, sessionID: sessionID, cwd: cwd, command: command), targetID: targetID)
+        return launched(await AgentLauncher.launchInNewWindow(host: s.host, target: s.target, sessionID: sessionID, cwd: cwd, command: command), targetID: targetID)
+    }
+
+    /// The refresh this asks for finds the new pane, then selects and opens it
+    /// as a click would. Of several launched at once, the last is shown.
+    private func launched(_ result: Result<String, RemoteFailure>, targetID: String) -> String? {
+        if case let .success(paneID) = result { pendingOpen = (targetID, paneID) }
+        return adminResult(result.map { _ in () }, targetID: targetID)
     }
 
     /// Real (non-grouped) sessions on a target, for the launch destination picker.

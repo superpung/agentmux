@@ -26,6 +26,12 @@ struct AgentMuxApp: App {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { model.checkForUpdates() }
             }
+            // ⌘N launches an agent; one main window is all the app needs.
+            CommandGroup(replacing: .newItem) {
+                Button("Launch Agent…") { model.showLaunch = true }
+                    .shortcut(.launchAgent)
+                    .disabled(model.targets.isEmpty)
+            }
             // Nothing here prints, and ⇧⌘P is the command palette.
             CommandGroup(replacing: .printItem) {}
             // There is no help book; the shortcuts are what Help can show.

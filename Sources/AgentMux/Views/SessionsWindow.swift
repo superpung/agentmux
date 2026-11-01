@@ -330,16 +330,24 @@ private struct NewSessionSheet: View {
 /// Launch (or resume) a Claude Code / Codex agent: pick the account (config
 /// dir), then resume chosen past sessions or start fresh in a project dir. Each
 /// launched agent lands in its own new tmux session. Session metadata only —
-/// never message text.
-private struct LaunchAgentSheet: View {
+/// never message text. From the main window's + it also picks the container
+/// and opens on starting fresh.
+struct LaunchAgentSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    let targetID: String
+    @State private var targetID: String
+    private let choosesContainer: Bool
 
     @State private var kind: AgentKind = .claudeCode
     @State private var configDirs: [AgentConfigDir] = []
     @State private var selectedDir: AgentConfigDir?
-    @State private var resuming = true
+    @State private var resuming: Bool
+
+    init(targetID: String, choosesContainer: Bool = false, startsFresh: Bool = false) {
+        _targetID = State(initialValue: targetID)
+        self.choosesContainer = choosesContainer
+        _resuming = State(initialValue: !startsFresh)
+    }
     @State private var sessions: [AgentSessionInfo] = []
     @State private var picked: Set<String> = []
     @State private var freshCwd = ""
@@ -356,8 +364,19 @@ private struct LaunchAgentSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Launch Agent").font(.headline)
-                Label(model.state(targetID)?.device.name ?? targetID, systemImage: "shippingbox")
-                    .font(.caption).foregroundStyle(.secondary)
+                if choosesContainer {
+                    HStack(spacing: 6) {
+                        Image(systemName: "shippingbox").foregroundStyle(.secondary)
+                        Picker("Container", selection: $targetID) {
+                            ForEach(model.targets) { Text($0.device.name).tag($0.id) }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                } else {
+                    Label(model.state(targetID)?.device.name ?? targetID, systemImage: "shippingbox")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Picker("Agent", selection: $kind) {
@@ -413,7 +432,15 @@ private struct LaunchAgentSheet: View {
         .padding(18)
         .frame(width: 540, height: 580)
         .animation(Motion.quick, value: "\(loadingDirs)\(launching)\(loadingSessions)\(error ?? "")")
-        .task { await loadDirs() }
+        // Another container has its own accounts, sessions and folders.
+        .task(id: targetID) {
+            configDirs = []
+            selectedDir = nil
+            sessions = []
+            destination = ""
+            error = nil
+            await loadDirs()
+        }
     }
 
     @ViewBuilder private var resumeList: some View {

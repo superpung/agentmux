@@ -136,14 +136,18 @@ struct SidebarView: View {
         .navigationTitle("AgentMux")
         .toolbar {
             ToolbarItem { viewOptionsMenu }
+            // Refresh stays in the View menu and the palette (⌘R): polling
+            // keeps every container current on its own.
             ToolbarItem {
                 Button {
-                    model.refreshAll()
+                    model.showLaunch = true
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    Label("Launch Agent", systemImage: "plus")
                 }
-                .help("Refresh all targets")
+                .help("Launch Agent")
+                .disabled(model.targets.isEmpty)
             }
+
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter() }
         .sheet(item: renaming) { agent in

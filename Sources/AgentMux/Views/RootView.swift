@@ -53,6 +53,12 @@ struct RootView: View {
             ResourceInspector()
                 .inspectorColumnWidth(min: 260, ideal: 330, max: 460)
         }
+        .sheet(isPresented: $model.showLaunch) {
+            // The container of the agent shown, else the first one.
+            LaunchAgentSheet(targetID: model.selection?.targetID ?? model.targets.first?.id ?? "",
+                             choosesContainer: true, startsFresh: true)
+                .environment(model)
+        }
         .onChange(of: model.previewRequest) { _, request in
             if let request { openWindow(value: request.spec) }
         }
