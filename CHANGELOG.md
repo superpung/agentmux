@@ -8,6 +8,8 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-01
+
 ### Added
 
 - **Done marks.** An agent that finished while you were not looking is marked
@@ -244,7 +246,8 @@ First public release.
 - Avoids a tmux server segfault on grouped-session teardown by never destroying a
   session while its control client is attached.
 
-[Unreleased]: https://github.com/superpung/agentmux/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/superpung/agentmux/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/superpung/agentmux/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/superpung/agentmux/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/superpung/agentmux/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/superpung/agentmux/compare/v0.2.1...v0.2.2
