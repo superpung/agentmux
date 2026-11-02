@@ -38,39 +38,36 @@ What makes it different:
 
 ## Features
 
-- 🪟 **One window for every agent.** Claude Code and Codex across SSH hosts and Docker containers, grouped by container, project, session, or status, with search, pinning, and rename.
-- 🔎 **Auto-discovery.** Point AgentMux at a host; it finds the containers and lets you pick which to monitor.
-- 📊 **Fleet dashboard.** Per-account usage (5-hour and 7-day limits with reset countdowns), agent counts and activity, and per-container CPU and memory sparklines.
-- 🎛️ **Usage at a glance.** Context window %, 5h / 7d limits, and the model and reasoning effort each agent is using, in a status bar whose fields you choose.
-- 🖥️ **Live terminal mirror.** Open the actual tmux pane an agent runs in, softly resized to a readable font, or pop it out into its own window. Your keystrokes go to that pane only; your own tmux clients stay untouched.
-- 🪟 **Several agents at once.** ⌘-click up to four agents in the sidebar to tile them, laid out to the window's shape (side by side, stacked, or a grid). Click a tile to type into it, ⌘] / ⌘[ to move between tiles, ⇧⌘↩ to zoom one. See [Several agents at once](#several-agents-at-once).
-- ⌨️ **Command palette.** ⇧⌘P lists every command with its key, filtered as you type: open Files or a terminal, pin, rename, zoom, regroup or filter the sidebar, clear done marks, and more. ⌘K jumps to any agent or sends a prompt straight into one; typing `>` there switches to commands. Settings ▸ Shortcuts lists every key.
-- 🚀 **Launch, resume & switch.** Start or resume a Claude Code or Codex agent in any directory from the + in the sidebar (⌘N), which then opens it, and switch a Claude or Codex account in place, resuming the same conversation. The Sessions window's History lists every past conversation in a container, to resume under any account.
-- 🧭 **Activity & faults.** Working, waiting for input or approval, or idle: Claude Code's own reported state, else structural session-log fields and a screen verdict. An agent waiting out an API retry shows as **Retrying**. A turn that stopped on a usage limit or on an API error is marked in the sidebar, with the limit's reset time.
-- ✅ **Done marks and working time.** An agent that finished while you were not looking is marked **Done** with a green check until you look at it, and sorts right after the agents that need you. A working agent shows for how long it has been working.
-- 🔁 **Auto-continue.** Optionally sends `continue` to an agent stopped by a connection or server error, after a visible wait you can cancel, and never over your typing or an unsent draft. See [Notifications and auto-continue](#notifications-and-auto-continue).
-- 🔔 **Notification inbox.** Finished, needs you, usage limit, stopped on an error, auto-continued: each goes to a list behind the toolbar bell with unread state, filters and clear, a Dock badge, and a desktop banner when you are not already looking at that agent.
-- 🔬 **Resource inspector.** Per-agent CPU, memory and uptime, git working-tree status (branch, diff, ahead/behind), and host load, memory, disk and GPU.
-- 📁 **Files.** Browse the remote working directory with rich previews: syntax-highlighted code, Markdown, CSV/TSV, Jupyter notebooks, HTML, RTF, SVG, PDF and images. Markdown, notebooks and HTML pages show their pictures, from the container or the web. The file shown and the folder listed update by themselves when they change remotely. Word, Excel and PowerPoint (and Pages, Numbers, Keynote) show as Quick Look shows them, with a searchable Text form; audio and video play; `.gz` / `.bz2` / `.xz` files show what they hold, zip and tar archives their listing, other binaries a hex view. Rendered formats switch to their source; ⌘F finds in every text and PDF preview (on a page or web view it switches to the text), also while the file list has the keyboard. Links in a preview open: a web page in your browser, another file or folder in the window (at its `#heading` or `#L12` line), with Back and Forward to return. Open a file in a Mac app (PowerPoint for a deck, say) from the toolbar or its context menu; the app gets a read-only copy. Drag files in from Finder to upload or out to Finder to download, and create, rename or delete files and folders.
-- 🧩 **tmux management.** Create or kill sessions, windows and panes, plus a throwaway shell: ⌘T in the selected agent's container, or in any container from the menu of the + in the sidebar.
-- 📍 **Menu-bar extra.** The agents that need you, are done or are working, live container CPU and memory (can be hidden in Settings), and jump to any agent without opening the main window.
-- 🔒 **Privacy-first.** Auto-refresh is read-only and structural, never conversation content, tokens, or credentials.
-- 🆕 **Update notifications.** A new release is announced once in a notification that opens its page; no update window, nothing installed for you. AgentMux ▸ Check for Updates… asks at once.
+- 🪟 **One window for every agent.** Claude Code and Codex across SSH hosts and Docker containers, found automatically, grouped by container, project, session or status.
+- 🖥️ **Live terminal.** The agent's real tmux pane, resized to a readable font, in the main window or a window of its own; your own tmux clients stay untouched.
+- 🧱 **Several at once.** ⌘-click up to four agents to tile them as cards, laid out to the window's shape.
+- 🧭 **Status at a glance.** Working, needs you, done, retrying, or stopped on a usage limit or an error, and how long each has been working.
+- 🎛️ **Usage.** Context %, 5-hour and 7-day limits with reset times, and the model and effort, per agent and per account.
+- 📊 **Dashboard and menu bar.** Every account's limits, the agents that need you, and live CPU and memory per container.
+- 🔔 **Notifications.** An inbox with a banner only when you are not looking, and optional auto-continue after a connection or server error.
+- 🚀 **Launch, resume and switch.** Start or resume an agent in any directory (⌘N), or move it to another account mid-conversation.
+- 📁 **Files.** Browse and preview the remote working directory: code, Markdown, notebooks, PDF, Office documents and more.
+- 🔬 **Resources.** Per-agent CPU, memory and git status; host load, disk and GPU.
+- 🧩 **tmux.** Create or kill sessions, windows and panes, or open a throwaway shell in any container (⌘T).
+- ⌨️ **Keyboard first.** ⌘K jumps to any agent, ⇧⌘P runs any command, and Settings ▸ Shortcuts lists every key.
+- 🆕 **Update notifications.** A new release is announced in a notification; nothing installs itself.
+
+How tiles, notifications, auto-continue and file previews work in detail: [docs/usage.md](docs/usage.md).
 
 ## How it compares
 
 Every similar tool *launches* agents for you (in local git worktrees, or on its own runtime). AgentMux instead watches the ones you **already run** on remote machines:
 
-| Capability | AgentMux | herdr | Orca | Conductor | Claude Squad | kero | Lody | herdrm | waku |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| Watch already-running agents (no runtime, nothing to launch) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🔶 | ❌ |
-| Remote over SSH | ✅ | 🔶 | ❌ | ❌ | ❌ | ❌ | 🔶 | 🔶 | ❌ |
-| Auto-discover Docker containers | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Host/container metrics, incl. GPU | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Switch Claude/Codex account in place | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Native Mac app (no Electron/TUI) | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| Capability | AgentMux | herdr | Orca | Conductor | Claude Squad | kero | Lody | herdrm | waku | Paseo |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| Watch already-running agents (no runtime, nothing to launch) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🔶 | ❌ | ❌ |
+| Remote over SSH | ✅ | 🔶 | ❌ | ❌ | ❌ | ❌ | 🔶 | 🔶 | ❌ | 🔶 |
+| Auto-discover Docker containers | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Host/container metrics, incl. GPU | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Switch Claude/Codex account in place | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Native Mac app (no Electron/TUI) | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ❌ |
 
-<sub>🔶 partial: remote over the tool's own runtime or daemon, not SSH; herdrm also requires adopting herdr.</sub>
+<sub>🔶 partial: remote only to the tool's own runtime or daemon on the far machine (Paseo can reach its daemon through an SSH tunnel); herdrm also requires adopting herdr.</sub>
 
 Download size, native apps only, smallest first:
 
@@ -111,45 +108,6 @@ Everything is set up in the app's **Settings** window:
 2. **Containers**: pick which auto-discovered containers to monitor.
 
 To see Claude context and rate-limit usage, copy [`scripts/agentmux-statusline.sh`](scripts/agentmux-statusline.sh) into each container and point Claude Code's `statusLine` setting at it. Codex usage is read automatically, with no extra setup.
-
-## Several agents at once
-
-⌘-click (or ⇧-click) up to four agents in the sidebar and they share the detail area; a plain click goes back to one.
-
-- **Layout** follows the area's shape and keeps every tile wide enough for an agent's TUI (about 80 columns) when it can. On a landscape window: two side by side, three as one tall tile beside two stacked, four as a 2×2 grid. On a portrait or narrow window they stack top to bottom. Resizing the window does not flip the layout back and forth near the switch point.
-- **Cards.** Each tile is a card whose header shows the agent's icon, name, folder and container, how long it has been working or idle, and its status; zoom and close appear on hover.
-- **Focus.** Keys go to one tile at a time, the one with the accent ring. Click a tile, or use ⌘] / ⌘[, to move focus. ⇧⌘↩ (or double-clicking a header) zooms the focused tile to the full area and back; the others keep running and keep their size.
-- **Rearranging.** Drag a tile's header onto another tile to swap the two. Tiles move into place as they join, leave, zoom or swap; their terminals take their new size once and fade in.
-- **Closing.** A tile's × (or ⌘-clicking its row again) takes it out; its mirror stays warm like any recently viewed agent.
-- Each tile sizes its agent's tmux window to the tile, as the single view does with the full area. If you also have that window attached elsewhere, you see it at the tile's size while the tile is open.
-
-## Notifications and auto-continue
-
-The toolbar bell (⌥⌘N) opens the inbox:
-
-| Event | When |
-|---|---|
-| Finished | A turn ended normally (working → idle). |
-| Needs you | The agent waits for input or an approval. |
-| Usage limit | The turn stopped on a usage limit; shows which one and when it resets. |
-| Stopped on an error | The turn stopped on an API error after the agent's own retries. |
-| Auto-continued | AgentMux sent `continue` (see below). |
-| Auto-continue stopped | Tries ran out, or a try was skipped (an unsent draft) or failed. |
-
-Items are kept across launches, newest first by day, with unread dots, an All / Unread filter, mark read or unread, delete (hover, swipe or right-click), Mark All as Read, Clear Read and Clear All. The Dock icon shows the unread count. A desktop banner appears unless that agent is on screen, in a window that is not minimized, hidden or covered; clicking a banner or a row opens the agent. Banners can be turned off in Settings; the inbox always records. A banner for an agent that needs you (or stopped on an error or a limit) and one for a finished turn play different sounds, each chosen from the Mac's alert sounds in Settings, or none.
-
-**Done marks.** An agent whose turn finished while it was not on screen is **Done** until it is: a green check in the sidebar and tile header, a Done chip and section in the menu bar and the dashboard. Looking at an agent marks its notifications read and takes their banners out of Notification Center. Clear in the menu bar's Done section clears every mark. Done agents sort after those that need you and before working ones; one you open keeps its place until you leave it, so the row does not move away as you click it.
-
-**How a stopped turn is recognized.** For Claude Code, the last real record of the session log is an API error: its error code and quota fields (`rate_limit` with a rejected quota is a usage limit; `server_error`, `unknown` and transient 429s are errors). For Codex, which writes no errors to its rollout, the last error line on its screen comes after its last output line; a usage-limit message is a usage limit and Esc's "Conversation interrupted" is not an error. Both are reduced to a verdict inside the container; the message text never leaves it.
-
-**Auto-continue** (Settings ▸ General, off by default) types `continue` (configurable) into an agent stopped by a connection or server error, which is what Claude Code's own error docs advise after a dropped response. Usage limits, auth and billing errors, and rejected requests are left alone.
-
-- **When.** 10 s after the error, then 1 min, then 5 min, up to 3 tries in a row (configurable); a turn that finishes normally resets the count. Agents already stopped when AgentMux starts, or when the setting is turned on, are included.
-- **Visible.** While a try waits, the sidebar row and the tile header show a ring that fills up until it is sent, and the status bar adds **Send Now** and **Cancel** (also in the row's right-click menu). Cancel stops tries until that error clears.
-- **Safe.** Right before typing, inside the container: the agent must still be stopped on the same error and still in front (never a shell); nobody may have typed into its window in the last 30 s (an attached terminal, or this app); and its input line must be empty, ignoring the agent's dimmed placeholder or suggestion. Otherwise it waits, or skips and says so in the inbox.
-- It runs only while AgentMux is open.
-
-For long unattended Claude Code runs, also set `CLAUDE_CODE_RETRY_WATCHDOG=1` in each account's `settings.json` `env`: Claude Code then retries capacity errors (429/529) indefinitely and other transient errors for hours before giving up, so fewer turns stop at all. Codex's built-in OpenAI provider does not let its retry counts be changed.
 
 ## How it works
 
