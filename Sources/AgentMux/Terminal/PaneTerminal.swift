@@ -68,8 +68,11 @@ final class PaneTerminal {
             write: { data in
                 // Keys and mouse reports reach the pane only while this view
                 // is selected and live.
+                // Not every write is the user's: mouse movement over an agent
+                // that tracks the mouse, focus changes and the terminal's
+                // answers to queries come this way too. The view notes keys
+                // and pastes instead (`onUserInput`).
                 guard gate.isOpen else { return }
-                gate.noteInput()
                 // Forward mouse reports only while a live TUI (Claude/Codex)
                 // is in the foreground consuming them; otherwise strip them so
                 // a bare shell is not fed pointer events as keystrokes.
@@ -102,6 +105,7 @@ final class PaneTerminal {
             view.onShiftEnter = { [weak self] in _ = self?.sendNewline() }
             view.onPasteImage = { [weak self] png in self?.pasteImage(png) }
             view.onFocus = { [weak self] in self?.onFocus?() }
+            view.onUserInput = { [weak self] in self?.gate.noteInput() }
             // Ghostty picks its palette from the view's appearance; honour the
             // terminal's theme preference (set before this runs via applyTheme).
             view.appearance = self?.themePreference.appearance
@@ -199,10 +203,11 @@ final class PaneTerminal {
     /// Pastes through tmux so bracketed paste follows the pane's real mode.
     func paste(_ text: String) -> Bool {
         guard gate.isOpen else { return false }
+        gate.noteInput()
         return mirror.paste(text)
     }
 
-    /// When the user last typed or clicked into this pane here.
+    /// When the user last typed or pasted into this pane here.
     var lastInputAt: Date? { gate.lastInput }
 
     /// Whether input can currently be delivered (mirror live and on screen).
@@ -211,7 +216,9 @@ final class PaneTerminal {
     /// Pastes `text`, then (when `submit`) presses Enter so an agent CLI runs
     /// the prompt. Returns false if input is not currently allowed.
     func send(_ text: String, submit: Bool) -> Bool {
-        guard gate.isOpen, mirror.paste(text) else { return false }
+        guard gate.isOpen else { return false }
+        gate.noteInput()
+        guard mirror.paste(text) else { return false }
         if submit { mirror.sendInput(Data([0x0d])) }
         return true
     }
@@ -297,6 +304,8 @@ final class PasteInterceptingTerminalView: AppTerminalView {
     /// ⌘V of a clipboard image (when no text is also present) hands over the PNG.
     var onPasteImage: ((Data) -> Void)?
     var onFocus: (() -> Void)?
+    /// A key typed into the terminal (not a shortcut the app takes).
+    var onUserInput: (() -> Void)?
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
@@ -305,6 +314,7 @@ final class PasteInterceptingTerminalView: AppTerminalView {
     }
 
     override func keyDown(with event: NSEvent) {
+        onUserInput?()
         // keyCode 36 is the main Return key; intercept Shift+Return only (no
         // other modifiers) so plain Enter still submits.
         if event.keyCode == 36,

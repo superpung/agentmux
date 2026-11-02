@@ -25,6 +25,10 @@ features and may change behavior; a patch version only fixes). Commits follow
 - Agents shown together that end up next to each other in the sidebar
   (as rows reorder) are highlighted as one block, without the gap and the
   rounded corners left between them.
+- Auto-continue no longer holds off while the mouse moves over the agent:
+  only keys and pastes count as typing into it. Mouse movement over an
+  agent that tracks the mouse, as Claude Code does, put the try off by
+  30 s again and again.
 
 ## [0.4.0] - 2026-11-01
 
