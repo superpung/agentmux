@@ -20,6 +20,12 @@ features and may change behavior; a patch version only fixes). Commits follow
 - The sidebar is at least 280 pt wide (was 240), so the + and its menu fit
   beside the view options.
 
+### Fixed
+
+- Agents shown together that end up next to each other in the sidebar
+  (as rows reorder) are highlighted as one block, without the gap and the
+  rounded corners left between them.
+
 ## [0.4.0] - 2026-11-01
 
 ### Added

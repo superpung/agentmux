@@ -132,7 +132,9 @@ struct SidebarView: View {
                 }
             }
         }
-        .animation(Motion.list, value: groups.map { g in g.agents.map { "\($0.id)" }.joined(separator: ",") }.joined(separator: "|"))
+        .animation(Motion.list, value: agentOrder)
+        .joinsSelectedNeighbors([agentOrder, filteredPanes.map { "\($0.id)" }.joined(separator: ","),
+                                 selection.wrappedValue.map { "\($0)" }.sorted().joined(separator: ",")])
         .searchable(text: $query, placement: .sidebar, prompt: "Search agents")
         .navigationTitle("AgentMux")
         .toolbar {
@@ -168,6 +170,11 @@ struct SidebarView: View {
                 model.setCustomName(agent.identityKey, name)
             }
         }
+    }
+
+    /// The agent rows as listed, which the list animates when it changes.
+    private var agentOrder: String {
+        groups.map { g in g.agents.map { "\($0.id)" }.joined(separator: ",") }.joined(separator: "|")
     }
 
     private var renaming: Binding<AgentEntry?> {
