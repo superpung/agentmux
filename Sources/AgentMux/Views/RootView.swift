@@ -11,7 +11,9 @@ struct RootView: View {
         @Bindable var model = model
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
+                // At 280 the toolbar's view options and the + with its menu
+                // fit; narrower, the + is pushed into the "»" overflow.
+                .navigationSplitViewColumnWidth(min: 280, ideal: 300, max: 420)
         } detail: {
             DetailView()
                 .toolbar {

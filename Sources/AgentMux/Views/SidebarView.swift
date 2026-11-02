@@ -83,6 +83,7 @@ enum AgentFilter: String, CaseIterable, Identifiable {
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     @State private var query = ""
     @AppStorage(SidebarPreferences.groupingKey) private var groupingRaw = GroupBy.project.rawValue
     @AppStorage(SidebarPreferences.filterKey) private var filterRaw = AgentFilter.all.rawValue
@@ -138,11 +139,23 @@ struct SidebarView: View {
             ToolbarItem { viewOptionsMenu }
             // Refresh stays in the View menu and the palette (⌘R): polling
             // keeps every container current on its own.
+            // A click launches an agent; the arrow also offers a throwaway
+            // shell in any container.
             ToolbarItem {
-                Button {
-                    model.showLaunch = true
+                Menu {
+                    Button("Launch Agent…") { model.showLaunch = true }
+                    Menu("New Terminal") {
+                        ForEach(model.targets) { state in
+                            Button(state.device.name) {
+                                if let spec = model.newTerminalSpec(targetID: state.id) { openWindow(value: spec) }
+                            }
+                            .disabled(!state.isOnline)
+                        }
+                    }
                 } label: {
                     Label("Launch Agent", systemImage: "plus")
+                } primaryAction: {
+                    model.showLaunch = true
                 }
                 .help("Launch Agent")
                 .disabled(model.targets.isEmpty)

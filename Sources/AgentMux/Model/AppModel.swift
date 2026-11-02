@@ -1612,6 +1612,12 @@ final class AppModel {
 
     /// A spec for a throwaway shell in the selected agent's container/host, or
     /// nil when nothing suitable is selected. A fresh id opens a new window.
+    /// A throwaway shell in `targetID`'s container, whatever is selected.
+    func newTerminalSpec(targetID: String) -> EphemeralTerminalSpec? {
+        guard let state = state(targetID) else { return nil }
+        return EphemeralTerminalSpec(targetID: targetID, label: state.device.name, id: UUID())
+    }
+
     func newTerminalSpec() -> EphemeralTerminalSpec? {
         guard let ref = selection, let agent = agentEntry(ref), state(ref.targetID) != nil else { return nil }
         return EphemeralTerminalSpec(targetID: ref.targetID, label: agent.device.name, id: UUID())

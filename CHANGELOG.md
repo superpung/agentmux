@@ -8,6 +8,18 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Added
+
+- **A terminal in any container.** The + in the sidebar has a menu: Launch
+  Agent…, and New Terminal with each container, a throwaway shell there
+  whatever is selected (⌘T still opens one in the selected agent's
+  container). A click on the + itself still launches an agent.
+
+### Changed
+
+- The sidebar is at least 280 pt wide (was 240), so the + and its menu fit
+  beside the view options.
+
 ## [0.4.0] - 2026-11-01
 
 ### Added
