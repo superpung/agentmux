@@ -141,8 +141,9 @@ struct SidebarView: View {
             ToolbarItem { viewOptionsMenu }
             // Refresh stays in the View menu and the palette (⌘R): polling
             // keeps every container current on its own.
-            // A click launches an agent; the arrow also offers a throwaway
-            // shell in any container.
+            // One + for both: launching an agent (also ⌘N) and a throwaway
+            // shell in any container. No split arrow, so the sidebar can be
+            // narrow.
             ToolbarItem {
                 Menu {
                     Button("Launch Agent…") { model.showLaunch = true }
@@ -155,11 +156,10 @@ struct SidebarView: View {
                         }
                     }
                 } label: {
-                    Label("Launch Agent", systemImage: "plus")
-                } primaryAction: {
-                    model.showLaunch = true
+                    Label("New", systemImage: "plus")
                 }
-                .help("Launch Agent")
+                .menuIndicator(.hidden)
+                .help("Launch an agent or open a terminal")
                 .disabled(model.targets.isEmpty)
             }
 

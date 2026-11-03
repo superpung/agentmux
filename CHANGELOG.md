@@ -10,15 +10,15 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Added
 
-- **A terminal in any container.** The + in the sidebar has a menu: Launch
+- **A terminal in any container.** The + in the sidebar is a menu: Launch
   Agent…, and New Terminal with each container, a throwaway shell there
   whatever is selected (⌘T still opens one in the selected agent's
-  container). A click on the + itself still launches an agent.
+  container).
 
 ### Changed
 
-- The sidebar is at least 280 pt wide (was 240), so the + and its menu fit
-  beside the view options.
+- A click on the + in the sidebar opens its menu instead of the launch sheet;
+  ⌘N still launches an agent at once.
 
 ### Fixed
 
