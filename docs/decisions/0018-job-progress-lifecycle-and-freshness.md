@@ -47,3 +47,18 @@ Python subprocess tests exercise quiet heartbeats, stream preservation, parser
 chunk boundaries, exit codes, signals and telemetry failures. Swift tests cover
 fraction precedence, staleness, frozen elapsed time, ETA expiry, details, stable
 ordering and superseded workers.
+
+## Remaining duration and estimated finish (2026-11-04)
+
+Custom reports opt in with `report --estimate`. Numeric observations are saved
+with the job, scoped to run, phase, unit and total, in a rolling 30-minute window.
+Time without a count increment is retained; process attachment age is not used
+as a rate. Resets and pauses clear the sampling window. Repeated report commands
+and monitor restarts retain comparable observations.
+
+The inspector pairs Remaining (rounded, marked approximate) with Est. finish
+(local date/time, Today/Tomorrow or an explicit date). Both derive from the same
+sample timestamp and duration, so the finish clock does not drift between new
+estimates. Stale, paused and terminal jobs omit the pair; a live counter waiting
+for a rate shows Estimating. This extends both generic reports and the custom
+progress adapter without restarting the experiment itself.

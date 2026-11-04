@@ -75,7 +75,7 @@ synchronizer that prints several jobs: report each job directly instead.
 Use a stable id and one writer per job. This does not restart the job:
 
 ```sh
-agentmux-progress report --id experiment --label Experiment --pid 1234 \
+agentmux-progress report --id experiment --label Experiment --pid 1234 --estimate \
   --phase evaluation --unit groups --current 3 --total 10 \
   --details-json '[{"id":"proof-a","label":"Proof A","current":4,"total":9,"unit":"assertions"}]'
 ```
@@ -105,13 +105,20 @@ The final report freezes Elapsed. Repeated heartbeats preserve terminal states.
 
 `--source-updated-at <Unix-seconds>` records when source results last changed,
 independently of the heartbeat. `--eta <seconds>` supplies a current ETA;
-`--clear-eta` removes it. Automatic ETA needs observed progress over time,
-recalculates as work advances and expires after 90 seconds without a new sample.
+`--clear-eta` removes it. The wrapper estimates ETA from observed progress. For custom reporters, add
+`--estimate`: it persists a separate 30-minute sampling window per run, phase
+and total, including time with unchanged counts. It needs at least 30 seconds
+and an observed increment. A new phase, changed total, rollback, pause or restart
+resets the window. Estimates expire after 90 seconds without a new estimate.
 
 ### Reading the inspector
 
 - **Running / Preparing / Queued / Paused** is the producer's execution state.
 - **Stale** means no report for over 90 seconds, not proof of a stalled process.
+- **Remaining** is an approximate duration; **Est. finish** is the same estimate
+  as a local date/time on the viewing Mac. Today/Tomorrow or an explicit date
+  makes overnight and multi-day work clear. Hover the finish value for its time
+  zone. **Estimating** appears while a running counter needs more observations.
 - **Data age** is the age of the underlying results, when supplied. A fresh
   heartbeat with unchanged data is possible and is not itself a failure.
 - Counts use the producer's unit (groups, epochs, designs, etc.). **Details**

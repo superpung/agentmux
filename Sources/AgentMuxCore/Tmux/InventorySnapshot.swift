@@ -242,10 +242,16 @@ public struct InventorySnapshot: Sendable, Equatable {
         }
 
         public func remaining(at now: Double) -> Int? {
-            guard isActive, !isStale(at: now), let etaSeconds,
-                  let sampledAt = etaAt ?? updatedAt, now - sampledAt <= 90 else { return nil }
-            let value = etaSeconds - max(0, Int(now - sampledAt))
-            return value > 0 ? value : nil
+            guard let finish = estimatedFinish(at: now) else { return nil }
+            return Int(ceil(finish - now))
+        }
+
+        public func estimatedFinish(at now: Double) -> Double? {
+            guard state == "running", !isStale(at: now), let etaSeconds, etaSeconds > 0,
+                  let sampledAt = etaAt ?? updatedAt, sampledAt <= now,
+                  now - sampledAt <= 90 else { return nil }
+            let finish = sampledAt + Double(etaSeconds)
+            return finish > now ? finish : nil
         }
 
         public static func displayOrder(_ jobs: [Self]) -> [Self] {

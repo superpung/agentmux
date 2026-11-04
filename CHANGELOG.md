@@ -10,6 +10,9 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Added
 
+- Job progress shows approximate remaining time and the estimated local finish
+  date/time together. Custom reporters can use `report --estimate` to retain
+  independent progress-rate histories across calls and monitor restarts.
 - **Structured job reports.** Progress can carry phases, units, subtask counts,
   lifecycle states and real start/finish times. The wrapper's `--pipe` mode
   preserves stdout and stderr separately for logs and pipelines.

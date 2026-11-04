@@ -91,6 +91,65 @@ class ProgressTests(unittest.TestCase):
             self.assertNotIn('eta_seconds', self.read())
             self.assertEqual(self.read()['finished_at'], 200)
 
+    def test_report_estimate_persists_and_recalculates_per_phase(self):
+        with patch.object(self.m.time, 'time', return_value=100) as clock:
+            self.report('--estimate','--phase','rq2','--started-at','1','--current','10','--total','100')
+            clock.return_value=130
+            st=self.report('--estimate','--phase','rq2','--current','13','--total','100')
+            self.assertEqual(st['eta_seconds'],870)
+            # A new script process reads the same persisted observations.
+            module=types.SimpleNamespace(**runpy.run_path(str(SCRIPT),run_name='restarted_reporter'))
+            clock.return_value=160
+            module.mode_report(['--id','job','--estimate','--current','19','--total','100'])
+            self.assertEqual(self.read()['eta_seconds'],540)
+            clock.return_value=190
+            st=self.report('--estimate','--current','19','--total','100')
+            self.assertEqual(st['eta_seconds'],810)
+            self.assertEqual(st['eta_at'],190)
+            clock.return_value=220
+            self.assertNotIn('eta_seconds',self.report('--estimate','--phase','rq3','--current','20','--total','100'))
+
+    def test_estimate_resets_on_total_change_rollback_and_new_run(self):
+        with patch.object(self.m.time,'time',return_value=100) as clock:
+            self.report('--estimate','--current','10','--total','100')
+            clock.return_value=130
+            self.assertIn('eta_seconds',self.report('--estimate','--current','20'))
+            clock.return_value=160
+            self.assertNotIn('eta_seconds',self.report('--estimate','--current','25','--total','200'))
+            clock.return_value=190
+            self.assertNotIn('eta_seconds',self.report('--estimate','--current','2'))
+            clock.return_value=220
+            self.assertNotIn('eta_seconds',self.report('--estimate','--restart','--current','30','--total','100'))
+
+    def test_estimate_omits_unknown_paused_and_complete_jobs(self):
+        self.assertNotIn('eta_seconds',self.report('--estimate','--state','preparing'))
+        self.assertNotIn('eta_seconds',self.report('--estimate','--state','running','--current','1','--total','1'))
+        self.assertNotIn('eta_seconds',self.report('--estimate','--state','paused'))
+        self.assertNotIn('_eta_samples',self.read())
+
+    def test_estimate_can_use_percent_without_counts(self):
+        with patch.object(self.m.time,'time',return_value=100) as clock:
+            self.report('--estimate','--percent','20')
+            clock.return_value=130
+            self.assertEqual(self.report('--estimate','--percent','30')['eta_seconds'],210)
+
+    def test_estimates_are_isolated_between_jobs(self):
+        with patch.object(self.m.time,'time',return_value=100) as clock:
+            self.report('--estimate','--current','10','--total','100')
+            clock.return_value=130
+            self.m.mode_report(['--id','other','--estimate','--current','90','--total','100'])
+            self.assertNotIn('eta_seconds',self.read('other'))
+            self.assertIn('eta_seconds',self.report('--estimate','--current','11'))
+
+    def test_long_reporting_gap_drops_old_estimate_history(self):
+        with patch.object(self.m.time,'time',return_value=100) as clock:
+            self.report('--estimate','--current','10','--total','100')
+            clock.return_value=130
+            self.report('--estimate','--current','20')
+            clock.return_value=4000
+            self.assertNotIn('eta_seconds',self.report('--estimate','--current','30'))
+
+
     def test_chunk_boundaries_and_ansi(self):
         r = self.m.Reporter('job', 'Job')
         parser = self.m.OutputParser(r)

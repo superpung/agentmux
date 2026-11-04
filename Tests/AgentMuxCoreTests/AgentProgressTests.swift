@@ -41,6 +41,33 @@ struct AgentProgressTests {
         #expect(p.remaining(at: 200) == nil)
     }
 
+    @Test func finishTimeStaysFixedBetweenReports() throws {
+        let p = try job(#"{"state":"running","updated_at":150,"eta_at":100,"eta_seconds":58}"#)
+        #expect(p.estimatedFinish(at: 110) == 158)
+        #expect(p.estimatedFinish(at: 120) == 158)
+        #expect(p.remaining(at: 120) == 38)
+        let paused = try job(#"{"state":"paused","updated_at":100,"eta_at":100,"eta_seconds":58}"#)
+        #expect(paused.estimatedFinish(at: 110) == nil)
+    }
+
+    @Test func completionLabelsUseLocalDatesAcrossMidnight() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Singapore")!
+        let parser = ISO8601DateFormatter()
+        let now = parser.date(from: "2026-11-04T15:30:00Z")!.timeIntervalSince1970
+        #expect(JobTimeLabel.finish(now + 600, relativeTo: now, calendar: calendar) == "Today 23:40")
+        #expect(JobTimeLabel.finish(now + 3600, relativeTo: now, calendar: calendar) == "Tomorrow 00:30")
+        #expect(JobTimeLabel.finish(now + 90000, relativeTo: now, calendar: calendar) == "Nov 6, 00:30")
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        #expect(JobTimeLabel.finish(now + 3600, relativeTo: now, calendar: calendar) == "Today 16:30")
+    }
+
+    @Test func approximateDurationAvoidsFalseSecondPrecision() {
+        #expect(JobTimeLabel.remaining(31) == "≈ 1m")
+        #expect(JobTimeLabel.remaining(3601) == "≈ 1h 1m")
+        #expect(JobTimeLabel.remaining(86400) == "≈ 1d")
+    }
+
     @Test func structuredDetailsDecode() throws {
         let p = try job(#"{"phase":"rq2","unit":"groups","source_updated_at":100,"details":[{"id":"a","label":"A","current":3,"total":9,"unit":"assertions"}]}"#)
         #expect(p.phase == "rq2")

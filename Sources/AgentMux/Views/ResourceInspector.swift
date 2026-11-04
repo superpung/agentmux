@@ -558,8 +558,13 @@ private struct ProgressJobView: View {
                 if let elapsed = job.elapsed(at: now) {
                     MetricRow(icon: "clock", title: "Elapsed", value: duration(elapsed))
                 }
-                if let eta = job.remaining(at: now) {
-                    MetricRow(icon: "timer", title: "ETA", value: duration(eta))
+                if let eta = job.remaining(at: now), let finish = job.estimatedFinish(at: now) {
+                    MetricRow(icon: "timer", title: "Remaining", value: JobTimeLabel.remaining(eta))
+                    MetricRow(icon: "calendar.badge.clock", title: "Est. finish",
+                              value: JobTimeLabel.finish(finish, relativeTo: now))
+                        .help(TimeZone.autoupdatingCurrent.identifier)
+                } else if job.state == "running", !stale, let fraction = job.fraction {
+                    MetricRow(icon: "timer", title: "Remaining", value: fraction >= 1 ? "Finishing" : "Estimating")
                 }
                 if job.isActive, let source = job.sourceUpdatedAt ?? job.progressAt {
                     MetricRow(icon: "clock.arrow.circlepath", title: "Data age",
