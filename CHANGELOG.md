@@ -22,6 +22,9 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Fixed
 
+- The log of remote commands (~/Library/Logs/AgentMux/remote-commands.log)
+  grew without end, to gigabytes; past 50 MB it now moves to
+  remote-commands.1.log and starts again, keeping at most two files.
 - Agents shown together that end up next to each other in the sidebar
   (as rows reorder) are highlighted as one block, without the gap and the
   rounded corners left between them.
