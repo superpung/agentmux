@@ -143,9 +143,12 @@ public struct InventorySnapshot: Sendable, Equatable {
     /// Progress of a long-running job in an agent's pane, from the per-pane JSON
     /// the `agentmux-progress` wrapper writes. Structural only (counts, times,
     /// a short status line), never the conversation.
-    public struct AgentProgress: Sendable, Equatable, Decodable {
+    public struct AgentProgress: Sendable, Equatable, Decodable, Identifiable {
+        public var id: String = ""
         public var label: String
-        public var state: String // running | done | failed
+        public var state: String
+        public var phase: String?
+        public var unit: String?
         /// The tmux pane the job runs in, so it maps to the right agent even when
         /// the file is keyed by a custom --id.
         public var pane: String?
@@ -154,15 +157,42 @@ public struct InventorySnapshot: Sendable, Equatable {
         public var percent: Double?
         public var message: String?
         public var startedAt: Double?
+        public var finishedAt: Double?
+        public var firstReportedAt: Double?
         public var updatedAt: Double?
+        public var sourceUpdatedAt: Double?
+        public var progressAt: Double?
         public var etaSeconds: Int?
+        public var etaAt: Double?
         public var exitCode: Int?
+        public var details: [Detail]
+        public var supersedes: [String]
+
+        public struct Detail: Sendable, Equatable, Decodable, Identifiable {
+            public var id: String { key ?? label }
+            public var key: String?
+            public var label: String
+            public var current: Int?
+            public var total: Int?
+            public var unit: String?
+
+            enum CodingKeys: String, CodingKey { case key = "id", label, current, total, unit }
+            public var fraction: Double? {
+                guard let current, let total, total > 0 else { return nil }
+                return max(0, min(1, Double(current) / Double(total)))
+            }
+        }
 
         enum CodingKeys: String, CodingKey {
-            case label, state, pane, current, total, percent, message
+            case label, state, pane, current, total, percent, message, phase, unit, details, supersedes
             case startedAt = "started_at"
+            case finishedAt = "finished_at"
+            case firstReportedAt = "first_reported_at"
             case updatedAt = "updated_at"
+            case sourceUpdatedAt = "source_updated_at"
+            case progressAt = "progress_at"
             case etaSeconds = "eta_seconds"
+            case etaAt = "eta_at"
             case exitCode = "exit_code"
         }
 
@@ -170,22 +200,67 @@ public struct InventorySnapshot: Sendable, Equatable {
             let c = try d.container(keyedBy: CodingKeys.self)
             label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? nil ?? "job"
             state = (try? c.decodeIfPresent(String.self, forKey: .state)) ?? nil ?? "running"
+            phase = try? c.decodeIfPresent(String.self, forKey: .phase)
+            unit = try? c.decodeIfPresent(String.self, forKey: .unit)
             pane = try? c.decodeIfPresent(String.self, forKey: .pane)
             current = try? c.decodeIfPresent(Int.self, forKey: .current)
             total = try? c.decodeIfPresent(Int.self, forKey: .total)
             percent = try? c.decodeIfPresent(Double.self, forKey: .percent)
             message = try? c.decodeIfPresent(String.self, forKey: .message)
             startedAt = try? c.decodeIfPresent(Double.self, forKey: .startedAt)
+            finishedAt = try? c.decodeIfPresent(Double.self, forKey: .finishedAt)
+            firstReportedAt = try? c.decodeIfPresent(Double.self, forKey: .firstReportedAt)
             updatedAt = try? c.decodeIfPresent(Double.self, forKey: .updatedAt)
+            sourceUpdatedAt = try? c.decodeIfPresent(Double.self, forKey: .sourceUpdatedAt)
+            progressAt = try? c.decodeIfPresent(Double.self, forKey: .progressAt)
             etaSeconds = try? c.decodeIfPresent(Int.self, forKey: .etaSeconds)
+            etaAt = try? c.decodeIfPresent(Double.self, forKey: .etaAt)
             exitCode = try? c.decodeIfPresent(Int.self, forKey: .exitCode)
+            details = (try? c.decodeIfPresent([Detail].self, forKey: .details)) ?? []
+            supersedes = (try? c.decodeIfPresent([String].self, forKey: .supersedes)) ?? []
         }
 
-        /// Fraction complete (0-1) from percent, else current/total.
+        /// Counts take precedence over percentages left by older reporters.
         public var fraction: Double? {
-            if let percent { return max(0, min(1, percent / 100)) }
-            guard let current, let total, total > 0 else { return nil }
-            return max(0, min(1, Double(current) / Double(total)))
+            if let current, let total, total > 0 {
+                return max(0, min(1, Double(current) / Double(total)))
+            }
+            guard let percent, percent.isFinite else { return nil }
+            return max(0, min(1, percent / 100))
+        }
+
+        public var isActive: Bool { !["done", "failed", "cancelled", "stopped"].contains(state) }
+
+        public func isStale(at now: Double) -> Bool {
+            isActive && updatedAt.map { now - $0 > 90 } == true
+        }
+
+        public func elapsed(at now: Double) -> Int? {
+            guard let startedAt else { return nil }
+            let end = isActive ? now : (finishedAt ?? updatedAt ?? startedAt)
+            return max(0, Int(end - startedAt))
+        }
+
+        public func remaining(at now: Double) -> Int? {
+            guard isActive, !isStale(at: now), let etaSeconds,
+                  let sampledAt = etaAt ?? updatedAt, now - sampledAt <= 90 else { return nil }
+            let value = etaSeconds - max(0, Int(now - sampledAt))
+            return value > 0 ? value : nil
+        }
+
+        public static func displayOrder(_ jobs: [Self]) -> [Self] {
+            let replaced = Set(jobs.flatMap(\.supersedes))
+            return jobs.filter { !replaced.contains($0.id) }.sorted {
+                if $0.isActive != $1.isActive { return $0.isActive }
+                if !$0.isActive {
+                    let a = $0.finishedAt ?? $0.updatedAt ?? 0
+                    let b = $1.finishedAt ?? $1.updatedAt ?? 0
+                    if a != b { return a > b }
+                }
+                let a = $0.startedAt ?? $0.firstReportedAt ?? 0
+                let b = $1.startedAt ?? $1.firstReportedAt ?? 0
+                return a == b ? $0.id < $1.id : a < b
+            }
         }
     }
 

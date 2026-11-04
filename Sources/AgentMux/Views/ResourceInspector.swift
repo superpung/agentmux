@@ -79,85 +79,28 @@ struct ResourceInspector: View {
         }
     }
 
-    /// A long-running job's progress in the selected agent's pane, from the
-    /// agentmux-progress wrapper: how far along, how long it has run, and the
-    /// estimated time left. Counts and a short status line only.
     @ViewBuilder
     private func progressSection(_ jobs: [InventorySnapshot.AgentProgress]) -> some View {
-        // Running jobs first, then most-recently-updated. Show all running, or
-        // just the latest when none is running.
-        let sorted = jobs.sorted { a, b in
-            let ar = a.state == "running", br = b.state == "running"
-            if ar != br { return ar }
-            return (a.updatedAt ?? 0) > (b.updatedAt ?? 0)
-        }
-        let shown = Array(sorted.prefix(sorted.contains { $0.state == "running" } ? 4 : 1))
+        let sorted = InventorySnapshot.AgentProgress.displayOrder(jobs)
+        let active = sorted.filter(\.isActive)
+        let finished = sorted.filter { !$0.isActive }
         InspectorSection(title: "Progress", icon: "hourglass") {
-            ForEach(Array(shown.enumerated()), id: \.offset) { index, p in
-                if index > 0 { Divider() }
-                progressJob(p)
+            ForEach(active) { job in
+                ProgressJobView(job: job)
+                if job.id != active.last?.id { Divider() }
+            }
+            if let latest = finished.first, active.isEmpty {
+                ProgressJobView(job: latest)
+            }
+            if !finished.isEmpty, !active.isEmpty || finished.count > 1 {
+                DisclosureGroup("Finished (\(finished.count))") {
+                    ForEach(active.isEmpty ? Array(finished.dropFirst()) : finished) { job in
+                        ProgressJobView(job: job)
+                    }
+                }
+                .font(.caption)
             }
         }
-    }
-
-    @ViewBuilder
-    private func progressJob(_ p: InventorySnapshot.AgentProgress) -> some View {
-        let stalled = p.state == "running" && isStalled(p)
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 6) {
-                Circle().fill(progressColor(p, stalled: stalled)).frame(width: 7, height: 7)
-                Text(p.label).lineLimit(1)
-                Spacer()
-                Text(progressStateText(p, stalled: stalled)).foregroundStyle(.secondary)
-            }
-            .font(.caption)
-            if let frac = p.fraction {
-                let pct = "\(Int((frac * 100).rounded()))%"
-                MetricRow(icon: "chart.bar.fill", title: "Progress",
-                          value: progressAmount(p) ?? pct,
-                          unit: progressAmount(p) == nil ? nil : pct,
-                          fraction: frac)
-            } else if p.state == "running" {
-                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Working…").foregroundStyle(.secondary) }
-                    .font(.caption)
-            }
-            if let started = p.startedAt {
-                MetricRow(icon: "clock", title: "Elapsed",
-                          value: uptimeText(max(0, Int(Date().timeIntervalSince1970 - started))))
-            }
-            if p.state == "running", !stalled, let eta = p.etaSeconds, eta > 0 {
-                MetricRow(icon: "timer", title: "ETA", value: uptimeText(eta))
-            }
-            if let msg = p.message, !msg.isEmpty {
-                Text(msg).font(.caption2).foregroundStyle(.secondary)
-                    .lineLimit(2).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func isStalled(_ p: InventorySnapshot.AgentProgress) -> Bool {
-        guard let updated = p.updatedAt else { return false }
-        return Date().timeIntervalSince1970 - updated > 90
-    }
-
-    private func progressColor(_ p: InventorySnapshot.AgentProgress, stalled: Bool) -> Color {
-        if p.state == "failed" { return .red }
-        if p.state == "done" { return .green }
-        return stalled ? .orange : .accentColor
-    }
-
-    private func progressStateText(_ p: InventorySnapshot.AgentProgress, stalled: Bool) -> String {
-        switch p.state {
-        case "done": return "Done"
-        case "failed": return p.exitCode.map { "Failed (\($0))" } ?? "Failed"
-        default: return stalled ? "Stalled" : "Running"
-        }
-    }
-
-    private func progressAmount(_ p: InventorySnapshot.AgentProgress) -> String? {
-        if let c = p.current, let t = p.total { return "\(c)/\(t)" }
-        return nil
     }
 
     /// The selected agent's git working tree: branch, how much changed, and how
@@ -325,6 +268,7 @@ struct MetricRow: View {
     let value: String
     var unit: String?
     var fraction: Double?
+    var barTint: Color? = nil
 
     /// Convenience for a Docker "a / b" string: first part is the value, the
     /// rest is the secondary unit.
@@ -341,12 +285,13 @@ struct MetricRow: View {
         fraction = nil
     }
 
-    init(icon: String, title: String, value: String, unit: String? = nil, fraction: Double? = nil) {
+    init(icon: String, title: String, value: String, unit: String? = nil, fraction: Double? = nil, barTint: Color? = nil) {
         self.icon = icon
         self.title = title
         self.value = value
         self.unit = unit
         self.fraction = fraction
+        self.barTint = barTint
     }
 
     var body: some View {
@@ -363,7 +308,7 @@ struct MetricRow: View {
                 inlineRow(nil)
             }
             if let fraction {
-                ThinBar(fraction: fraction)
+                ThinBar(fraction: fraction, tint: barTint)
             }
         }
     }
@@ -565,19 +510,117 @@ private struct DiffText: View {
     }
 }
 
-/// A 3pt capacity bar coloured by the shared usage ramp.
+/// Capacity meters use the usage ramp; job progress supplies its state tint.
 struct ThinBar: View {
     let fraction: Double
+    var tint: Color? = nil
 
     var body: some View {
         let f = min(1, max(0, fraction))
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(Theme.hairline)
-                Capsule().fill(Theme.meterColor(f)).frame(width: geo.size.width * f)
+                Capsule().fill(tint ?? Theme.meterColor(f)).frame(width: geo.size.width * f)
             }
         }
         .frame(height: 3)
         .animation(.easeOut(duration: 0.25), value: f)
+    }
+}
+
+/// Stable job identity keeps disclosure state as reports arrive and time passes.
+private struct ProgressJobView: View {
+    let job: InventorySnapshot.AgentProgress
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            let now = context.date.timeIntervalSince1970
+            let stale = job.isStale(at: now)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Circle().fill(color(stale: stale)).frame(width: 7, height: 7)
+                    Text(job.label).lineLimit(1).help(job.label)
+                    Spacer(minLength: 4)
+                    Text(status(stale: stale)).foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                if let phase = job.phase, !phase.isEmpty {
+                    MetricRow(icon: "square.stack", title: "Phase", value: phase)
+                }
+                if let fraction = job.fraction {
+                    let percent = "\(Int((fraction * 100).rounded()))%"
+                    MetricRow(icon: "chart.bar.fill", title: job.unit ?? "Progress",
+                              value: amount ?? percent, unit: amount == nil ? nil : percent,
+                              fraction: fraction, barTint: color(stale: stale))
+                } else if job.state == "running", !stale {
+                    ProgressView().controlSize(.small)
+                }
+                if let elapsed = job.elapsed(at: now) {
+                    MetricRow(icon: "clock", title: "Elapsed", value: duration(elapsed))
+                }
+                if let eta = job.remaining(at: now) {
+                    MetricRow(icon: "timer", title: "ETA", value: duration(eta))
+                }
+                if job.isActive, let source = job.sourceUpdatedAt ?? job.progressAt {
+                    MetricRow(icon: "clock.arrow.circlepath", title: "Data age",
+                              value: duration(max(0, Int(now - source))))
+                }
+                if !job.details.isEmpty || job.message?.isEmpty == false {
+                    DisclosureGroup("Details") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(job.details) { detail in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(detail.label).font(.caption2).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    MetricRow(icon: "chart.bar", title: detail.unit ?? "Progress",
+                                              value: detail.current.flatMap { c in detail.total.map { "\(c)/\($0)" } } ?? "",
+                                              fraction: detail.fraction,
+                                              barTint: detail.fraction == 1 ? .green : .accentColor)
+                                }
+                            }
+                            if let message = job.message, !message.isEmpty {
+                                Text(message).font(.caption2).foregroundStyle(.secondary)
+                                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+    }
+
+    private var amount: String? {
+        guard let current = job.current, let total = job.total else { return nil }
+        return "\(current)/\(total)"
+    }
+
+    private func color(stale: Bool) -> Color {
+        if job.state == "failed" { return .red }
+        if job.state == "done" { return .green }
+        if stale { return .orange }
+        return job.state == "running" ? .accentColor : .secondary
+    }
+
+    private func status(stale: Bool) -> String {
+        if stale { return "Stale" }
+        switch job.state {
+        case "done": return "Done"
+        case "failed": return job.exitCode.map { "Failed (\($0))" } ?? "Failed"
+        case "preparing": return "Preparing"
+        case "queued": return "Queued"
+        case "paused": return "Paused"
+        case "cancelled": return "Cancelled"
+        case "stopped": return "Stopped"
+        case "running": return "Running"
+        default: return "Unknown"
+        }
+    }
+
+    private func duration(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m \(seconds % 60)s" }
+        if seconds < 86400 { return "\(seconds / 3600)h \(seconds % 3600 / 60)m" }
+        return "\(seconds / 86400)d \(seconds % 86400 / 3600)h"
     }
 }

@@ -7,3 +7,7 @@ build/
 config/*.local.json5
 # Original Chinese handoff document; the English version is docs/requirements.md
 remote-agent-console-handoff.md
+
+# Python progress-wrapper tests
+__pycache__/
+*.pyc

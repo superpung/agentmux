@@ -22,6 +22,7 @@ engine's `.xcstrings` resource; the native engine copies the file instead. See
 . scripts/env.sh
 swiftpm build                 # debug build
 swiftpm test                  # unit tests (swift-testing)
+python3 -m unittest discover -s Tests/ScriptTests  # progress wrapper regressions
 scripts/bundle-app.sh         # build and ad-hoc sign build/AgentMux.app (debug)
 scripts/bundle-app.sh release # release build
 open build/AgentMux.app

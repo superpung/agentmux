@@ -44,3 +44,86 @@ For long unattended Claude Code runs, also set `CLAUDE_CODE_RETRY_WATCHDOG=1` in
 ## Files
 
 Browse the remote working directory with rich previews: syntax-highlighted code, Markdown, CSV/TSV, Jupyter notebooks, HTML, RTF, SVG, PDF and images. Markdown, notebooks and HTML pages show their pictures, from the container or the web. The file shown and the folder listed update by themselves when they change remotely. Word, Excel and PowerPoint (and Pages, Numbers, Keynote) show as Quick Look shows them, with a searchable Text form; audio and video play; `.gz` / `.bz2` / `.xz` files show what they hold, zip and tar archives their listing, other binaries a hex view. Rendered formats switch to their source; ⌘F finds in every text and PDF preview (on a page or web view it switches to the text), also while the file list has the keyboard. Links in a preview open: a web page in your browser, another file or folder in the window (at its `#heading` or `#L12` line), with Back and Forward to return. Open a file in a Mac app (PowerPoint for a deck, say) from the toolbar or its context menu; the app gets a read-only copy. Drag files in from Finder to upload or out to Finder to download, and create, rename or delete files and folders.
+
+## Job progress
+
+Select an agent and open its right inspector to see its jobs. Install
+`scripts/agentmux-progress` as `/usr/local/bin/agentmux-progress` in the
+container (Python 3, standard library only). No daemon is required.
+
+### New commands
+
+Run in the agent's tmux pane; its `TMUX_PANE` associates the job with that agent:
+
+```sh
+agentmux-progress --id training --label Training --unit epochs -- python train.py
+agentmux-progress --pipe --id build --label Build -- make >build.log 2>build.err
+```
+
+The default PTY supports terminal progress bars. It merges stdout/stderr and
+may translate line endings; it also changes terminal detection and the process
+tree. Choose `--pipe` for separate, unchanged stdout/stderr bytes. Signals go to
+the child process group and its exit status is preserved. A failed progress-file
+write does not stop the command. Existing job-control/watchdog rules still apply.
+
+The parser recognizes fractions, percentages, epoch/step/iter/batch counters,
+tqdm ETA and `ETA mm:ss`. It is intended for one job's output. Do not wrap a
+synchronizer that prints several jobs: report each job directly instead.
+
+### Existing jobs and custom progress
+
+Use a stable id and one writer per job. This does not restart the job:
+
+```sh
+agentmux-progress report --id experiment --label Experiment --pid 1234 \
+  --phase evaluation --unit groups --current 3 --total 10 \
+  --details-json '[{"id":"proof-a","label":"Proof A","current":4,"total":9,"unit":"assertions"}]'
+```
+
+On Linux, `--pid` derives the actual process start time and records its
+incarnation. Otherwise pass `--started-at <Unix-seconds>` from the job's own
+records. Without a known start time the app omits Elapsed. Changing phase clears
+old counts and ETA; omit an unknown total, using `--clear-progress` to remove
+previous counts. `--percent` is useful without counts; counts take precedence
+when both are present. Use `--restart` for a new run with the same id.
+
+Report at least every 30 seconds, even if progress has not changed:
+
+```sh
+agentmux-progress report --id experiment --heartbeat
+agentmux-progress report --id experiment --state paused
+agentmux-progress report --id experiment --state running
+agentmux-progress report --id experiment --state done --finished-at 1793799000
+# Or: --state failed --exit-code 1
+```
+
+`report --pid` records identity/start time; the reporting caller must check that
+the same process is still alive. State can be `preparing`, `queued`, `running`,
+`paused`, `unknown`, `done`, `failed`, `cancelled` or `stopped` (exited with an
+unknown result). A missing completion file alone is not evidence of running.
+The final report freezes Elapsed. Repeated heartbeats preserve terminal states.
+
+`--source-updated-at <Unix-seconds>` records when source results last changed,
+independently of the heartbeat. `--eta <seconds>` supplies a current ETA;
+`--clear-eta` removes it. Automatic ETA needs observed progress over time,
+recalculates as work advances and expires after 90 seconds without a new sample.
+
+### Reading the inspector
+
+- **Running / Preparing / Queued / Paused** is the producer's execution state.
+- **Stale** means no report for over 90 seconds, not proof of a stalled process.
+- **Data age** is the age of the underlying results, when supplied. A fresh
+  heartbeat with unchanged data is possible and is not itself a failure.
+- Counts use the producer's unit (groups, epochs, designs, etc.). **Details**
+  expands subtask counts and the full status message. A group counter can stay
+  unchanged while its assertions advance.
+- Jobs keep a stable order. Active jobs stay visible; terminal jobs live under
+  **Finished**. A structured report can name raw worker records with repeated
+  `--supersedes <id>` so the same job appears once.
+
+The wrapper writes a heartbeat every 10 seconds. Existing wrapper processes
+keep their loaded version until they exit; updating the installed file changes
+future launches. Progress records live in `~/.agentmux/progress`, outside the
+project, or `AGENTMUX_PROGRESS_DIR`. Use `--pane` when reporting from outside
+that tmux pane. Changing the progress directory requires the reader to use the
+same directory.

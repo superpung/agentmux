@@ -47,7 +47,7 @@ What makes it different:
 - 🔔 **Notifications.** An inbox with a banner only when you are not looking, and optional auto-continue after a connection or server error.
 - 🚀 **Launch, resume and switch.** Start or resume an agent in any directory (⌘N), or move it to another account mid-conversation.
 - 📁 **Files.** Browse and preview the remote working directory: code, Markdown, notebooks, PDF, Office documents and more.
-- 🔬 **Resources.** Per-agent CPU, memory and git status; host load, disk and GPU.
+- 🔬 **Resources.** Per-agent CPU, memory and git status; host load, disk and GPU, plus [long-job progress](docs/usage.md#job-progress).
 - 🧩 **tmux.** Create or kill sessions, windows and panes, or open a throwaway shell in any container (⌘T).
 - ⌨️ **Keyboard first.** ⌘K jumps to any agent, ⇧⌘P runs any command, and Settings ▸ Shortcuts lists every key.
 - 🆕 **Update notifications.** A new release is announced in a notification; nothing installs itself.

@@ -1,348 +1,458 @@
 #!/usr/bin/env python3
-"""agentmux-progress — report long-job progress to AgentMux, non-intrusively.
+"""Report a long-running job to AgentMux.
 
-Two modes:
+New job, in the agent's tmux pane:
+  agentmux-progress --id train --label Training --unit epochs -- python train.py
+  agentmux-progress --pipe --id build -- make >build.log 2>build.err
 
-  agentmux-progress [--label L] [--id KEY] -- <cmd> [args...]
-      Run <cmd> unchanged and stream its output through byte-for-byte (the child
-      runs under a pty, so tqdm/rich progress bars behave exactly as if attached
-      to the terminal). A copy of the output is parsed for progress and written
-      to a side JSON file. The child's exit code is preserved; SIGINT/SIGTERM and
-      window-size changes are forwarded. Anything that goes wrong on the progress
-      side is swallowed, so the job itself is never affected.
+Default PTY mode supports terminal progress bars, merges stdout/stderr, and may
+translate newlines. --pipe preserves separate byte streams for logs/pipelines.
+The wrapper forwards signals to the child's process group and preserves its
+exit status. Progress-file failures are isolated from the command; the wrapper
+itself still changes the process tree and terminal behavior.
 
-  agentmux-progress report [--current N] [--total M] [--percent P] [--msg S]
-                           [--state running|done|failed] [--id KEY] [--label L]
-      Write/update the progress file explicitly (for jobs whose output can't be
-      auto-parsed). Prints nothing, touches nothing else.
+Existing job: report directly; do not wrap a progress synchronizer:
+  agentmux-progress report --id train --pid 1234 --phase eval --unit groups \
+    --current 3 --total 10
+  agentmux-progress report --id train --heartbeat
+  agentmux-progress report --id train --state done
 
-The file is written to  $AGENTMUX_PROGRESS_DIR  (default ~/.agentmux/progress),
-named by the tmux pane it runs in ($TMUX_PANE) or by --id. AgentMux reads it over
-its normal read-only refresh and shows it in the right sidebar. Writing it never
-touches the project directory or the job's own files.
+--pid derives the real start time on Linux. Otherwise use --started-at (Unix
+seconds). Use --restart for a new run with the same id. Report at least every
+30 seconds, even when counts stay unchanged. A 90-second reporting gap means
+Stale, not proof the job has stalled. Omit unknown totals (--clear-progress
+clears old counts). Use preparing/queued/paused for those states and explicitly
+report completion/failure. A missing completion file does not prove life.
+
+--details-json accepts labeled subtask counts, e.g.
+  '[{"id":"a","label":"Proof A","current":4,"total":9,"unit":"assertions"}]'
+--source-updated-at records source freshness separately from the heartbeat.
+
+Records go to ~/.agentmux/progress (override with AGENTMUX_PROGRESS_DIR).
+TMUX_PANE associates a job with its agent; --pane overrides it. Use one stable
+--id per job and one writer per id. All options: report --help.
+Installed guide: /usr/local/share/doc/agentmux-progress/README.md.
 """
+import argparse
+import codecs
+import collections
 import json
+import math
 import os
 import re
 import signal
 import sys
 import time
+import uuid
 
-SCHEMA = 1
-MIN_WRITE_INTERVAL = 1.0  # seconds; throttle sidecar writes
+SCHEMA = 2
+MIN_WRITE_INTERVAL = 1.0
+HEARTBEAT_INTERVAL = 10.0
+ETA_MAX_AGE = 90.0
+ACTIVE_STATES = ('running', 'preparing', 'queued', 'paused', 'unknown')
+STATES = ACTIVE_STATES + ('done', 'failed', 'cancelled', 'stopped')
+PROGRESS_FIELDS = ('current', 'total', 'percent', 'eta_seconds', 'eta_at')
 
 
 def progress_path(key):
-    base = os.environ.get("AGENTMUX_PROGRESS_DIR") or os.path.join(
-        os.path.expanduser("~"), ".agentmux", "progress"
-    )
-    safe = re.sub(r"[^A-Za-z0-9._%-]", "_", key) or "default"
-    return os.path.join(base, safe + ".json")
+    base = os.environ.get('AGENTMUX_PROGRESS_DIR') or os.path.expanduser('~/.agentmux/progress')
+    return os.path.join(base, (re.sub(r'[^A-Za-z0-9._%-]', '_', key) or 'default') + '.json')
 
 
 def default_key(explicit):
-    if explicit:
-        return explicit
-    return os.environ.get("TMUX_PANE") or "default"
+    return explicit or os.environ.get('TMUX_PANE') or 'default'
 
 
 def atomic_write(path, obj):
-    """Write JSON atomically; never raise (progress must not affect the job)."""
+    tmp = '%s.tmp.%d' % (path, os.getpid())
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = "%s.tmp.%d" % (path, os.getpid())
-        with open(tmp, "w") as f:
-            json.dump(obj, f)
-            f.flush()
-            os.fsync(f.fileno())
+        with open(tmp, 'w') as f:
+            json.dump(obj, f, allow_nan=False)
         os.replace(tmp, path)
-    except Exception:
-        pass
+        return True
+    except (OSError, ValueError, TypeError):
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
 
 
-# --- progress parsing -------------------------------------------------------
+def process_identity(pid):
+    """Linux PID incarnation/start time; never read arguments or credentials."""
+    try:
+        with open('/proc/%d/stat' % pid) as f:
+            fields = f.read().rsplit(')', 1)[1].split()
+        ticks = int(fields[19])
+        with open('/proc/stat') as f:
+            boot = next(int(line.split()[1]) for line in f if line.startswith('btime '))
+        return ticks, boot + ticks / os.sysconf('SC_CLK_TCK')
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None, None
 
-_PCT = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*%")
-_FRAC = re.compile(r"(?<![\d./])(\d+)\s*/\s*(\d+)(?![\d/])")
-_EPOCH = re.compile(r"(?:epoch|step|iter|batch)\s*[:#]?\s*(\d+)\s*/\s*(\d+)", re.I)
-# tqdm bracket: [elapsed<remaining, rate]  e.g. [00:12<01:40, 2.3it/s]
-_TQDM_ETA = re.compile(r"\[(\d+:\d+(?::\d+)?)<(\d+:\d+(?::\d+)?)")
-_ETA_WORD = re.compile(r"\beta[:\s]+(\d+:\d+(?::\d+)?)", re.I)
 
-
-def _hms_to_s(text):
-    parts = [int(p) for p in text.split(":")]
-    s = 0
-    for p in parts:
-        s = s * 60 + p
-    return s
+_PCT = re.compile(r'(?<![\d.])(\d{1,3}(?:\.\d+)?)\s*%')
+_FRAC = re.compile(r'(?<![\d./])(\d+)\s*/\s*(\d+)(?![\d/])')
+_EPOCH = re.compile(r'(?:epoch|step|iter|batch)\s*[:#]?\s*(\d+)\s*/\s*(\d+)', re.I)
+_TQDM_ETA = re.compile(r'\[\d+:\d+(?::\d+)?<(\d+:\d+(?::\d+)?)')
+_ETA_WORD = re.compile(r'\beta[:\s]+(\d+:\d+(?::\d+)?)', re.I)
+_ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 
 
 def parse_progress(segment):
-    """Extract a progress dict from one output segment, or None."""
+    segment = _ANSI.sub('', segment)
     out = {}
     m = _EPOCH.search(segment) or _FRAC.search(segment)
-    if m:
-        cur, tot = int(m.group(1)), int(m.group(2))
-        if tot > 0 and cur <= tot:
-            out["current"], out["total"] = cur, tot
+    if m and 0 <= int(m[1]) <= int(m[2]) and int(m[2]) > 0:
+        out.update(current=int(m[1]), total=int(m[2]))
     m = _PCT.search(segment)
+    if m and 0 <= float(m[1]) <= 100:
+        out['percent'] = float(m[1])
+    m = _TQDM_ETA.search(segment) or _ETA_WORD.search(segment)
     if m:
-        try:
-            p = float(m.group(1))
-            if 0 <= p <= 100:
-                out["percent"] = p
-        except ValueError:
-            pass
-    m = _TQDM_ETA.search(segment)
-    if m:
-        out["eta_seconds"] = _hms_to_s(m.group(2))
-    else:
-        m = _ETA_WORD.search(segment)
-        if m:
-            out["eta_seconds"] = _hms_to_s(m.group(1))
-    if not out:
-        return None
-    msg = segment.strip()
-    if msg:
-        out["message"] = msg[-200:]
-    return out
+        seconds = 0
+        for part in m[1].split(':'):
+            seconds = seconds * 60 + int(part)
+        out['eta_seconds'] = seconds
+    if out:
+        out['message'] = segment.strip()[-500:]
+    return out or None
+
+
+def reconcile_counts(st, fields):
+    if 'current' in fields or 'total' in fields:
+        st.pop('percent', None)
+    st.update(fields)
+    current, total = st.get('current'), st.get('total')
+    if current is not None and total is not None and total > 0:
+        st['percent'] = max(0, min(100, 100 * current / total))
 
 
 class Reporter:
-    def __init__(self, key, label):
+    def __init__(self, key, label, unit=None, phase=None, pane=None):
         self.path = progress_path(key)
-        self.started = time.time()
-        self.last_write = 0.0
-        self.state = {
-            "schema": SCHEMA,
-            "label": label,
-            "state": "running",
-            "started_at": self.started,
-        }
-        # Associate this job with the tmux pane it runs in, so AgentMux can show
-        # it under the right agent regardless of the file key (--id).
-        pane = os.environ.get("TMUX_PANE")
-        if pane:
-            self.state["pane"] = pane
-        self._flush(force=True)
-
-    def update(self, fields, force=False):
-        self.state.update(fields)
         now = time.time()
-        if not force and now - self.last_write < MIN_WRITE_INTERVAL:
-            return
+        self.state = dict(schema=SCHEMA, run_id=uuid.uuid4().hex, label=label,
+                          state='running', started_at=now, first_reported_at=now)
+        for k, v in (('pane', pane or os.environ.get('TMUX_PANE')), ('unit', unit), ('phase', phase)):
+            if v:
+                self.state[k] = v
+        self.last_write = 0.0
+        self.samples = collections.deque(maxlen=60)
         self._flush()
 
-    def _flush(self, force=False):
-        self.last_write = time.time()
-        self.state["updated_at"] = self.last_write
-        # Estimate ETA from rate when the job gives a total but no ETA.
-        st = self.state
-        if "eta_seconds" not in st and st.get("total") and st.get("current"):
-            cur, tot = st["current"], st["total"]
-            elapsed = self.last_write - self.started
-            if 0 < cur < tot and elapsed > 0:
-                st["eta_seconds"] = int(elapsed / cur * (tot - cur))
-        atomic_write(self.path, st)
+    def update(self, fields, force=False):
+        now = time.time()
+        before = (self.state.get('current'), self.state.get('total'), self.state.get('percent'))
+        reconcile_counts(self.state, fields)
+        after = (self.state.get('current'), self.state.get('total'), self.state.get('percent'))
+        if after != before:
+            self.state['progress_at'] = now
+        if 'eta_seconds' in fields:
+            self.state['eta_at'] = now
+        elif after != before and self.state.get('total'):
+            count, total = self.state.get('current'), self.state['total']
+            if count is not None:
+                if self.samples and (total != self.samples[-1][2] or count < self.samples[-1][1]):
+                    self.samples.clear()
+                self.samples.append((now, count, total))
+                while len(self.samples) > 2 and now - self.samples[0][0] > 300:
+                    self.samples.popleft()
+                first = self.samples[0]
+                self.state.pop('eta_seconds', None)
+                self.state.pop('eta_at', None)
+                if 0 < count < total and now - first[0] >= 5 and count > first[1]:
+                    self.state['eta_seconds'] = round((total-count)*(now-first[0])/(count-first[1]))
+                    self.state['eta_at'] = now
+        if force or now - self.last_write >= MIN_WRITE_INTERVAL:
+            self._flush()
+
+    def heartbeat(self):
+        self._flush()
+
+    def _flush(self):
+        now = time.time()
+        self.last_write = now
+        self.state['updated_at'] = now
+        if now - self.state.get('eta_at', now) > ETA_MAX_AGE:
+            self.state.pop('eta_seconds', None)
+            self.state.pop('eta_at', None)
+        atomic_write(self.path, self.state)
 
     def finish(self, state, code=None):
-        self.state["state"] = state
-        self.state.pop("eta_seconds", None)
+        self.state.update(state=state, finished_at=time.time())
+        self.state.pop('eta_seconds', None)
+        self.state.pop('eta_at', None)
         if code is not None:
-            self.state["exit_code"] = code
-        self._flush(force=True)
+            self.state['exit_code'] = code
+        self._flush()
 
 
-# --- report mode ------------------------------------------------------------
+def timestamp(value):
+    value = float(value)
+    if not math.isfinite(value) or not 0 <= value <= 253402300799:
+        raise argparse.ArgumentTypeError('expected Unix seconds between years 1970 and 9999')
+    return value
+
 
 def mode_report(argv):
-    import argparse
-
-    p = argparse.ArgumentParser(prog="agentmux-progress report", add_help=True)
-    p.add_argument("--current", type=int)
-    p.add_argument("--total", type=int)
-    p.add_argument("--percent", type=float)
-    p.add_argument("--msg", "--message", dest="msg")
-    p.add_argument("--state", choices=["running", "done", "failed"], default="running")
-    p.add_argument("--eta", type=int, help="ETA in seconds")
-    p.add_argument("--id")
-    p.add_argument("--label")
-    args = p.parse_args(argv)
-
-    path = progress_path(default_key(args.id))
-    # Merge onto any existing file so started_at and label persist.
+    p = argparse.ArgumentParser(prog='agentmux-progress report', description='Update one job directly; do not wrap a reporting loop.')
+    for name in ('current', 'total', 'eta', 'pid', 'exit-code'):
+        p.add_argument('--'+name, type=int)
+    p.add_argument('--percent', type=float)
+    p.add_argument('--msg', '--message', dest='message')
+    p.add_argument('--state', choices=STATES)
+    for name in ('id', 'label', 'pane', 'phase', 'unit'):
+        p.add_argument('--'+name)
+    for name in ('started-at', 'finished-at', 'source-updated-at'):
+        p.add_argument('--'+name, type=timestamp)
+    p.add_argument('--details-json', help='JSON array of labeled subtask counts')
+    p.add_argument('--supersedes', action='append', help='raw worker record replaced by this structured report')
+    for name in ('heartbeat', 'restart', 'clear-progress', 'clear-eta'):
+        p.add_argument('--'+name, action='store_true')
+    a = p.parse_args(argv)
+    if a.percent is not None and (not math.isfinite(a.percent) or not 0 <= a.percent <= 100):
+        p.error('--percent must be between 0 and 100')
+    if any(v is not None and v < 0 for v in (a.current, a.eta)) or (a.total is not None and a.total <= 0):
+        p.error('counts/ETA must be non-negative and total positive; omit unknown totals')
+    details = None
+    if a.details_json is not None:
+        try:
+            details = json.loads(a.details_json)
+            if not isinstance(details, list) or not all(isinstance(x, dict) and isinstance(x.get('label'), str) for x in details):
+                raise ValueError()
+        except (ValueError, TypeError):
+            p.error('--details-json must be an array of objects with a label')
+    now = time.time()
+    path = progress_path(default_key(a.id))
     try:
         with open(path) as f:
             st = json.load(f)
-    except Exception:
-        st = {"schema": SCHEMA, "started_at": time.time()}
-    if args.label:
-        st["label"] = args.label
-    st.setdefault("label", "job")
-    for k, v in (
-        ("current", args.current), ("total", args.total),
-        ("percent", args.percent), ("message", args.msg), ("eta_seconds", args.eta),
-    ):
-        if v is not None:
-            st[k] = v
-    st["state"] = args.state
-    st["updated_at"] = time.time()
-    pane = os.environ.get("TMUX_PANE")
-    if pane:
-        st["pane"] = pane
-    if args.state != "running":
-        st.pop("eta_seconds", None)
-    atomic_write(path, st)
+        if not isinstance(st, dict):
+            st = {}
+    except (OSError, ValueError):
+        st = {}
+    ticks, process_start = process_identity(a.pid) if a.pid else (None, None)
+    new_run = a.restart or (a.state in ACTIVE_STATES and st.get('state') in ('done', 'failed', 'cancelled', 'stopped'))
+    if a.started_at is not None and st.get('started_at') not in (None, a.started_at):
+        new_run = True
+    if ticks is not None and st.get('pid_start_ticks') not in (None, ticks):
+        new_run = True
+    if new_run:
+        st = {}
+    if not st:
+        st = dict(schema=SCHEMA, run_id=uuid.uuid4().hex, first_reported_at=now, state='running')
+    st['schema'] = SCHEMA
+    if a.phase is not None and a.phase != st.get('phase'):
+        for k in PROGRESS_FIELDS + ('details', 'progress_at', 'source_updated_at'):
+            st.pop(k, None)
+    if a.clear_progress:
+        for k in PROGRESS_FIELDS + ('progress_at',):
+            st.pop(k, None)
+    fields = {k: getattr(a, k) for k in ('label', 'phase', 'unit', 'message', 'current', 'total', 'percent', 'source_updated_at') if getattr(a, k) is not None}
+    before = (st.get('current'), st.get('total'), st.get('percent'), st.get('details'))
+    reconcile_counts(st, fields)
+    if details is not None:
+        st['details'] = details
+    if a.supersedes is not None:
+        st['supersedes'] = a.supersedes
+    after = (st.get('current'), st.get('total'), st.get('percent'), st.get('details'))
+    if after != before:
+        st['progress_at'] = now
+    st.setdefault('label', 'job')
+    if a.started_at is not None:
+        st['started_at'] = a.started_at
+    elif process_start is not None:
+        st['started_at'] = process_start
+    if a.pid is not None:
+        st['pid'] = a.pid
+        if ticks is not None:
+            st['pid_start_ticks'] = ticks
+    if a.eta is not None:
+        st.update(eta_seconds=a.eta, eta_at=now)
+    elif a.clear_eta or (not a.heartbeat and any(k in fields for k in ('current', 'total', 'percent', 'phase'))):
+        st.pop('eta_seconds', None)
+        st.pop('eta_at', None)
+    if now - st.get('eta_at', now) > ETA_MAX_AGE:
+        st.pop('eta_seconds', None)
+        st.pop('eta_at', None)
+    if a.state is not None:
+        st['state'] = a.state
+    st['pane'] = a.pane or os.environ.get('TMUX_PANE') or st.get('pane')
+    st['updated_at'] = now
+    if st['state'] not in ACTIVE_STATES:
+        if a.finished_at is not None:
+            st['finished_at'] = a.finished_at
+        else:
+            st.setdefault('finished_at', now)
+        st.pop('eta_seconds', None)
+        st.pop('eta_at', None)
+    elif a.finished_at is not None:
+        p.error('--finished-at requires a terminal state')
+    if not atomic_write(path, st):
+        sys.stderr.write('agentmux-progress: could not write progress record\n')
+        return 1
     return 0
 
 
-# --- run mode (pty passthrough) --------------------------------------------
+class OutputParser:
+    def __init__(self, reporter):
+        self.reporter = reporter
+        self.decoder = codecs.getincrementaldecoder('utf-8')('replace')
+        self.pending = ''
 
-def mode_run(cmd, label, key):
-    import fcntl
-    import pty
-    import struct
-    import termios
+    def feed(self, data, final=False):
+        self.pending += self.decoder.decode(data, final=final)
+        parts = re.split(r'[\r\n]', self.pending)
+        self.pending = parts.pop()[-8192:]
+        if final:
+            parts.append(self.pending)
+            self.pending = ''
+        for part in parts:
+            fields = parse_progress(part)
+            if fields:
+                self.reporter.update(fields)
 
-    if not label:
-        label = os.path.basename(cmd[0])
 
-    reporter = None
+def write_all(fd, data):
     try:
-        reporter = Reporter(default_key(key), label)
-    except Exception:
-        reporter = None
-
-    pid, fd = pty.fork()
-    if pid == 0:
-        # Child: exec the real command, unchanged.
-        try:
-            os.execvp(cmd[0], cmd)
-        except Exception as e:
-            sys.stderr.write("agentmux-progress: cannot run %s: %s\n" % (cmd[0], e))
-            os._exit(127)
-
-    # Parent: copy pty <-> our stdio, parse a copy of the child's output.
-    def set_winsize():
-        try:
-            sz = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
-            fcntl.ioctl(fd, termios.TIOCSWINSZ, sz)
-        except Exception:
-            pass
-
-    set_winsize()
-    try:
-        signal.signal(signal.SIGWINCH, lambda *_: set_winsize())
-    except Exception:
+        while data:
+            try:
+                n = os.write(fd, data)
+                data = data[n:]
+            except InterruptedError:
+                continue
+    except OSError:
         pass
-    for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+
+
+def mode_run(cmd, label, key, pipe=False, unit=None, phase=None, pane=None, heartbeat_interval=HEARTBEAT_INTERVAL):
+    import selectors
+    import subprocess
+    reporter = Reporter(default_key(key), label or os.path.basename(cmd[0]), unit, phase, pane)
+    streams = selectors.DefaultSelector()
+    proc = None
+    if pipe:
         try:
-            signal.signal(s, lambda sig, _f: os.kill(pid, sig))
-        except Exception:
-            pass
-
-    import select
-
-    buf = b""
-    out_fd = sys.stdout.fileno()
-    in_fd = sys.stdin.fileno()
-    stdin_ok = True
-    try:
-        stdin_ok = os.isatty(in_fd) or not sys.stdin.closed
-    except Exception:
-        stdin_ok = False
-
-    while True:
-        try:
-            rfds = [fd] + ([in_fd] if stdin_ok else [])
-            r, _, _ = select.select(rfds, [], [], 0.2)
-        except (InterruptedError, OSError):
-            continue
-        if fd in r:
+            proc = subprocess.Popen(cmd, stdin=sys.stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        except OSError as e:
+            sys.stderr.write('agentmux-progress: %s\n' % e)
+            reporter.finish('failed', 127)
+            return 127
+        pid = proc.pid
+        streams.register(proc.stdout, selectors.EVENT_READ, (sys.stdout.fileno(), OutputParser(reporter)))
+        streams.register(proc.stderr, selectors.EVENT_READ, (sys.stderr.fileno(), OutputParser(reporter)))
+    else:
+        import fcntl
+        import pty
+        import termios
+        pid, fd = pty.fork()
+        if pid == 0:
             try:
-                data = os.read(fd, 65536)
-            except OSError:
-                data = b""
-            if not data:
-                break
-            # Passthrough, unchanged.
+                os.execvp(cmd[0], cmd)
+            except OSError as e:
+                sys.stderr.write('agentmux-progress: %s\n' % e)
+                os._exit(127)
+        def set_winsize(*_):
             try:
-                os.write(out_fd, data)
+                size = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b'\0'*8)
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, size)
             except OSError:
                 pass
-            # Parse a copy for progress. Split on \r and \n so tqdm's in-place
-            # updates are each seen as their own segment.
-            if reporter is not None:
-                try:
-                    buf += data
-                    buf = buf[-8192:]
-                    text = buf.decode("utf-8", "replace")
-                    segments = re.split(r"[\r\n]", text)
-                    for seg in reversed(segments):
-                        fields = parse_progress(seg)
-                        if fields:
-                            reporter.update(fields)
-                            break
-                except Exception:
-                    pass
-        if stdin_ok and in_fd in r:
-            try:
-                data = os.read(in_fd, 65536)
-                if data:
-                    os.write(fd, data)
-                else:
-                    stdin_ok = False
-            except OSError:
-                stdin_ok = False
-
-    _, status = os.waitpid(pid, 0)
-    if os.WIFSIGNALED(status):
-        code = 128 + os.WTERMSIG(status)
-    else:
-        code = os.WEXITSTATUS(status)
-    if reporter is not None:
+        set_winsize()
+        signal.signal(signal.SIGWINCH, set_winsize)
+        streams.register(fd, selectors.EVENT_READ, (sys.stdout.fileno(), OutputParser(reporter)))
         try:
-            reporter.finish("done" if code == 0 else "failed", code)
-        except Exception:
+            streams.register(sys.stdin, selectors.EVENT_READ, (fd, None))
+        except (OSError, ValueError):
             pass
+    ticks, start = process_identity(pid)
+    reporter.state['pid'] = pid
+    if ticks is not None:
+        reporter.state['pid_start_ticks'] = ticks
+    if start is not None:
+        reporter.state['started_at'] = start
+    reporter.heartbeat()
+    def forward(sig, _frame):
+        try:
+            os.killpg(pid, sig)
+        except ProcessLookupError:
+            pass
+    for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(s, forward)
+    last_heartbeat = time.monotonic()
+    output_count = 2 if pipe else 1
+    pty_status = None
+    try:
+        while True:
+            if not output_count:
+                if proc is not None and proc.poll() is not None:
+                    break
+                if proc is None:
+                    ended, status = os.waitpid(pid, os.WNOHANG)
+                    if ended:
+                        pty_status = status
+                        break
+            for event, _ in streams.select(timeout=min(heartbeat_interval, 0.5)):
+                destination, parser = event.data
+                try:
+                    data = os.read(event.fd, 65536)
+                except OSError:
+                    data = b''
+                if not data:
+                    streams.unregister(event.fileobj)
+                    if parser is not None:
+                        try:
+                            parser.feed(b'', final=True)
+                        except Exception:
+                            pass
+                        output_count -= 1
+                    continue
+                write_all(destination, data)
+                if parser is not None:
+                    try:
+                        parser.feed(data)
+                    except Exception:
+                        pass
+            if time.monotonic() - last_heartbeat >= heartbeat_interval:
+                reporter.heartbeat()
+                last_heartbeat = time.monotonic()
+        if proc is not None:
+            result = proc.wait()
+            code = result if result >= 0 else 128-result
+        else:
+            if pty_status is None:
+                _, pty_status = os.waitpid(pid, 0)
+            code = os.waitstatus_to_exitcode(pty_status)
+            if code < 0:
+                code = 128-code
+    finally:
+        streams.close()
+        if not pipe:
+            os.close(fd)
+    reporter.finish('done' if code == 0 else 'failed', code)
     return code
 
 
 def main():
     argv = sys.argv[1:]
-    if argv and argv[0] == "report":
+    if argv and argv[0] == 'report':
         return mode_report(argv[1:])
-
-    label = None
-    key = None
-    rest = None
-    i = 0
-    while i < len(argv):
-        a = argv[i]
-        if a == "--":
-            rest = argv[i + 1:]
-            break
-        elif a == "--label":
-            i += 1
-            label = argv[i] if i < len(argv) else None
-        elif a == "--id":
-            i += 1
-            key = argv[i] if i < len(argv) else None
-        elif a in ("-h", "--help"):
-            sys.stdout.write(__doc__)
-            return 0
-        else:
-            # First bare token begins the command (allow omitting --).
-            rest = argv[i:]
-            break
-        i += 1
-
-    if not rest:
-        sys.stderr.write("usage: agentmux-progress [--label L] [--id KEY] -- <cmd...>\n")
-        return 2
-    return mode_run(rest, label, key)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    for name in ('id', 'label', 'unit', 'phase', 'pane'):
+        p.add_argument('--'+name)
+    p.add_argument('--pipe', action='store_true', help='preserve separate stdout/stderr bytes without a PTY')
+    p.add_argument('--heartbeat-interval', type=float, default=HEARTBEAT_INTERVAL)
+    p.add_argument('command', nargs=argparse.REMAINDER)
+    a = p.parse_args(argv)
+    cmd = a.command[1:] if a.command[:1] == ['--'] else a.command
+    if not cmd:
+        p.error('a command is required after --')
+    if not math.isfinite(a.heartbeat_interval) or a.heartbeat_interval <= 0:
+        p.error('--heartbeat-interval must be positive')
+    return mode_run(cmd, a.label, a.id, a.pipe, a.unit, a.phase, a.pane, a.heartbeat_interval)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     sys.exit(main())

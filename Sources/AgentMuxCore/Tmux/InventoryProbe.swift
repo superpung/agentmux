@@ -524,7 +524,8 @@ public enum InventoryProbe {
                     let key = String(rest[..<sp])
                     let json = rest[rest.index(after: sp)...]
                     if let data = String(json).data(using: .utf8),
-                       let p = try? JSONDecoder().decode(InventorySnapshot.AgentProgress.self, from: data) {
+                       var p = try? JSONDecoder().decode(InventorySnapshot.AgentProgress.self, from: data) {
+                        p.id = key
                         snapshot.progress[key] = p
                     }
                 }

@@ -10,6 +10,9 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Added
 
+- **Structured job reports.** Progress can carry phases, units, subtask counts,
+  lifecycle states and real start/finish times. The wrapper's `--pipe` mode
+  preserves stdout and stderr separately for logs and pipelines.
 - **A terminal in any container.** The + in the sidebar is a menu: Launch
   Agent…, and New Terminal with each container, a throwaway shell there
   whatever is selected (⌘T still opens one in the selected agent's
@@ -22,6 +25,14 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Fixed
 
+- Job progress distinguishes stale reports from stalled work, keeps a stable
+  order, labels units, expands subtask details, shows seconds and freezes
+  completed durations. Quiet jobs keep reporting heartbeats and the wrapper
+  refreshes and expires ETA estimates. Counts replace stale percentages and
+  phases reset old metrics.
+- Job progress uses its execution state for color: running is the accent color,
+  completed is green and failed is red. Completing 90% or more no longer turns
+  a successful job red as a capacity meter would; subtask bars follow completion.
 - The log of remote commands (~/Library/Logs/AgentMux/remote-commands.log)
   grew without end, to gigabytes; past 50 MB it now moves to
   remote-commands.1.log and starts again, keeping at most two files.
@@ -173,8 +184,8 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ### Added
 
-- **Job progress.** `agentmux-progress` runs a long command unchanged (through a
-  pty, keeping its exit code and signals) and reads tqdm, epoch, percent and
+- **Job progress.** `agentmux-progress` wraps a long command (through a
+  pty, keeping its exit code and forwarding signals) and reads tqdm, epoch, percent and
   ETA progress from its output; the inspector shows each of an agent's jobs
   with elapsed time and ETA.
 - The time until each 5-hour and 7-day limit resets, in the status bar and the
