@@ -81,8 +81,10 @@ public enum InventoryProbe {
           [ -n "$qpane" ] || continue
           qcwd=$(readlink "/proc/$q/cwd" 2>/dev/null)
           qch=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
-          echo "${qch:-$HOME/.codex}|$qcwd|$qpane"
+          qthread=$(tr '\\0' '\\n' < "/proc/$q/cmdline" 2>/dev/null | awk 'p == "resume" && length($0) == 36 && /^[0-9a-fA-F-]+$/ {print; exit} {p=$0}')
+          echo "${qch:-$HOME/.codex}|$qcwd|$qpane|$qthread"
         done | sort -u)
+        printf '%s\\n' "$codextui" | awk -F'|' 'length($4) == 36 {print "@@codexthread " $3 " " $4}'
         # Rollouts held open by shared Codex app-servers, as "home|cwd|mtime|path".
         # Newer Codex keeps the live session's rollout in a shared app-server the
         # TUI does not hold, so a pane with no fd of its own still finds its
@@ -396,7 +398,11 @@ public enum InventoryProbe {
         # Per-pane progress files from the agentmux-progress wrapper (our own
         # small JSON, keyed by tmux pane; never the conversation).
         pgdir="${AGENTMUX_PROGRESS_DIR:-$HOME/.agentmux/progress}"
-        if [ -d "$pgdir" ]; then
+        if [ -d "$pgdir" ] && command -v python3 >/dev/null 2>&1; then
+          python3 - "$pgdir" <<'__AGENTMUX_PROGRESS__'
+        \(progressReader)
+        __AGENTMUX_PROGRESS__
+        elif [ -d "$pgdir" ]; then
           for pf in "$pgdir"/*.json; do
             [ -f "$pf" ] || continue
             j=$(tr -d '\\r\\n' < "$pf" 2>/dev/null)
@@ -529,6 +535,12 @@ public enum InventoryProbe {
                         snapshot.progress[key] = p
                     }
                 }
+            } else if let rest = line.dropPrefix("@@codexthread ") {
+                let fields = rest.split(separator: " ")
+                if fields.count == 2, isID(fields[0], "%"),
+                   let id = UUID(uuidString: String(fields[1]))?.uuidString.lowercased() {
+                    snapshot.codexThreads[id, default: []].insert(String(fields[0]))
+                }
             } else if let rest = line.dropPrefix("@@agent ") {
                 currentAgent = Int(rest)
                 if let pid = currentAgent {
@@ -587,8 +599,50 @@ public enum InventoryProbe {
             pane.title = textFields["pane_title"]?[id] ?? ""
             return pane
         }
+        snapshot.resolveProgressOwners()
         return snapshot
     }
+
+    /// Read our progress files and recover missing thread metadata from a live
+    /// job's environment only after verifying its PID incarnation. No files are
+    /// changed, and neither agent configs nor conversations are opened.
+    static let progressReader = #"""
+    import itertools, json, os, re, sys
+    from pathlib import Path
+    root = Path(sys.argv[1])
+    proc = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('/proc')
+    thread_pattern = r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}'
+    try:
+        entries = os.scandir(root)
+    except OSError:
+        entries = []
+    for entry in itertools.islice((e for e in entries if e.name.endswith('.json')), 256):
+        key = entry.name[:-5]
+        if not re.fullmatch(r'[A-Za-z0-9._%-]+', key):
+            continue
+        try:
+            if entry.stat().st_size > 1048576:
+                continue
+            with open(entry.path) as f:
+                record = json.load(f)
+            if not isinstance(record, dict):
+                continue
+            if not record.get('codex_thread_id'):
+                pid, ticks = record.get('pid'), record.get('pid_start_ticks')
+                if type(pid) is int and pid > 0 and type(ticks) is int:
+                    try:
+                        fields = (proc / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()
+                        if int(fields[19]) == ticks:
+                            env = dict(v.split(b'=', 1) for v in (proc / str(pid) / 'environ').read_bytes().split(b'\0') if b'=' in v)
+                            thread = env.get(b'CODEX_THREAD_ID', b'').decode('ascii', errors='ignore')
+                            if re.fullmatch(thread_pattern, thread):
+                                record['codex_thread_id'] = thread.lower()
+                    except (OSError, ValueError, IndexError):
+                        pass
+            print('@@progress', key, json.dumps(record, separators=(',', ':'), allow_nan=False))
+        except (OSError, ValueError, TypeError):
+            continue
+    """#
 
     // MARK: - Line parsers
 

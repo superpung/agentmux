@@ -8,6 +8,22 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Job progress from a shared Codex app-server follows the command's thread
+  identity instead of the daemon's inherited tmux pane. The reader can recover
+  thread metadata from older live jobs after verifying their PID start ticks.
+  Explicit pane overrides survive heartbeat reports, and default Codex record
+  keys are scoped to the thread to avoid cross-thread overwrites.
+  Verified ownership stays with the same run after its process exits. Fresh or
+  ambiguous threads still require an explicit `--pane`; the guide covers this.
+- Embedded terminals report their default foreground and background to tmux
+  when opened and when their theme changes, including Follow System. Agents
+  launched in new sessions or windows receive the same colors before their
+  first terminal query, preventing light input fills in dark terminals.
+  Running TUIs that cache startup colors still need a fresh process to adopt
+  a changed theme.
+
 ## [0.4.1] - 2026-11-04
 
 ### Added

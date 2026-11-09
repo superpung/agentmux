@@ -859,7 +859,8 @@ final class AppModel {
             return "Couldn't build a launch command for this agent."
         }
         let name = uniqueSessionName(targetID, base: SpaceLabel.label(cwd))
-        return launched(await AgentLauncher.launchInNewSession(host: s.host, target: s.target, name: name, cwd: cwd, command: command), targetID: targetID)
+        return launched(await AgentLauncher.launchInNewSession(host: s.host, target: s.target, name: name, cwd: cwd, command: command,
+                                                               defaultColors: GhosttyRuntime.defaultColors(for: terminalTheme)), targetID: targetID)
     }
 
     /// Starts (or resumes) one agent in a new window of an existing session.
@@ -868,7 +869,8 @@ final class AppModel {
         guard let command = AgentCommand.launch(kind: kind, configDir: configDir, resumeID: resumeID) else {
             return "Couldn't build a launch command for this agent."
         }
-        return launched(await AgentLauncher.launchInNewWindow(host: s.host, target: s.target, sessionID: sessionID, cwd: cwd, command: command), targetID: targetID)
+        return launched(await AgentLauncher.launchInNewWindow(host: s.host, target: s.target, sessionID: sessionID, cwd: cwd, command: command,
+                                                              defaultColors: GhosttyRuntime.defaultColors(for: terminalTheme)), targetID: targetID)
     }
 
     /// The refresh this asks for finds the new pane, then selects and opens it
@@ -942,8 +944,9 @@ final class AppModel {
         let result = await TargetProbe.run(host: state.host, target: state.target)
         state.isRefreshing = false
         switch result {
-        case let .success(snapshot):
+        case .success(var snapshot):
             let previousServer = state.snapshot?.server
+            snapshot.retainProgressIdentity(from: state.snapshot)
             state.snapshot = snapshot
             state.detections = AgentDetector.detect(snapshot)
             let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
@@ -1575,7 +1578,7 @@ final class AppModel {
               let sessionID = state.snapshot?.primaryMembership(of: ref.paneID)?.sessionID
         else { return }
         do {
-            let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target)
+            let terminal = try PaneTerminal(ref: ref, sessionID: sessionID, host: state.host, target: state.target, theme: terminalTheme)
             terminal.onActivity = { [weak self] in self?.nudge(ref.targetID) }
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
             terminal.onFontSizeChanged = { [weak self] size in self?.rememberTerminalFontSize(size) }

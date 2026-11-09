@@ -33,6 +33,7 @@ public final class PaneMirror: @unchecked Sendable {
     private var pendingSize: Geometry?
     private var sizeGeneration = 0
     private var silenced = Set<String>()
+    private var defaultColors: TerminalDefaultColors?
     private var onTerminalBytes: (@Sendable (Data) -> Void)?
     private var onGeometry: (@Sendable (Geometry) -> Void)?
     private var onEnded: (@Sendable (String) -> Void)?
@@ -41,7 +42,7 @@ public final class PaneMirror: @unchecked Sendable {
 
     public static let maxPasteBytes = 256 << 10
 
-    public init(host: HostConfig, target: TargetConfig, session: String, paneID: String, options: SSHOptions = SSHOptions()) throws {
+    public init(host: HostConfig, target: TargetConfig, session: String, paneID: String, options: SSHOptions = SSHOptions(), defaultColors: TerminalDefaultColors? = nil) throws {
         guard TmuxQuote.id(paneID) != nil, paneID.hasPrefix("%") else {
             throw InvalidRemoteValue(field: "pane", value: paneID)
         }
@@ -49,6 +50,7 @@ public final class PaneMirror: @unchecked Sendable {
         self.host = host
         self.target = target
         self.options = options
+        self.defaultColors = defaultColors
         client = try ControlClient(host: host, target: target, session: session, options: options)
     }
 
@@ -77,7 +79,27 @@ public final class PaneMirror: @unchecked Sendable {
         if let target = TmuxQuote.id(paneID) {
             client.send("select-window -t \(target)") { _ in }
         }
+        if let defaultColors { reportDefaultColors(defaultColors) }
         resync()
+    }
+
+    /// Keeps tmux's OSC 10/11 replies consistent with the embedded surface.
+    /// This changes the pane's reported colors, not a running TUI's cached RGBs.
+    public func setDefaultColors(_ colors: TerminalDefaultColors) {
+        client.queue.async { [self] in
+            guard !ended, defaultColors != colors else { return }
+            defaultColors = colors
+            reportDefaultColors(colors)
+        }
+    }
+
+    private func reportDefaultColors(_ colors: TerminalDefaultColors) {
+        client.send(colors.reportCommands(paneID: paneID)) { [client] result in
+            if case let .failure(error) = result {
+                // Older tmux versions can lack -r. Mirroring must still work.
+                CommandLog.log("theme", client.clientTag, "default-color report failed: \(error)")
+            }
+        }
     }
 
     /// Redraws the local terminal from the pane's current state.

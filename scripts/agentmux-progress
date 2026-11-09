@@ -31,8 +31,12 @@ ETA appears after at least 30 seconds with progress, using a 30-minute window.
 --source-updated-at records source freshness separately from the heartbeat.
 
 Records go to ~/.agentmux/progress (override with AGENTMUX_PROGRESS_DIR).
-TMUX_PANE associates a job with its agent; --pane overrides it. Use one stable
---id per job and one writer per id. All options: report --help.
+--pane explicitly associates a job with its agent and stays set on heartbeats.
+Codex commands also save CODEX_THREAD_ID: a shared app-server may supply a stale
+TMUX_PANE. AgentMux can match resumed threads to their actual panes. For a fresh
+thread or ambiguous mapping, pass --pane with the agent's actual pane id; do not
+copy the tool shell's TMUX_PANE without checking it. Use one stable --id per job
+and one writer per id. All options: report --help.
 Installed guide: /usr/local/share/doc/agentmux-progress/README.md.
 """
 import argparse
@@ -62,7 +66,26 @@ def progress_path(key):
 
 
 def default_key(explicit):
-    return explicit or os.environ.get('TMUX_PANE') or 'default'
+    thread = codex_thread_id()
+    return explicit or ('codex-'+thread if thread else None) or os.environ.get('TMUX_PANE') or 'default'
+
+
+def codex_thread_id():
+    value = os.environ.get('CODEX_THREAD_ID', '')
+    try:
+        return str(uuid.UUID(value)) if value else None
+    except ValueError:
+        return None
+
+
+def associate_owner(state, pane=None):
+    if pane:
+        state.update(pane=pane, pane_explicit=True)
+    elif not state.get('pane_explicit'):
+        state['pane'] = os.environ.get('TMUX_PANE') or state.get('pane')
+    thread = codex_thread_id()
+    if thread:
+        state['codex_thread_id'] = thread
 
 
 def atomic_write(path, obj):
@@ -194,7 +217,8 @@ class Reporter:
         now = time.time()
         self.state = dict(schema=SCHEMA, run_id=uuid.uuid4().hex, label=label,
                           state='running', started_at=now, first_reported_at=now)
-        for k, v in (('pane', pane or os.environ.get('TMUX_PANE')), ('unit', unit), ('phase', phase)):
+        associate_owner(self.state, pane)
+        for k, v in (('unit', unit), ('phase', phase)):
             if v:
                 self.state[k] = v
         self.last_write = 0.0
@@ -346,7 +370,7 @@ def mode_report(argv):
         st.pop('eta_at', None)
     if a.state is not None:
         st['state'] = a.state
-    st['pane'] = a.pane or os.environ.get('TMUX_PANE') or st.get('pane')
+    associate_owner(st, a.pane)
     st['updated_at'] = now
     if st['state'] not in ACTIVE_STATES:
         if a.finished_at is not None:

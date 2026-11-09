@@ -37,6 +37,29 @@ class ProgressTests(unittest.TestCase):
         self.report('--percent', '20', '--current', '2', '--total', '10')
         self.assertEqual(self.report('--current', '8')['percent'], 80)
 
+    def test_codex_thread_is_saved_despite_stale_daemon_pane(self):
+        thread = '01a1bf35-d874-7310-abe5-b0d96d101ef1'
+        with patch.dict(os.environ, CODEX_THREAD_ID=thread, TMUX_PANE='%2'):
+            st = self.report('--current', '19', '--total', '40')
+            self.assertEqual(st['codex_thread_id'], thread)
+            self.assertEqual(st['pane'], '%2')
+            self.assertEqual(self.m.default_key(None), 'codex-'+thread)
+            reporter = self.m.Reporter('wrapped', 'Wrapped')
+            self.assertEqual(reporter.state['codex_thread_id'], thread)
+
+    def test_explicit_pane_is_preserved_by_heartbeat_and_counts(self):
+        self.report('--pane', '%158', '--current', '1', '--total', '40')
+        with patch.dict(os.environ, TMUX_PANE='%2'):
+            st = self.report('--heartbeat')
+            self.assertEqual(st['pane'], '%158')
+            self.assertTrue(st['pane_explicit'])
+            self.assertEqual(self.report('--current', '19')['pane'], '%158')
+
+    def test_invalid_codex_thread_does_not_replace_legacy_key(self):
+        with patch.dict(os.environ, CODEX_THREAD_ID='not-a-thread', TMUX_PANE='%2'):
+            self.assertEqual(self.m.default_key(None), '%2')
+            self.assertNotIn('codex_thread_id', self.report('--heartbeat'))
+
     def test_new_phase_clears_progress_and_eta(self):
         self.report('--phase', 'train', '--current', '2', '--total', '10', '--eta', '60')
         st = self.report('--phase', 'evaluation', '--state', 'preparing')

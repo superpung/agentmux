@@ -1,6 +1,7 @@
 // The shared Ghostty terminal runtime: font, cursor and key settings, and a
 // light/dark theme built on Apple Terminal's standard 16-color ANSI palette.
 import AppKit
+import AgentMuxCore
 import Foundation
 import GhosttyTerminal
 import SwiftUI
@@ -73,13 +74,21 @@ enum GhosttyRuntime {
     /// the app points it at the selected terminal's theme. `.system` follows the
     /// app's current appearance.
     static func applyColorScheme(for preference: TerminalThemePreference) {
+        controller.setColorScheme(isDark(preference) ? .dark : .light)
+    }
+
+    static func defaultColors(for preference: TerminalThemePreference) -> TerminalDefaultColors {
+        isDark(preference) ? darkDefaultColors : lightDefaultColors
+    }
+
+    private static func isDark(_ preference: TerminalThemePreference) -> Bool {
         let dark: Bool
         switch preference {
         case .dark: dark = true
         case .light: dark = false
         case .system: dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         }
-        controller.setColorScheme(dark ? .dark : .light)
+        return dark
     }
 
     private static func makeConfiguration(fontFamily: String, fontSize: Double) -> TerminalConfiguration {
@@ -126,8 +135,10 @@ enum GhosttyRuntime {
         return CGSize(width: ceil(width), height: ceil(font.ascender - font.descender + font.leading))
     }
 
-    static let darkBackground = "#101012"
-    static let lightBackground = "#FFFFFF"
+    private static let darkDefaultColors = TerminalDefaultColors(foreground: 0xD6D6D6, background: 0x101012)
+    private static let lightDefaultColors = TerminalDefaultColors(foreground: 0x3A3A3A, background: 0xFFFFFF)
+    static let darkBackground = darkDefaultColors.backgroundHex
+    static let lightBackground = lightDefaultColors.backgroundHex
 
     /// The terminal background, for the detail pane behind a centred surface so
     /// the letterbox margins read as terminal padding.
@@ -158,14 +169,14 @@ enum GhosttyRuntime {
     private static var theme: TerminalTheme {
         let dark = TerminalConfiguration { builder in
             builder.withBackground(darkBackground)
-            builder.withForeground("#D6D6D6")
+            builder.withForeground(darkDefaultColors.foregroundHex)
             for (index, color) in darkPalette.enumerated() {
                 builder.withPalette(index, color: hex(color))
             }
         }
         let light = TerminalConfiguration { builder in
             builder.withBackground(lightBackground)
-            builder.withForeground("#3A3A3A")
+            builder.withForeground(lightDefaultColors.foregroundHex)
             for (index, color) in lightPalette.enumerated() {
                 builder.withPalette(index, color: hex(color))
             }

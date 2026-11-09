@@ -152,6 +152,10 @@ public struct InventorySnapshot: Sendable, Equatable {
         /// The tmux pane the job runs in, so it maps to the right agent even when
         /// the file is keyed by a custom --id.
         public var pane: String?
+        /// Per-command identity survives a shared Codex app-server's stale pane environment.
+        public var codexThreadID: String?
+        public var paneIsExplicit: Bool
+        public var runID: String?
         public var current: Int?
         public var total: Int?
         public var percent: Double?
@@ -185,6 +189,9 @@ public struct InventorySnapshot: Sendable, Equatable {
 
         enum CodingKeys: String, CodingKey {
             case label, state, pane, current, total, percent, message, phase, unit, details, supersedes
+            case codexThreadID = "codex_thread_id"
+            case paneIsExplicit = "pane_explicit"
+            case runID = "run_id"
             case startedAt = "started_at"
             case finishedAt = "finished_at"
             case firstReportedAt = "first_reported_at"
@@ -203,6 +210,9 @@ public struct InventorySnapshot: Sendable, Equatable {
             phase = try? c.decodeIfPresent(String.self, forKey: .phase)
             unit = try? c.decodeIfPresent(String.self, forKey: .unit)
             pane = try? c.decodeIfPresent(String.self, forKey: .pane)
+            codexThreadID = try? c.decodeIfPresent(String.self, forKey: .codexThreadID)
+            paneIsExplicit = (try? c.decodeIfPresent(Bool.self, forKey: .paneIsExplicit)) ?? false
+            runID = try? c.decodeIfPresent(String.self, forKey: .runID)
             current = try? c.decodeIfPresent(Int.self, forKey: .current)
             total = try? c.decodeIfPresent(Int.self, forKey: .total)
             percent = try? c.decodeIfPresent(Double.self, forKey: .percent)
@@ -301,6 +311,8 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var usage: [String: AgentUsage] = [:]
     /// Long-job progress per agent pane, from the agentmux-progress wrapper.
     public var progress: [String: AgentProgress] = [:]
+    /// Exact thread identity from a TUI's `codex resume <uuid>`, never its conversation.
+    public var codexThreads: [String: Set<String>] = [:]
     /// Model id per agent pane (e.g. "claude-opus-5-5", "gpt-6-astra"), read
     /// from the session log (metadata only).
     public var models: [String: String] = [:]
@@ -318,6 +330,39 @@ public struct InventorySnapshot: Sendable, Equatable {
     public var failure: RemoteFailure?
 
     public init() {}
+
+    /// A legacy wrapper can exit before the next poll. Keep the exact thread
+    /// identity already verified for that run so its completion stays visible.
+    public mutating func retainProgressIdentity(from previous: Self?) {
+        guard let previous, let server, previous.server == server else { return }
+        for key in progress.keys {
+            guard var job = progress[key], job.codexThreadID == nil,
+                  let run = job.runID, !run.isEmpty,
+                  let old = previous.progress[key], old.runID == run else { continue }
+            job.codexThreadID = old.codexThreadID
+            progress[key] = job
+        }
+        resolveProgressOwners()
+    }
+
+    mutating func resolveProgressOwners() {
+        for key in progress.keys {
+            guard var job = progress[key], !job.paneIsExplicit,
+                  let rawID = job.codexThreadID, let thread = UUID(uuidString: rawID)?.uuidString.lowercased()
+            else { continue }
+            if let owners = codexThreads[thread], owners.count == 1 {
+                job.pane = owners.first
+            } else if codexThreads[thread] != nil {
+                // Two views of the same thread are ambiguous; do not choose one.
+                job.pane = nil
+            } else if let pane = job.pane,
+                      codexThreads.contains(where: { $0.key != thread && $0.value.contains(pane) }) {
+                // A daemon's inherited pane belongs to a different known thread.
+                job.pane = nil
+            }
+            progress[key] = job
+        }
+    }
 
     public func pane(_ id: String) -> Pane? {
         panes.first { $0.id == id }

@@ -90,6 +90,100 @@ struct AgentProgressTests {
         #expect(snapshot.progress["train"]?.id == "train")
     }
 
+    @Test func sharedCodexDaemonPaneIsReplacedByExactThreadOwner() throws {
+        let thread = "01a1bf35-d874-7310-abe5-b0d96d101ef1"
+        let text = """
+        @@begin 1 test
+        @@progress train {"pane":"%2","codex_thread_id":"\(thread)","current":19,"total":40}
+        @@codexthread %158 \(thread)
+        @@codexthread %158 \(thread)
+        @@end test
+        """
+        let snapshot = try InventoryProbe.parse(text, nonce: "test")
+        #expect(snapshot.progress["train"]?.pane == "%158")
+        #expect(snapshot.progress["train"]?.fraction == 0.475)
+    }
+
+    @Test func explicitPaneSurvivesThreadMatching() throws {
+        let thread = "01a1bf35-d874-7310-abe5-b0d96d101ef1"
+        let text = "@@begin 1 test\n@@codexthread %158 \(thread)\n@@progress train {\"pane\":\"%168\",\"pane_explicit\":true,\"codex_thread_id\":\"\(thread)\"}\n@@end test\n"
+        #expect(try InventoryProbe.parse(text, nonce: "test").progress["train"]?.pane == "%168")
+    }
+
+    @Test func ambiguousThreadDoesNotGuessAPane() throws {
+        let thread = "01a1bf35-d874-7310-abe5-b0d96d101ef1"
+        let text = "@@begin 1 test\n@@codexthread %158 \(thread)\n@@codexthread %168 \(thread)\n@@progress train {\"pane\":\"%2\",\"codex_thread_id\":\"\(thread)\"}\n@@end test\n"
+        #expect(try InventoryProbe.parse(text, nonce: "test").progress["train"]?.pane == nil)
+    }
+
+    @Test func anotherKnownThreadCannotInheritTheDaemonPane() throws {
+        let text = """
+        @@begin 1 test
+        @@codexthread %2 01a1bf35-d874-7310-abe5-b0d96d101ef1
+        @@progress train {"pane":"%2","codex_thread_id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
+        @@end test
+        """
+        #expect(try InventoryProbe.parse(text, nonce: "test").progress["train"]?.pane == nil)
+    }
+
+    @Test func legacyPaneAssociationStillWorks() throws {
+        let text = "@@begin 1 test\n@@progress train {\"pane\":\"%77\"}\n@@end test\n"
+        #expect(try InventoryProbe.parse(text, nonce: "test").progress["train"]?.pane == "%77")
+    }
+
+    @Test func completionRetainsVerifiedIdentityOnlyForTheSameRunAndServer() throws {
+        let thread = "01a1bf35-d874-7310-abe5-b0d96d101ef1"
+        func snapshot(run: String, state: String, identity: Bool, server: Int = 1) throws -> InventorySnapshot {
+            let meta = identity ? ",\"codex_thread_id\":\"\(thread)\"" : ""
+            return try InventoryProbe.parse("@@begin 1 test\n@@server \(server) 100 /tmp/tmux\n@@codexthread %158 \(thread)\n@@progress train {\"run_id\":\"\(run)\",\"state\":\"\(state)\",\"pane\":\"%2\"\(meta)}\n@@end test\n", nonce: "test")
+        }
+        let old = try snapshot(run: "a", state: "running", identity: true)
+        var finished = try snapshot(run: "a", state: "done", identity: false)
+        finished.retainProgressIdentity(from: old)
+        #expect(finished.progress["train"]?.pane == "%158")
+        var restarted = try snapshot(run: "b", state: "running", identity: false)
+        restarted.retainProgressIdentity(from: old)
+        #expect(restarted.progress["train"]?.codexThreadID == nil)
+        var newServer = try snapshot(run: "a", state: "done", identity: false, server: 2)
+        newServer.retainProgressIdentity(from: old)
+        #expect(newServer.progress["train"]?.codexThreadID == nil)
+    }
+
+    @Test func readerRecoversOnlyVerifiedLiveJobMetadataWithoutWritingFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("agentmux-progress-reader-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let records = dir.appendingPathComponent("progress")
+        let proc = dir.appendingPathComponent("proc/123")
+        try FileManager.default.createDirectory(at: records, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: proc, withIntermediateDirectories: true)
+        var fields = Array(repeating: "0", count: 20)
+        fields[19] = "999"
+        try ("123 (worker) " + fields.joined(separator: " ")).write(to: proc.appendingPathComponent("stat"), atomically: true, encoding: .utf8)
+        let thread = "01a1bf35-d874-7310-abe5-b0d96d101ef1"
+        try Data("CODEX_THREAD_ID=\(thread)\u{0}TMUX_PANE=%2\u{0}UNRELATED_SECRET=must-not-leave-proc\u{0}".utf8)
+            .write(to: proc.appendingPathComponent("environ"))
+        let live = #"{"pane":"%2","pid":123,"pid_start_ticks":999}"#
+        try live.write(to: records.appendingPathComponent("live.json"), atomically: true, encoding: .utf8)
+        try #"{"pane":"%2","pid":123,"pid_start_ticks":998}"#.write(to: records.appendingPathComponent("reused.json"), atomically: true, encoding: .utf8)
+        try #"{"pane":"%2","pid":123}"#.write(to: records.appendingPathComponent("unverified.json"), atomically: true, encoding: .utf8)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-c", InventoryProbe.progressReader, records.path, dir.appendingPathComponent("proc").path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        #expect(!output.contains("must-not-leave-proc"))
+        let snapshot = try InventoryProbe.parse("@@begin 1 test\n" + output + "@@end test\n", nonce: "test")
+        #expect(snapshot.progress["live"]?.codexThreadID == thread)
+        #expect(snapshot.progress["reused"]?.codexThreadID == nil)
+        #expect(snapshot.progress["unverified"]?.codexThreadID == nil)
+        #expect(try String(contentsOf: records.appendingPathComponent("live.json"), encoding: .utf8) == live)
+    }
+
     @Test func structuredReportReplacesItsRawWorkerOnly() throws {
         let report = try job(#"{"supersedes":["worker"]}"#, id: "report")
         let worker = try job(#"{}"#, id: "worker")

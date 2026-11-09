@@ -277,28 +277,34 @@ public extension AgentSessionProbe {
 /// (`%12`), so the app can show the agent once it is up.
 public enum AgentLauncher {
     /// Creates `name` at `cwd` and runs `command` in it.
-    public static func launchInNewSession(host: HostConfig, target: TargetConfig, name: String, cwd: String, command: String) async -> Result<String, RemoteFailure> {
+    public static func launchInNewSession(host: HostConfig, target: TargetConfig, name: String, cwd: String, command: String, defaultColors: TerminalDefaultColors? = nil) async -> Result<String, RemoteFailure> {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return .failure(RemoteFailure(.remoteCommandFailed, detail: "empty session name")) }
-        return await run(host, target, create: ["new-session", "-d", "-s", trimmed, "-c", cwd], command: command)
+        return await run(host, target, create: ["new-session", "-d", "-s", trimmed, "-c", cwd], command: command, defaultColors: defaultColors)
     }
 
     /// Opens a new window in `sessionID` at `cwd` and runs `command` in it.
-    public static func launchInNewWindow(host: HostConfig, target: TargetConfig, sessionID: String, cwd: String, command: String) async -> Result<String, RemoteFailure> {
+    public static func launchInNewWindow(host: HostConfig, target: TargetConfig, sessionID: String, cwd: String, command: String, defaultColors: TerminalDefaultColors? = nil) async -> Result<String, RemoteFailure> {
         guard TmuxQuote.id(sessionID) != nil else {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "invalid tmux id: \(sessionID)"))
         }
-        return await run(host, target, create: ["new-window", "-t", sessionID, "-c", cwd], command: command)
+        return await run(host, target, create: ["new-window", "-t", sessionID, "-c", cwd], command: command, defaultColors: defaultColors)
     }
 
     /// The shell script: `create` (a tmux command that makes a pane) prints
     /// the new pane's id, `command` is typed into that pane, and the id is
     /// reported as `@@pane <id>`.
-    static func script(tmux: [String], create: [String], command: String) -> String {
+    static func script(tmux: [String], create: [String], command: String, defaultColors: TerminalDefaultColors? = nil) -> String {
         let made = ShellQuote.command(tmux + [create[0], "-P", "-F", "#{pane_id}"] + create.dropFirst())
         let typed = ShellQuote.command(tmux + ["send-keys", "-t"]) + " \"$p\" -l " + ShellQuote.word(command)
         let enter = ShellQuote.command(tmux + ["send-keys", "-t"]) + " \"$p\" Enter"
-        return "p=$(\(made)) && \(typed) && \(enter) && printf '@@pane %s\\n' \"$p\""
+        let preparation = defaultColors.map { colors in
+            ["window-style", "window-active-style"].map { option in
+                ShellQuote.command(tmux + ["set-option", "-p", "-t"]) + " \"$p\" "
+                    + ShellQuote.command([option, colors.paneStyle]) + " && "
+            }.joined()
+        } ?? ""
+        return "p=$(\(made)) && \(preparation)\(typed) && \(enter) && printf '@@pane %s\\n' \"$p\""
     }
 
     /// The pane id the script reported.
@@ -308,14 +314,14 @@ public enum AgentLauncher {
             .first { TmuxQuote.id($0) != nil }
     }
 
-    private static func run(_ host: HostConfig, _ target: TargetConfig, create: [String], command: String) async -> Result<String, RemoteFailure> {
+    private static func run(_ host: HostConfig, _ target: TargetConfig, create: [String], command: String, defaultColors: TerminalDefaultColors?) async -> Result<String, RemoteFailure> {
         let tmux: TmuxInvocation
         do {
             tmux = try target.executionContext().tmux
         } catch {
             return .failure(RemoteFailure(.remoteCommandFailed, detail: "\(error)"))
         }
-        let result = await RemoteScript.run("\(script(tmux: tmux.argv, create: create, command: command)) 2>&1",
+        let result = await RemoteScript.run("\(script(tmux: tmux.argv, create: create, command: command, defaultColors: defaultColors)) 2>&1",
                                             host: host, target: target, timeoutSeconds: 15)
         return result.flatMap { output in
             paneID(in: output).map(Result.success)

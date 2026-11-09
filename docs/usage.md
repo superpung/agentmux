@@ -53,12 +53,32 @@ container (Python 3, standard library only). No daemon is required.
 
 ### New commands
 
-Run in the agent's tmux pane; its `TMUX_PANE` associates the job with that agent:
+Run in the agent's tmux pane. For a direct terminal command, `TMUX_PANE`
+associates the job with that agent:
 
 ```sh
 agentmux-progress --id training --label Training --unit epochs -- python train.py
 agentmux-progress --pipe --id build --label Build -- make >build.log 2>build.err
 ```
+
+**Codex shared app-server:** a tool command can inherit the background service's
+old `TMUX_PANE`, even though the TUI runs in a different pane. The reporter saves
+the per-command `CODEX_THREAD_ID`; AgentMux matches it to an exact
+`codex resume <uuid>` TUI. For older running wrappers, the reader can recover
+that identity from the live job after verifying its PID and start ticks.
+For fresh threads without a resume id, or multiple TUIs of the same thread,
+use an explicit pane id from the actual agent pane:
+
+```sh
+agentmux-progress --pane %158 --id training -- python train.py
+agentmux-progress report --pane %158 --id training --pid 1234 --current 3 --total 10
+```
+
+Replace `%158` with the actual pane id; do not blindly copy `TMUX_PANE` from a
+Codex tool shell. `tmux list-panes -a -F '#{pane_id} #{session_name} #{window_name}'`
+lists pane identities. Explicit `--pane` remains set across heartbeat reports.
+Without `--id`, Codex records use the thread id rather than a shared daemon's
+pane id, preventing different threads from overwriting each other's record.
 
 The default PTY supports terminal progress bars. It merges stdout/stderr and
 may translate line endings; it also changes terminal detection and the process

@@ -55,10 +55,12 @@ final class PaneTerminal {
     func applyTheme(_ preference: TerminalThemePreference) {
         themePreference = preference
         surfaceView?.appearance = preference.appearance
+        mirror.setDefaultColors(GhosttyRuntime.defaultColors(for: preference))
     }
 
-    init(ref: PaneRef, sessionID: String, host: HostConfig, target: TargetConfig) throws {
-        let mirror = try PaneMirror(host: host, target: target, session: sessionID, paneID: ref.paneID)
+    init(ref: PaneRef, sessionID: String, host: HostConfig, target: TargetConfig, theme: TerminalThemePreference) throws {
+        let mirror = try PaneMirror(host: host, target: target, session: sessionID, paneID: ref.paneID,
+                                    defaultColors: GhosttyRuntime.defaultColors(for: theme))
         let gate = InputGate()
         // Drops mouse reports while the pane is a bare shell (no live agent),
         // so a terminal stuck in mouse-reporting mode cannot flood the shell;
@@ -97,6 +99,7 @@ final class PaneTerminal {
         self.gate = gate
         self.host = host
         self.target = target
+        themePreference = theme
 
         state.makePlatformView = { [weak self] in
             let view = PasteInterceptingTerminalView(frame: .zero)
@@ -106,6 +109,10 @@ final class PaneTerminal {
             view.onPasteImage = { [weak self] png in self?.pasteImage(png) }
             view.onFocus = { [weak self] in self?.onFocus?() }
             view.onUserInput = { [weak self] in self?.gate.noteInput() }
+            view.onAppearanceChange = { [weak self] in
+                guard let self, self.themePreference == .system else { return }
+                self.mirror.setDefaultColors(GhosttyRuntime.defaultColors(for: .system))
+            }
             // Ghostty picks its palette from the view's appearance; honour the
             // terminal's theme preference (set before this runs via applyTheme).
             view.appearance = self?.themePreference.appearance
@@ -297,6 +304,13 @@ final class PaneTerminal {
 /// the local mirror cannot know whether the remote program enabled
 /// bracketed paste before the view was opened.
 final class PasteInterceptingTerminalView: AppTerminalView {
+    var onAppearanceChange: (() -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?()
+    }
+
     var onPaste: ((String) -> Bool)?
     var onPreviewPath: ((String) -> Void)?
     /// Shift+Return sends a soft newline to the pane instead of submitting.
