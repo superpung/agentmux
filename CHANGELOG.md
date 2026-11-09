@@ -8,6 +8,8 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-09
+
 ### Fixed
 
 - Job progress from a shared Codex app-server follows the command's thread
@@ -303,7 +305,8 @@ First public release.
 - Avoids a tmux server segfault on grouped-session teardown by never destroying a
   session while its control client is attached.
 
-[Unreleased]: https://github.com/superpung/agentmux/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/superpung/agentmux/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/superpung/agentmux/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/superpung/agentmux/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/superpung/agentmux/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/superpung/agentmux/compare/v0.2.3...v0.3.0
