@@ -292,7 +292,9 @@ func printProbe(_ result: Result<InventorySnapshot, RemoteFailure>) {
         for job in snapshot.progress.values.sorted(by: { $0.id < $1.id }) {
             let counts = job.current.map(String.init) ?? "?"
             let total = job.total.map(String.init) ?? "?"
-            print("   progress \(display(job.id)) pane=\(display(job.pane ?? "unassigned")) state=\(display(job.state)) counts=\(counts)/\(total)")
+            let correction = job.reportedPane != job.pane
+                ? " reported-pane=\(display(job.reportedPane ?? "unassigned"))" : ""
+            print("   progress \(display(job.id)) pane=\(display(job.pane ?? "unassigned")) state=\(display(job.state)) counts=\(counts)/\(total)\(correction)")
         }
         print("   \(snapshot.panes.count) panes, \(snapshot.processes.count) processes under panes, \(snapshot.agents.count) agent candidates")
     }

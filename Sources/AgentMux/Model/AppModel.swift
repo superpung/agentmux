@@ -300,16 +300,40 @@ final class AppModel {
     private(set) var linkGroupsByTarget: [String: [ProjectLinkGroup]] = [:]
     /// Codex account dirs + non-secret account ids per target, for switching.
     private(set) var codexAccountsByTarget: [String: [AgentSessionProbe.CodexAccount]] = [:]
+    @ObservationIgnored private var accountSwitches: Set<PaneRef> = []
+    @ObservationIgnored private var accountLinkRefreshes: Set<String> = []
+    @ObservationIgnored private var accountLinksAttempted: [String: Date] = [:]
+    private enum AccountDiscovery: Sendable {
+        case claude(Result<[ProjectLinkEntry], RemoteFailure>)
+        case codex(Result<[AgentSessionProbe.CodexAccount], RemoteFailure>)
+    }
 
     func refreshLinks(_ targetID: String) {
-        guard let state = state(targetID) else { return }
+        guard let state = state(targetID), accountLinkRefreshes.insert(targetID).inserted else { return }
+        accountLinksAttempted[targetID] = Date()
+        let host = state.host
+        let target = state.target
         Task { [weak self] in
-            if case let .success(entries) = await AgentSessionProbe.projectLinks(host: state.host, target: state.target) {
-                let groups = AgentSessionProbe.linkGroups(from: entries)
-                await MainActor.run { self?.linkGroupsByTarget[targetID] = groups }
-            }
-            if case let .success(accts) = await AgentSessionProbe.codexAccounts(host: state.host, target: state.target) {
-                await MainActor.run { self?.codexAccountsByTarget[targetID] = accts }
+            defer { self?.accountLinkRefreshes.remove(targetID) }
+            // Independent scans: a slow Claude project listing must not delay
+            // Codex account discovery or turn a partial failure into a cache hit.
+            await withTaskGroup(of: AccountDiscovery.self) { group in
+                group.addTask {
+                    .claude(await AgentSessionProbe.projectLinks(host: host, target: target))
+                }
+                group.addTask {
+                    .codex(await AgentSessionProbe.codexAccounts(host: host, target: target))
+                }
+                for await discovery in group {
+                    switch discovery {
+                    case let .claude(.success(entries)):
+                        self?.linkGroupsByTarget[targetID] = AgentSessionProbe.linkGroups(from: entries)
+                    case let .codex(.success(accounts)):
+                        self?.codexAccountsByTarget[targetID] = accounts
+                    case let .claude(.failure(error)), let .codex(.failure(error)):
+                        CommandLog.log("account-discovery", targetID, error.detail.isEmpty ? error.kind.rawValue : error.detail)
+                    }
+                }
             }
         }
     }
@@ -329,9 +353,9 @@ final class AppModel {
             let current = agent.configDir ?? group.accounts.first { ($0 as NSString).lastPathComponent == ".claude" }
             return group.accounts.filter { $0 != current }
         case .codex:
-            // Codex sessions are linked to one canonical copy, so any other codex
-            // account dir can resume the session. Offer the ones whose account
-            // differs from this agent's current one.
+            // The handoff verifies the source conversation and carries its
+            // runtime state to the selected account. A sessions symlink alone
+            // cannot establish continuity between independent SQLite indexes.
             guard let accounts = codexAccountsByTarget[ref.targetID] else { return [] }
             let currentAccount = state(ref.targetID)?.snapshot?.accounts[ref.paneID]
             let currentID = currentAccount.flatMap { $0.hasPrefix("codex:") ? String($0.dropFirst(6)) : nil }
@@ -347,6 +371,8 @@ final class AppModel {
     /// conversation in place. Returns nil on success (and requests a refresh),
     /// else an error string. Destructive — the caller confirms first.
     func switchAccount(_ ref: PaneRef, to configDir: String) async -> String? {
+        guard accountSwitches.insert(ref).inserted else { return "An account switch is already in progress." }
+        defer { accountSwitches.remove(ref) }
         guard let state = state(ref.targetID), let agent = agentEntry(ref),
               let pid = state.detections[ref.paneID]?.pid
         else { return "This agent is no longer available." }
@@ -947,7 +973,18 @@ final class AppModel {
         case .success(var snapshot):
             let previousServer = state.snapshot?.server
             snapshot.retainProgressIdentity(from: state.snapshot)
+            for job in snapshot.progress.values {
+                guard let reported = job.reportedPane, let actual = job.pane, reported != actual else { continue }
+                let old = state.snapshot?.progress[job.id]
+                if old?.runID == job.runID, old?.pane == actual, old?.reportedPane == reported { continue }
+                CommandLog.log("progress", state.id, "job=\(job.id) reported-pane=\(reported) resolved-pane=\(actual) thread=\(job.codexThreadID ?? "unknown")")
+            }
             state.snapshot = snapshot
+            if terminals.keys.contains(where: { $0.targetID == state.id }),
+               codexAccountsByTarget[state.id] == nil || linkGroupsByTarget[state.id] == nil,
+               Date().timeIntervalSince(accountLinksAttempted[state.id] ?? .distantPast) >= 15 {
+                refreshLinks(state.id)
+            }
             state.detections = AgentDetector.detect(snapshot)
             let newActivities = Self.resolveActivities(snapshot: snapshot, detections: state.detections)
             noteActivitySince(state, old: state.activities, new: newActivities)
@@ -1587,7 +1624,7 @@ final class AppModel {
             terminal.setMouseForwardingAllowed(state.detections[ref.paneID]?.kind.isAgent ?? false)
             terminals[ref] = terminal
             // Populate the account-link map so "Switch Account" is ready.
-            if linkGroupsByTarget[ref.targetID] == nil { refreshLinks(ref.targetID) }
+            if linkGroupsByTarget[ref.targetID] == nil || codexAccountsByTarget[ref.targetID] == nil { refreshLinks(ref.targetID) }
         } catch {
             state.lastFailure = RemoteFailure(.remoteCommandFailed, detail: "\(error)")
         }

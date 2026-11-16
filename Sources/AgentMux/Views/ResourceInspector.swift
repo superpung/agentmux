@@ -578,7 +578,7 @@ private struct ProgressJobView: View {
                                     Text(detail.label).font(.caption2).foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
                                     MetricRow(icon: "chart.bar", title: detail.unit ?? "Progress",
-                                              value: detail.current.flatMap { c in detail.total.map { "\(c)/\($0)" } } ?? "",
+                                              value: detail.amount ?? "",
                                               fraction: detail.fraction,
                                               barTint: detail.fraction == 1 ? .green : .accentColor)
                                 }

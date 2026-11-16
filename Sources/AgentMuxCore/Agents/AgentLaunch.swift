@@ -151,20 +151,26 @@ public enum AgentSessionProbe {
     /// Codex account dirs (`~/.codex*` with a sessions dir) and each one's
     /// non-secret `tokens.account_id`. Never reads any token.
     public static func codexAccounts(host: HostConfig, target: TargetConfig) async -> Result<[CodexAccount], RemoteFailure> {
-        let script = """
+        return (await RemoteScript.run(codexAccountScript, host: host, target: target, timeoutSeconds: 15))
+            .map(parseCodexAccounts)
+    }
+
+    static let codexAccountScript = """
         command -v jq >/dev/null 2>&1 || exit 0
         for d in "$HOME"/.codex "$HOME"/.codex-*; do
           [ -d "$d/sessions" ] || continue
           id=$(jq -r '.tokens.account_id // empty' "$d/auth.json" 2>/dev/null)
-          [ -n "$id" ] && printf '%s|%s\\n' "$d" "$id"
+          [ -n "$id" ] || continue
+          printf '%s|%s\\n' "$d" "$id"
         done
+        exit 0
         """
-        return (await RemoteScript.run(script, host: host, target: target, timeoutSeconds: 15)).map { text in
-            text.split(whereSeparator: \.isNewline).compactMap { line in
-                let p = line.split(separator: "|", maxSplits: 1).map(String.init)
-                guard p.count == 2, !p[0].isEmpty, !p[1].isEmpty, AgentAccountSwitch.isSafeConfigDir(p[0]) else { return nil }
-                return CodexAccount(path: p[0], accountID: p[1])
-            }
+
+    static func parseCodexAccounts(_ text: String) -> [CodexAccount] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            let p = line.split(separator: "|", maxSplits: 1).map(String.init)
+            guard p.count == 2, !p[0].isEmpty, !p[1].isEmpty, AgentAccountSwitch.isSafeConfigDir(p[0]) else { return nil }
+            return CodexAccount(path: p[0], accountID: p[1])
         }
     }
 }
@@ -423,10 +429,10 @@ public enum AgentAccountSwitch {
     }
 
     /// Switches a Codex agent to another account dir (CODEX_HOME), resuming the
-    /// same session in place. Works because the per-account `sessions` dirs are
-    /// linked to one canonical copy, so `codex resume <id>` finds the rollout
-    /// under the new account. `codexPID` is the detected Codex process for the
-    /// pane; a stale pid is refused. Destructive — the caller confirms first.
+    /// exact source conversation in place, using its verified SQLite state and
+    /// a fresh runtime rather than the target account's potentially stale index.
+    /// `codexPID` is verified against the pane's process ancestry; stale pids
+    /// are refused. Destructive — the caller confirms first.
     public static func switchCodexAccount(
         host: HostConfig, target: TargetConfig,
         paneID: String, codexPID: Int, cwd: String, newConfigDir: String
@@ -443,58 +449,10 @@ public enum AgentAccountSwitch {
         let tmux: TmuxInvocation
         do { tmux = try target.executionContext().tmux }
         catch { return .failure(RemoteFailure(.remoteCommandFailed, detail: "\(error)")) }
-        let tm = ShellQuote.command(tmux.argv)
-        let script = """
-        pane=\(ShellQuote.word(paneID))
-        pid=\(ShellQuote.word(String(codexPID)))
-        newcfg=\(ShellQuote.word(newConfigDir))
-        cwd=\(ShellQuote.word(cwd))
-        # Refuse to touch a pid that is not this pane's Codex (guards a stale pid).
-        tp=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
-        cl=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
-        case "$tp" in "$pane") ;; *) echo "ERR: process $pid is not in $pane any more (stale); refusing"; exit 1;; esac
-        case "$cl" in *codex*) ;; *) echo "ERR: process $pid is not Codex any more (stale); refusing"; exit 1;; esac
-        ch=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1)
-        ch=${ch:-$HOME/.codex}
-        # Session id to resume: `resume <id>` on the cmdline, else the id of the
-        # live rollout the shared app-server holds for this (CODEX_HOME, cwd),
-        # else the newest rollout matching this cwd. Only metadata is read.
-        sid=$(printf '%s' "$cl" | grep -oE 'resume [A-Za-z0-9._-]+' | awk '{print $2}' | head -1)
-        if [ -z "$sid" ] && command -v jq >/dev/null 2>&1; then
-          for q in $(ps -eo pid=,comm= 2>/dev/null | awk '$2=="codex"{print $1}'); do
-            case "$(tr '\\0' ' ' < "/proc/$q/cmdline" 2>/dev/null)" in *app-server*) ;; *) continue ;; esac
-            qch=$(tr '\\0' '\\n' < "/proc/$q/environ" 2>/dev/null | sed -n 's/^CODEX_HOME=//p' | head -1); qch=${qch:-$HOME/.codex}
-            [ "$qch" = "$ch" ] || continue
-            for rf in $(ls -l "/proc/$q/fd" 2>/dev/null | grep -oE '/[^ ]*/sessions/[0-9]+/[0-9]+/[0-9]+/rollout-[^ ]*\\.jsonl' | sort -u); do
-              [ -f "$rf" ] || continue
-              [ "$(head -n 1 "$rf" | jq -r '.payload.cwd // empty' 2>/dev/null)" = "$cwd" ] || continue
-              sid=$(head -n 1 "$rf" | jq -r '.payload.id // empty' 2>/dev/null); [ -n "$sid" ] && break
-            done
-            [ -n "$sid" ] && break
-          done
-        fi
-        if [ -z "$sid" ] && command -v jq >/dev/null 2>&1; then
-          rf=$(find -L "$ch/sessions" -name 'rollout-*.jsonl' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | while read -r _ f; do
-            [ "$(head -n 1 "$f" | jq -r '.payload.cwd // empty' 2>/dev/null)" = "$cwd" ] && { echo "$f"; break; }
-          done)
-          [ -n "$rf" ] && sid=$(head -n 1 "$rf" | jq -r '.payload.id // empty' 2>/dev/null)
-        fi
-        case "$sid" in ""|*[!A-Za-z0-9._-]*) echo "ERR: could not determine the session id to resume"; exit 1;; esac
-        # Stop gracefully, then hard.
-        kill -TERM "$pid" 2>/dev/null
-        i=0
-        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.25; i=$((i+1)); done
-        if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; sleep 0.3; fi
-        sleep 0.4
-        cmd="CODEX_HOME=$newcfg codex resume $sid"
-        # Discard any partial line at the shell prompt before typing, so a stray
-        # byte that landed between the kill and now cannot prefix the command.
-        \(tm) send-keys -t "$pane" C-u
-        \(tm) send-keys -t "$pane" -l "$cmd" || { echo "ERR: could not type the relaunch command"; exit 1; }
-        \(tm) send-keys -t "$pane" Enter
-        echo "OK: $sid"
-        """
-        let result = await RemoteScript.run(script, host: host, target: target, timeoutSeconds: 30)
+        let script = CodexAccountHandoff.script(
+            tmux: tmux.argv, paneID: paneID, pid: codexPID, cwd: cwd, target: newConfigDir
+        )
+        let result = await RemoteScript.run(script, host: host, target: target, timeoutSeconds: 120)
         switch result {
         case let .success(output):
             let lines = output.split(whereSeparator: \.isNewline).map(String.init)

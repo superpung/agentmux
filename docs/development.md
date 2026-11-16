@@ -22,11 +22,16 @@ engine's `.xcstrings` resource; the native engine copies the file instead. See
 . scripts/env.sh
 swiftpm build                 # debug build
 swiftpm test                  # unit tests (swift-testing)
-python3 -m unittest discover -s Tests/ScriptTests  # progress wrapper regressions
+python3 -m unittest discover -s Tests/ScriptTests  # progress and account-switch regressions
 scripts/bundle-app.sh         # build and ad-hoc sign build/AgentMux.app (debug)
 scripts/bundle-app.sh release # release build
 open build/AgentMux.app
 ```
+
+On Linux, set `AGENTMUX_CODEX_TEST_BINARY` to an installed Codex binary to also
+run the native account-switch tests. These use disposable accounts, synthetic
+conversations and the isolated `agentmux-test` tmux socket, with no model
+requests or real credentials. See decision 0019 for the continuity checks.
 
 `scripts/bundle-app.sh` assembles `build/AgentMux.app` from the SwiftPM binary,
 copies the resource bundles and icons, writes `Info.plist`, and ad-hoc signs the

@@ -75,6 +75,16 @@ struct AgentProgressTests {
         #expect(p.details.first?.fraction == 1.0 / 3.0)
     }
 
+    @Test func decimalMetricsDoNotDiscardOtherDetails() throws {
+        let p = try job(#"{"current":45,"total":117,"details":[{"id":"cases","label":"Cases","current":45,"total":117},{"id":"cpu","label":"CPU","current":25.17,"total":100,"unit":"%"},null,{"label":"Incomplete","current":"unknown"},{"label":"Missing counts"}]}"#)
+        #expect(p.details.count == 4)
+        #expect(p.details.first?.fraction == 45.0 / 117)
+        let cpu = try #require(p.details.dropFirst().first?.fraction)
+        #expect(abs(cpu - 0.2517) < 0.000001)
+        #expect(p.details.first?.amount == "45/117")
+        #expect(p.details.dropFirst().first?.amount == "25.17/100")
+    }
+
     @Test func reportsDoNotReorderActiveJobs() throws {
         let a = try job(#"{"started_at":100,"updated_at":500}"#, id: "a")
         let b = try job(#"{"started_at":200,"updated_at":600}"#, id: "b")
@@ -104,10 +114,27 @@ struct AgentProgressTests {
         #expect(snapshot.progress["train"]?.fraction == 0.475)
     }
 
-    @Test func explicitPaneSurvivesThreadMatching() throws {
+    @Test func uniqueLiveThreadCorrectsAnExplicitStaleDaemonPane() throws {
         let thread = "01a1bf35-d874-7310-abe5-b0d96d101ef1"
-        let text = "@@begin 1 test\n@@codexthread %158 \(thread)\n@@progress train {\"pane\":\"%168\",\"pane_explicit\":true,\"codex_thread_id\":\"\(thread)\"}\n@@end test\n"
+        let text = "@@begin 1 test\n@@codexthread %158 \(thread)\n@@codexthread %2 aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n@@progress train {\"pane\":\"%2\",\"pane_explicit\":true,\"codex_thread_id\":\"\(thread)\",\"current\":60,\"total\":117}\n@@end test\n"
+        let snapshot = try InventoryProbe.parse(text, nonce: "test")
+        #expect(snapshot.progress["train"]?.pane == "%158")
+        #expect(snapshot.progress["train"]?.current == 60)
+        #expect(snapshot.progress["train"]?.reportedPane == "%2")
+        #expect(snapshot.progress.values.filter { $0.pane == "%2" }.isEmpty)
+    }
+
+    @Test func explicitPaneStillWorksWithoutUniqueThreadEvidence() throws {
+        let thread = "01a1bf35-d874-7310-abe5-b0d96d101ef1"
+        let text = "@@begin 1 test\n@@codexthread %158 \(thread)\n@@codexthread %168 \(thread)\n@@progress train {\"pane\":\"%168\",\"pane_explicit\":true,\"codex_thread_id\":\"\(thread)\"}\n@@end test\n"
         #expect(try InventoryProbe.parse(text, nonce: "test").progress["train"]?.pane == "%168")
+        #expect(try job(#"{"pane":"%168","pane_explicit":true}"#).pane == "%168")
+    }
+
+    @Test func correctedReporterKeepsTheOriginalPaneForDiagnostics() throws {
+        let value = try job(#"{"pane":"%158","requested_pane":"%2","pane_explicit":true,"owner_source":"codex_thread"}"#)
+        #expect(value.pane == "%158")
+        #expect(value.reportedPane == "%2")
     }
 
     @Test func ambiguousThreadDoesNotGuessAPane() throws {

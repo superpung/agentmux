@@ -28,7 +28,7 @@ jobs:
         with:
           fetch-depth: 0 # full history and tags, for the previous release
 
-      - name: Test progress wrapper
+      - name: Test remote scripts
         run: python3 -m unittest discover -s Tests/ScriptTests
 
       - name: Derive version

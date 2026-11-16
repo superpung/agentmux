@@ -398,7 +398,7 @@ public enum InventoryProbe {
         # Per-pane progress files from the agentmux-progress wrapper (our own
         # small JSON, keyed by tmux pane; never the conversation).
         pgdir="${AGENTMUX_PROGRESS_DIR:-$HOME/.agentmux/progress}"
-        if [ -d "$pgdir" ] && command -v python3 >/dev/null 2>&1; then
+        if command -v python3 >/dev/null 2>&1; then
           python3 - "$pgdir" <<'__AGENTMUX_PROGRESS__'
         \(progressReader)
         __AGENTMUX_PROGRESS__
@@ -607,23 +607,84 @@ public enum InventoryProbe {
     /// job's environment only after verifying its PID incarnation. No files are
     /// changed, and neither agent configs nor conversations are opened.
     static let progressReader = #"""
-    import itertools, json, os, re, sys
+    import heapq, itertools, json, os, re, sys
     from pathlib import Path
     root = Path(sys.argv[1])
     proc = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('/proc')
     thread_pattern = r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}'
-    try:
-        entries = os.scandir(root)
-    except OSError:
-        entries = []
-    for entry in itertools.islice((e for e in entries if e.name.endswith('.json')), 256):
-        key = entry.name[:-5]
-        if not re.fullmatch(r'[A-Za-z0-9._%-]+', key):
+
+    def entries(path):
+        try:
+            with os.scandir(path) as found:
+                yield from found
+        except OSError:
+            return
+
+    def environment(pid):
+        return dict(v.split(b'=', 1) for v in (proc / str(pid) / 'environ').read_bytes().split(b'\0') if b'=' in v)
+
+    directories = {str(root.resolve())}
+
+    def add_directory(value):
+        if isinstance(value, str) and os.path.isabs(value) and len(directories) < 64:
+            directories.add(str(Path(value).resolve()))
+
+    # The reporter registers custom directories here, so completed runs remain
+    # discoverable after their processes exit. No project tree is searched.
+    registry = Path.home() / '.agentmux/progress-sources'
+    for entry in itertools.islice(entries(registry), 128):
+        try:
+            if entry.name.endswith('.json') and entry.is_file(follow_symlinks=False) and entry.stat().st_size <= 8192:
+                with open(entry.path) as f:
+                    source = json.load(f)
+                if isinstance(source, dict):
+                    add_directory(source.get('directory'))
+        except (OSError, ValueError, TypeError):
+            continue
+
+    # Compatibility for wrappers started before directory registration existed.
+    # Inspect only Python/progress processes and the reporter's own entrypoint.
+    for entry in itertools.islice(entries(proc), 8192):
+        if not entry.name.isdigit():
             continue
         try:
-            if entry.stat().st_size > 1048576:
+            process = proc / entry.name
+            comm = (process / 'comm').read_text().strip()
+            if not re.fullmatch(r'(?:python[0-9.]*|agentmux-progre.*)', comm):
                 continue
-            with open(entry.path) as f:
+            with open(process / 'cmdline', 'rb') as f:
+                args = f.read(4096).split(b'\0')
+            if not any(os.path.basename(a) == b'agentmux-progress' for a in args[:2]):
+                continue
+            custom = environment(entry.name).get(b'AGENTMUX_PROGRESS_DIR')
+            if custom:
+                add_directory(os.fsdecode(custom))
+        except (OSError, ValueError):
+            continue
+
+    def candidates():
+        for directory in sorted(directories):
+            for entry in entries(directory):
+                key = entry.name[:-5]
+                if not entry.name.endswith('.json') or not re.fullmatch(r'[A-Za-z0-9._%-]+', key):
+                    continue
+                try:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    stat = entry.stat()
+                    if stat.st_size <= 1048576:
+                        yield stat.st_mtime_ns, entry.path, key
+                except OSError:
+                    continue
+
+    # Apply the payload budget AFTER selecting the newest reports, not to an
+    # arbitrary filesystem prefix that can exclude every live job.
+    seen = set()
+    for modified, path, key in heapq.nlargest(256, candidates()):
+        if key in seen:
+            continue
+        try:
+            with open(path) as f:
                 record = json.load(f)
             if not isinstance(record, dict):
                 continue
@@ -633,13 +694,17 @@ public enum InventoryProbe {
                     try:
                         fields = (proc / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()
                         if int(fields[19]) == ticks:
-                            env = dict(v.split(b'=', 1) for v in (proc / str(pid) / 'environ').read_bytes().split(b'\0') if b'=' in v)
+                            env = environment(pid)
                             thread = env.get(b'CODEX_THREAD_ID', b'').decode('ascii', errors='ignore')
                             if re.fullmatch(thread_pattern, thread):
                                 record['codex_thread_id'] = thread.lower()
                     except (OSError, ValueError, IndexError):
                         pass
+            # Estimator internals are producer state, not inspector data.
+            record.pop('_eta_samples', None)
+            record.pop('_eta_key', None)
             print('@@progress', key, json.dumps(record, separators=(',', ':'), allow_nan=False))
+            seen.add(key)
         except (OSError, ValueError, TypeError):
             continue
     """#

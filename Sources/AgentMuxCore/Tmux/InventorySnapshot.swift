@@ -152,6 +152,8 @@ public struct InventorySnapshot: Sendable, Equatable {
         /// The tmux pane the job runs in, so it maps to the right agent even when
         /// the file is keyed by a custom --id.
         public var pane: String?
+        /// Original reporter input, retained when live thread evidence corrects it.
+        public var reportedPane: String?
         /// Per-command identity survives a shared Codex app-server's stale pane environment.
         public var codexThreadID: String?
         public var paneIsExplicit: Bool
@@ -176,21 +178,45 @@ public struct InventorySnapshot: Sendable, Equatable {
             public var id: String { key ?? label }
             public var key: String?
             public var label: String
-            public var current: Int?
-            public var total: Int?
+            public var current: Double?
+            public var total: Double?
             public var unit: String?
 
             enum CodingKeys: String, CodingKey { case key = "id", label, current, total, unit }
+
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                label = try c.decode(String.self, forKey: .label)
+                key = try? c.decodeIfPresent(String.self, forKey: .key)
+                current = try? c.decodeIfPresent(Double.self, forKey: .current)
+                total = try? c.decodeIfPresent(Double.self, forKey: .total)
+                unit = try? c.decodeIfPresent(String.self, forKey: .unit)
+            }
+
             public var fraction: Double? {
                 guard let current, let total, total > 0 else { return nil }
-                return max(0, min(1, Double(current) / Double(total)))
+                return max(0, min(1, current / total))
             }
+
+            public var amount: String? {
+                guard let current, let total else { return nil }
+                func text(_ value: Double) -> String {
+                    value.formatted(.number.grouping(.never).precision(.fractionLength(0...2)))
+                }
+                return "\(text(current))/\(text(total))"
+            }
+        }
+
+        private struct OptionalDetail: Decodable {
+            let value: Detail?
+            init(from decoder: Decoder) throws { value = try? Detail(from: decoder) }
         }
 
         enum CodingKeys: String, CodingKey {
             case label, state, pane, current, total, percent, message, phase, unit, details, supersedes
             case codexThreadID = "codex_thread_id"
             case paneIsExplicit = "pane_explicit"
+            case requestedPane = "requested_pane"
             case runID = "run_id"
             case startedAt = "started_at"
             case finishedAt = "finished_at"
@@ -210,6 +236,7 @@ public struct InventorySnapshot: Sendable, Equatable {
             phase = try? c.decodeIfPresent(String.self, forKey: .phase)
             unit = try? c.decodeIfPresent(String.self, forKey: .unit)
             pane = try? c.decodeIfPresent(String.self, forKey: .pane)
+            reportedPane = (try? c.decodeIfPresent(String.self, forKey: .requestedPane)) ?? pane
             codexThreadID = try? c.decodeIfPresent(String.self, forKey: .codexThreadID)
             paneIsExplicit = (try? c.decodeIfPresent(Bool.self, forKey: .paneIsExplicit)) ?? false
             runID = try? c.decodeIfPresent(String.self, forKey: .runID)
@@ -226,7 +253,7 @@ public struct InventorySnapshot: Sendable, Equatable {
             etaSeconds = try? c.decodeIfPresent(Int.self, forKey: .etaSeconds)
             etaAt = try? c.decodeIfPresent(Double.self, forKey: .etaAt)
             exitCode = try? c.decodeIfPresent(Int.self, forKey: .exitCode)
-            details = (try? c.decodeIfPresent([Detail].self, forKey: .details)) ?? []
+            details = ((try? c.decodeIfPresent([OptionalDetail].self, forKey: .details)) ?? []).compactMap(\.value)
             supersedes = (try? c.decodeIfPresent([String].self, forKey: .supersedes)) ?? []
         }
 
@@ -347,15 +374,17 @@ public struct InventorySnapshot: Sendable, Equatable {
 
     mutating func resolveProgressOwners() {
         for key in progress.keys {
-            guard var job = progress[key], !job.paneIsExplicit,
+            guard var job = progress[key],
                   let rawID = job.codexThreadID, let thread = UUID(uuidString: rawID)?.uuidString.lowercased()
             else { continue }
             if let owners = codexThreads[thread], owners.count == 1 {
+                // An explicit pane can still be copied from a shared daemon's
+                // stale environment. Exact live thread identity wins over it.
                 job.pane = owners.first
-            } else if codexThreads[thread] != nil {
+            } else if !job.paneIsExplicit, codexThreads[thread] != nil {
                 // Two views of the same thread are ambiguous; do not choose one.
                 job.pane = nil
-            } else if let pane = job.pane,
+            } else if !job.paneIsExplicit, let pane = job.pane,
                       codexThreads.contains(where: { $0.key != thread && $0.value.contains(pane) }) {
                 // A daemon's inherited pane belongs to a different known thread.
                 job.pane = nil

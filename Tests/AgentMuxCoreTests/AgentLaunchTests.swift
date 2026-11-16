@@ -1,4 +1,5 @@
 @testable import AgentMuxCore
+import Foundation
 import Testing
 
 @Suite struct AgentLaunchTests {
@@ -42,6 +43,41 @@ import Testing
             AgentConfigDir(kind: .claudeCode, path: "/root/.claude-3"),
             AgentConfigDir(kind: .codex, path: "/root/.codex-2"),
         ])
+    }
+
+    @Test func parsesOnlyValidCodexAccountIdentities() {
+        #expect(AgentSessionProbe.parseCodexAccounts("/root/.codex|account-a\n/root/.codex-3|account-b\n/root/.codex-exp|\nrelative|account-c\njunk\n") == [
+            .init(path: "/root/.codex", accountID: "account-a"),
+            .init(path: "/root/.codex-3", accountID: "account-b"),
+        ])
+    }
+
+    @Test func trailingUnconfiguredCodexDirectoryDoesNotDiscardValidAccounts() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agentmux-accounts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in [".codex", ".codex-3", ".codex-exp"] {
+            try FileManager.default.createDirectory(at: directory.appendingPathComponent("\(name)/sessions"), withIntermediateDirectories: true)
+        }
+        // A deterministic jq stand-in: the regression concerns the shell's
+        // final exit status, not JSON parsing or the user's real credentials.
+        let jq = directory.appendingPathComponent("jq")
+        try "#!/bin/sh\ncase \"$3\" in */.codex-exp/*) exit 2;; esac\nprintf 'fixture-account\\n'\n"
+            .write(to: jq, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: jq.path)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", AgentSessionProbe.codexAccountScript]
+        process.environment = ["HOME": directory.path, "PATH": directory.path + ":/usr/bin:/bin"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        try process.run()
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        let accounts = AgentSessionProbe.parseCodexAccounts(String(decoding: output, as: UTF8.self))
+        #expect(accounts.map(\.path) == [directory.appendingPathComponent(".codex").path, directory.appendingPathComponent(".codex-3").path])
     }
 
     @Test func parsesSessionsAndSkipsBadRows() {

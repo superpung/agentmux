@@ -8,6 +8,29 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex account switching preserves the source conversation's verified runtime
+  state, including paginated history, even when another account's index points
+  the same thread id at an older rollout. A fresh server bypasses stale caches;
+  the previous writer is released and the replacement is verified before the
+  switch succeeds. Ambiguous identity and duplicate open views are refused.
+- An unconfigured Codex directory no longer discards valid discovered accounts
+  and hides Switch Account. Codex discovery runs independently of Claude links
+  and retries failed scans while a terminal is open.
+- A unique live Codex thread now corrects even an explicitly supplied stale
+  tmux pane, preventing reports copied from a shared daemon's environment from
+  appearing under another agent. The reporter verifies process ancestry before
+  writing; the app also corrects legacy running records. Original pane values
+  remain available in diagnostics. Ambiguous threads keep explicit overrides.
+- Progress polling selects the newest records before applying its 256-record
+  budget, so accumulated history no longer hides live jobs. Custom progress
+  directories register automatically and legacy live wrappers are discovered
+  without restarting jobs or scanning projects. Duplicate ids use the newest
+  report across sources.
+- Progress details accept decimal metrics and preserve valid rows when another
+  row is malformed. Producer-only ETA history is omitted from polling payloads.
+
 ## [0.4.2] - 2026-11-09
 
 ### Fixed

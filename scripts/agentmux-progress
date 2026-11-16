@@ -31,22 +31,28 @@ ETA appears after at least 30 seconds with progress, using a 30-minute window.
 --source-updated-at records source freshness separately from the heartbeat.
 
 Records go to ~/.agentmux/progress (override with AGENTMUX_PROGRESS_DIR).
---pane explicitly associates a job with its agent and stays set on heartbeats.
-Codex commands also save CODEX_THREAD_ID: a shared app-server may supply a stale
-TMUX_PANE. AgentMux can match resumed threads to their actual panes. For a fresh
-thread or ambiguous mapping, pass --pane with the agent's actual pane id; do not
-copy the tool shell's TMUX_PANE without checking it. Use one stable --id per job
-and one writer per id. All options: report --help.
+Custom directories register in ~/.agentmux/progress-sources for discovery;
+AgentMux also detects legacy live wrappers. No reader configuration is needed.
+Codex commands save CODEX_THREAD_ID. An exact, unique live `codex resume <id>`
+match takes precedence over both TMUX_PANE and --pane, which may have been copied
+from a shared app-server's stale environment. Corrections retain requested_pane
+and owner_source for diagnostics. Without a unique match, --pane associates the
+job explicitly and stays set on heartbeats. Use the actual pane id for fresh
+threads or ambiguous mappings; do not copy the tool shell's TMUX_PANE without
+checking it. Use one stable --id per job and one writer per id.
+All options: report --help.
 Installed guide: /usr/local/share/doc/agentmux-progress/README.md.
 """
 import argparse
 import codecs
 import collections
+import hashlib
 import json
 import math
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 import uuid
@@ -78,6 +84,57 @@ def codex_thread_id():
         return None
 
 
+def codex_panes_from_processes(thread, pane_roots, processes, read_args):
+    """Match exact resume identities through ancestry, never a daemon's env."""
+    owners = set()
+    for pid, (parent, command) in processes.items():
+        if command != 'codex':
+            continue
+        try:
+            args = read_args(pid)
+        except OSError:
+            continue
+        if any(a in ('app-server', 'daemon') for a in args):
+            continue
+        if not any(args[i] == 'resume' and args[i+1].lower() == thread for i in range(len(args)-1)):
+            continue
+        ancestor = pid
+        for _ in range(20):
+            if ancestor in pane_roots:
+                owners.add(pane_roots[ancestor])
+                break
+            if ancestor not in processes:
+                break
+            ancestor = processes[ancestor][0]
+    return owners
+
+
+def resolve_codex_panes(thread):
+    """Read only tmux/process metadata; unsupported platforms fall back safely."""
+    if not os.path.isdir('/proc'):
+        return set()
+    try:
+        panes = subprocess.check_output(
+            ['tmux', 'list-panes', '-a', '-F', '#{pane_id} #{pane_pid}'],
+            stderr=subprocess.DEVNULL, text=True, timeout=2)
+        roots = {int(pid): pane for line in panes.splitlines()
+                 if len(parts := line.split()) == 2 for pane, pid in [parts]
+                 if re.fullmatch(r'%[0-9]+', pane) and pid.isdigit()}
+        ps = subprocess.check_output(['ps', '-eo', 'pid=,ppid=,comm='],
+                                     stderr=subprocess.DEVNULL, text=True, timeout=2)
+        processes = {int(pid): (int(parent), command) for line in ps.splitlines()
+                     if len(parts := line.strip().split(None, 2)) == 3
+                     for pid, parent, command in [parts] if pid.isdigit() and parent.isdigit()}
+
+        def read_args(pid):
+            with open('/proc/%d/cmdline' % pid, 'rb') as f:
+                return [a.decode('utf-8', errors='replace') for a in f.read(4096).split(b'\0')]
+
+        return codex_panes_from_processes(thread, roots, processes, read_args)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return set()
+
+
 def associate_owner(state, pane=None):
     if pane:
         state.update(pane=pane, pane_explicit=True)
@@ -86,6 +143,36 @@ def associate_owner(state, pane=None):
     thread = codex_thread_id()
     if thread:
         state['codex_thread_id'] = thread
+        owners = resolve_codex_panes(thread)
+        if len(owners) == 1:
+            actual = next(iter(owners))
+            if state.get('pane') and state['pane'] != actual:
+                state['requested_pane'] = state['pane']
+            state.update(pane=actual, owner_source='codex_thread')
+
+
+def register_progress_directory(directory):
+    """Let the reader discover custom output paths without scanning projects."""
+    directory = os.path.realpath(directory)
+    default = os.path.realpath(os.path.expanduser('~/.agentmux/progress'))
+    if directory == default:
+        return
+    registry = os.path.expanduser('~/.agentmux/progress-sources')
+    name = hashlib.sha256(os.fsencode(directory)).hexdigest()+'.json'
+    path = os.path.join(registry, name)
+    tmp = path+'.tmp.%d' % os.getpid()
+    try:
+        if os.path.isfile(path):
+            return
+        os.makedirs(registry, exist_ok=True)
+        with open(tmp, 'w') as f:
+            json.dump({'directory': directory}, f)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def atomic_write(path, obj):
@@ -95,6 +182,7 @@ def atomic_write(path, obj):
         with open(tmp, 'w') as f:
             json.dump(obj, f, allow_nan=False)
         os.replace(tmp, path)
+        register_progress_directory(os.path.dirname(path))
         return True
     except (OSError, ValueError, TypeError):
         try:

@@ -13,6 +13,27 @@ The [README](../README.md) lists what AgentMux does; this page covers how some o
 - **Closing.** A tile's × (or ⌘-clicking its row again) takes it out; its mirror stays warm like any recently viewed agent.
 - Each tile sizes its agent's tmux window to the tile, as the single view does with the full area. If you also have that window attached elsewhere, you see it at the tile's size while the tile is open.
 
+## Switching Codex accounts
+
+Choose **Switch Account** on an open agent and select the account directory.
+AgentMux verifies the current conversation, releases its previous writer and
+resumes it under the selected account's login and configuration. The new process
+keeps the source's SQLite state directory, including its conversation index and
+paginated history, and runs with a dedicated server so an older cached copy in
+the target account cannot take precedence. Subsequent switches carry that state
+directory forward.
+
+The switch succeeds after the replacement process opens the verified conversation
+and state database. If the identity is ambiguous, the same conversation is open
+in another view, or the installed Codex cannot perform the handoff, AgentMux
+reports the reason. Close duplicate views before retrying. Python 3 and a Codex
+version supporting `--no-daemon`, `sqlite_home` and the local app-server handoff
+protocol are required; the native integration tests cover Codex 0.169.0.
+
+This handoff applies to **Switch Account** in AgentMux. A separately launched
+`CODEX_HOME=… codex resume …` still uses that directory's own state unless an
+explicit `sqlite_home` override is supplied.
+
 ## Notifications and auto-continue
 
 The toolbar bell (⌥⌘N) opens the inbox:
@@ -66,6 +87,12 @@ old `TMUX_PANE`, even though the TUI runs in a different pane. The reporter save
 the per-command `CODEX_THREAD_ID`; AgentMux matches it to an exact
 `codex resume <uuid>` TUI. For older running wrappers, the reader can recover
 that identity from the live job after verifying its PID and start ticks.
+An exact, unique live thread match takes precedence over both the inherited
+`TMUX_PANE` and an explicit `--pane`. A copied daemon pane must not move progress
+to another agent. The reporter resolves this before writing new records; the
+app corrects records from already-running wrappers without restarting them.
+Corrections retain the originally requested pane for CLI and command-log
+diagnostics. No project, config or conversation files are used for this match.
 For fresh threads without a resume id, or multiple TUIs of the same thread,
 use an explicit pane id from the actual agent pane:
 
@@ -76,7 +103,9 @@ agentmux-progress report --pane %158 --id training --pid 1234 --current 3 --tota
 
 Replace `%158` with the actual pane id; do not blindly copy `TMUX_PANE` from a
 Codex tool shell. `tmux list-panes -a -F '#{pane_id} #{session_name} #{window_name}'`
-lists pane identities. Explicit `--pane` remains set across heartbeat reports.
+lists pane identities. Without unique thread evidence, explicit `--pane` remains
+set across heartbeat reports. Multiple live panes of the same thread remain
+ambiguous and use the explicit pane rather than an arbitrary candidate.
 Without `--id`, Codex records use the thread id rather than a shared daemon's
 pane id, preventing different threads from overwriting each other's record.
 
@@ -152,5 +181,17 @@ The wrapper writes a heartbeat every 10 seconds. Existing wrapper processes
 keep their loaded version until they exit; updating the installed file changes
 future launches. Progress records live in `~/.agentmux/progress`, outside the
 project, or `AGENTMUX_PROGRESS_DIR`. Use `--pane` when reporting from outside
-that tmux pane. Changing the progress directory requires the reader to use the
-same directory.
+that tmux pane. Custom directories automatically register a small pointer in
+`~/.agentmux/progress-sources`; the reader combines them with the default
+directory. It also discovers custom directories from already-running wrappers,
+without restarting the commands or scanning project trees. Use absolute custom
+paths. A legacy custom reporter that has already exited must report once with
+the updated tool to register its directory.
+
+The inspector reads the 256 newest records across these sources, selected by
+modification time before reading JSON. Older history cannot crowd out current
+heartbeats. IDs are shared across sources; when the same id appears in more
+than one directory, the newest report wins. Use distinct ids for distinct jobs.
+Detail counts accept decimal metrics as well as integers; an invalid detail
+does not discard valid sibling rows. Internal ETA sample histories stay on the
+producer and are not sent to the app.

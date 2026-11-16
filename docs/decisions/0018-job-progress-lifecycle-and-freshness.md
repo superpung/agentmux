@@ -62,3 +62,23 @@ sample timestamp and duration, so the finish clock does not drift between new
 estimates. Stale, paused and terminal jobs omit the pair; a live counter waiting
 for a rate shows Estimating. This extends both generic reports and the custom
 progress adapter without restarting the experiment itself.
+
+## Codex ownership precedence (2026-11-14)
+
+A shared app-server can pass its original `TMUX_PANE` to another thread's
+commands. Copying that value into `--pane` does not make it trustworthy. Reports
+with a correct `CODEX_THREAD_ID` were still shown under another live agent
+because explicit pane values previously bypassed thread resolution.
+
+An exact, unique live `codex resume <thread-id>` match now wins over both an
+inherited pane and an explicit pane. The reporter verifies the TUI's ancestry
+against tmux pane roots before writing; the app applies the same precedence to
+existing records. Missing or ambiguous thread evidence preserves explicit pane
+selection. No cwd matching, newest-session guessing, conversation reads or
+agent restarts are involved. Corrections retain the originally reported pane
+for CLI diagnostics and a deduplicated command-log entry.
+
+Regression fixtures include an active job explicitly assigned to `%2` while
+its exact thread owns `%158`, a different thread really owning `%2`, multiple
+panes of the same thread, absent identity and daemon processes with stale
+environment. Counters and heartbeat timestamps survive ownership correction.
