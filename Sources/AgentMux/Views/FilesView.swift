@@ -1081,6 +1081,7 @@ final class CodeHighlighter {
     private static let highlightByteCap = 150_000
 
     private let highlightr = Highlightr()
+    var isAvailable: Bool { highlightr != nil }
     private let font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
 
     struct Result { var string: NSAttributedString; var background: NSColor }

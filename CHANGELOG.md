@@ -8,6 +8,14 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening a code preview in a distributed app no longer crashes while locating
+  Highlightr resources. The highlighter loads its bundled scripts and themes from
+  `Contents/Resources` and falls back to plain text when resources are missing.
+  Release checks exercise a relocated app with build resources hidden, including
+  light/dark highlighting and incomplete-resource fallback.
+
 ## [0.4.3] - 2026-11-16
 
 ### Fixed

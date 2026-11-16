@@ -9,9 +9,9 @@ let package = Package(
         // patch; see scripts/vendor-libghostty.sh and Vendor/libghostty-spm/VENDORED.
         // Its binary target still downloads the prebuilt GhosttyKit.xcframework.
         .package(path: "Vendor/libghostty-spm"),
-        // Syntax highlighting for the file preview (highlight.js via
-        // JavaScriptCore; MIT). UI target only.
-        .package(url: "https://github.com/raspu/Highlightr.git", exact: "2.3.0"),
+        // Pinned source with an app-bundle resource lookup patch. See
+        // scripts/vendor-highlightr.sh and Vendor/Highlightr/VENDORED.
+        .package(path: "Vendor/Highlightr"),
     ],
     targets: [
         // forkpty + execve. The child after fork must only make

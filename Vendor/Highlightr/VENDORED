@@ -1,0 +1,3 @@
+tag=2.3.0
+commit=05e7fcc63b33925cd0c1faaa205cdd5681e7bbef
+patch=Vendor/patches/Bundle+HighlightrResources.swift

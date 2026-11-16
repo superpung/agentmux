@@ -85,6 +85,12 @@ jobs:
           AGENTMUX_VERSION: ${{ steps.version.outputs.version }}
         run: scripts/bundle-app.sh release
 
+      - name: Test relocated app resources and preview fallback
+        run: |
+          . scripts/env.sh
+          BIN="$("$SWIFT" build --build-system native -c release --show-bin-path)"
+          scripts/check-app-resources.sh build/AgentMux.app "$BIN"
+
       - name: Package
         run: |
           set -eux

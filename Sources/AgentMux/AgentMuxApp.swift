@@ -5,7 +5,12 @@ import UserNotifications
 @main
 struct AgentMuxApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        AppResourceSmoke.runIfRequested()
+        _model = State(initialValue: AppModel())
+    }
 
     var body: some Scene {
         WindowGroup {

@@ -14,7 +14,8 @@ cd "$ROOT"
 swiftpm build -c "$CONFIG"
 BIN="$("$SWIFT" build --build-system native -c "$CONFIG" --show-bin-path 2>/dev/null)"
 
-APP="$ROOT/build/AgentMux.app"
+APP="${AGENTMUX_APP_DIR:-$ROOT/build/AgentMux.app}"
+case "$APP" in *.app) ;; *) echo "App output must end in .app" >&2; exit 1;; esac
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/AgentMux" "$APP/Contents/MacOS/AgentMux"
