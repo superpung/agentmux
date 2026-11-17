@@ -8,6 +8,8 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-17
+
 ### Fixed
 
 - Long-lived terminal and file-watch readers release temporary Foundation read
@@ -347,7 +349,8 @@ First public release.
 - Avoids a tmux server segfault on grouped-session teardown by never destroying a
   session while its control client is attached.
 
-[Unreleased]: https://github.com/superpung/agentmux/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/superpung/agentmux/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/superpung/agentmux/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/superpung/agentmux/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/superpung/agentmux/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/superpung/agentmux/compare/v0.4.1...v0.4.2
