@@ -95,7 +95,7 @@ public enum CommandRunner {
         group.enter()
         DispatchQueue.global().async {
             while true {
-                let chunk = handle.availableData
+                let chunk = PipeReader.readAvailable(from: handle)
                 if chunk.isEmpty { break }
                 append(chunk)
             }

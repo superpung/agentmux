@@ -8,6 +8,13 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Long-lived terminal and file-watch readers release temporary Foundation read
+  buffers after each chunk instead of retaining them until the connection ends.
+  This prevents memory growth proportional to cumulative terminal output; pipe
+  data remains owned until its consumer has finished processing it.
+
 ## [0.4.4] - 2026-11-16
 
 ### Fixed

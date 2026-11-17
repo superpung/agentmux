@@ -82,7 +82,7 @@ public final class ControlClient: @unchecked Sendable {
         let reader = output.fileHandleForReading
         Thread.detachNewThread { [weak self] in
             while true {
-                let chunk = reader.availableData
+                let chunk = PipeReader.readAvailable(from: reader)
                 guard let self else { return }
                 if chunk.isEmpty {
                     self.queue.async { self.finish(reason: "connection closed") }
@@ -94,7 +94,7 @@ public final class ControlClient: @unchecked Sendable {
         let errorReader = errors.fileHandleForReading
         Thread.detachNewThread { [weak self] in
             while true {
-                let chunk = errorReader.availableData
+                let chunk = PipeReader.readAvailable(from: errorReader)
                 guard let self, !chunk.isEmpty else { return }
                 self.queue.async {
                     self.stderrTail.append(chunk)

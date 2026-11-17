@@ -72,7 +72,7 @@ public final class RemoteWatch: @unchecked Sendable {
         let reader = output.fileHandleForReading
         Thread.detachNewThread { [weak self] in
             while true {
-                let chunk = reader.availableData
+                let chunk = PipeReader.readAvailable(from: reader)
                 guard let self else { return }
                 if chunk.isEmpty {
                     self.queue.async { self.finish() }
