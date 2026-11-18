@@ -8,6 +8,8 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-18
+
 ### Added
 
 - Enable **Auto** in an agent's bottom status bar to choose a recognized
@@ -364,7 +366,8 @@ First public release.
 - Avoids a tmux server segfault on grouped-session teardown by never destroying a
   session while its control client is attached.
 
-[Unreleased]: https://github.com/superpung/agentmux/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/superpung/agentmux/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/superpung/agentmux/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/superpung/agentmux/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/superpung/agentmux/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/superpung/agentmux/compare/v0.4.2...v0.4.3
