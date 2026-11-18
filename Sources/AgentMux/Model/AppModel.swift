@@ -60,6 +60,7 @@ final class TargetState: Identifiable {
 @MainActor
 @Observable
 final class AppModel {
+    let autoMode = AutoApprovalController()
     private(set) var targets: [TargetState] = []
     /// Non-nil only when saving settings failed.
     private(set) var configError: String?
@@ -372,6 +373,7 @@ final class AppModel {
     /// else an error string. Destructive — the caller confirms first.
     func switchAccount(_ ref: PaneRef, to configDir: String) async -> String? {
         guard accountSwitches.insert(ref).inserted else { return "An account switch is already in progress." }
+        autoMode.setEnabled(false, for: ref, model: self)
         defer { accountSwitches.remove(ref) }
         guard let state = state(ref.targetID), let agent = agentEntry(ref),
               let pid = state.detections[ref.paneID]?.pid
@@ -561,6 +563,7 @@ final class AppModel {
         // Snapshot keys before mutating the dictionaries we iterate.
         for id in Array(targetStates.keys) where !desiredIDs.contains(id) {
             pollers.removeValue(forKey: id)?.cancel()
+            for ref in autoMode.enabledRefs where ref.targetID == id { autoMode.setEnabled(false, for: ref, model: self) }
             for ref in Array(terminals.keys) where ref.targetID == id { closeTerminal(ref) }
             if selection?.targetID == id { selection = nil }
             releasedOrphans.remove(id)
@@ -645,6 +648,7 @@ final class AppModel {
     }
 
     func stopPolling() {
+        autoMode.stopAll()
         isPolling = false
         pollers.values.forEach { $0.cancel() }
         pollers.removeAll()
@@ -967,7 +971,15 @@ final class AppModel {
     private func refreshOnce(_ state: TargetState) async {
         state.isRefreshing = true
         state.lastAttempt = Date()
-        let result = await TargetProbe.run(host: state.host, target: state.target)
+        let watched = Set(visibleRefs.filter { $0.targetID == state.id }).union(autoMode.enabledRefs.filter { $0.targetID == state.id })
+        var approvalAgents: [String: AgentApproval.Agent] = [:]
+        for ref in watched {
+            if let detection = state.detections[ref.paneID], detection.kind.isAgent,
+               let pid = detection.pid, let ticks = detection.startTicks {
+                approvalAgents[ref.paneID] = AgentApproval.Agent(pid: pid, startTicks: ticks)
+            }
+        }
+        let result = await TargetProbe.run(host: state.host, target: state.target, approvalAgents: approvalAgents)
         state.isRefreshing = false
         switch result {
         case .success(var snapshot):
@@ -1010,6 +1022,7 @@ final class AppModel {
                 invalidateTerminals(of: state)
             }
             closeOrphanedMirrors(state)
+            autoMode.reconcile(state, model: self)
             await releaseOrphansOnce(state)
             if let pending = pendingSelect, pending.targetID == state.id,
                snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)
@@ -1035,6 +1048,7 @@ final class AppModel {
             }
         case let .failure(failure):
             state.lastFailure = failure
+            autoMode.pause(state.id)
             let doubled = state.interval * 2
             state.interval = doubled > TargetState.maxInterval ? TargetState.maxInterval : doubled
         }
@@ -1089,6 +1103,11 @@ final class AppModel {
     static func resolveActivities(snapshot: InventorySnapshot, detections: [String: AgentDetection]) -> [String: AgentActivity] {
         var result: [String: AgentActivity] = [:]
         for (paneID, detection) in detections where detection.kind == .codex || detection.kind == .claudeCode {
+            if let request = snapshot.approvals[paneID], request.agent.pid == detection.pid,
+               request.agent.startTicks == detection.startTicks {
+                result[paneID] = .waitingApproval
+                continue
+            }
             let evidence = detection.pid.flatMap { snapshot.agents[$0] }
             result[paneID] = ActivityDetector.resolve(
                 kind: detection.kind,
@@ -1620,6 +1639,7 @@ final class AppModel {
             terminal.onPreviewRequest = { [weak self] raw in self?.previewFromTerminal(raw, ref: ref) }
             terminal.onFontSizeChanged = { [weak self] size in self?.rememberTerminalFontSize(size) }
             terminal.onFocus = { [weak self] in self?.focusTile(ref) }
+            terminal.onUserInput = { [weak self] in self?.autoMode.cancel(ref, source: "terminal-input") }
             terminal.applyTheme(terminalTheme)
             terminal.setMouseForwardingAllowed(state.detections[ref.paneID]?.kind.isAgent ?? false)
             terminals[ref] = terminal

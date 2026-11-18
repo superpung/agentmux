@@ -425,7 +425,13 @@ private struct AgentRow: View {
             // No per-row pin glyph: pinned agents live under the "Pinned"
             // section header, so marking each row too is redundant.
             TwoLineRow {
-                Text(model.customName(entry.identityKey) ?? entry.title)
+                HStack(spacing: 4) {
+                    Text(model.customName(entry.identityKey) ?? entry.title)
+                    if model.autoMode.entries[entry.ref] != nil {
+                        Image(systemName: "bolt.fill").font(.caption2).foregroundStyle(.orange)
+                            .help("Auto mode on for this agent")
+                    }
+                }
             } detail: {
                 HStack(spacing: 6) {
                     Text(entry.configLabel)

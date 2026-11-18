@@ -32,6 +32,7 @@ final class PaneTerminal {
     @ObservationIgnored var onPreviewRequest: ((String) -> Void)?
     /// The surface took keyboard focus (clicked into, or focused in code).
     @ObservationIgnored var onFocus: (() -> Void)?
+    @ObservationIgnored var onUserInput: (() -> Void)?
     /// Last time an activity notification fired; confined to the mirror queue.
     @ObservationIgnored nonisolated(unsafe) private var lastActivityNotify = Date.distantPast
     private(set) var phase: Phase = .connecting
@@ -108,7 +109,7 @@ final class PaneTerminal {
             view.onShiftEnter = { [weak self] in _ = self?.sendNewline() }
             view.onPasteImage = { [weak self] png in self?.pasteImage(png) }
             view.onFocus = { [weak self] in self?.onFocus?() }
-            view.onUserInput = { [weak self] in self?.gate.noteInput() }
+            view.onUserInput = { [weak self] in self?.noteUserInput() }
             view.onAppearanceChange = { [weak self] in
                 guard let self, self.themePreference == .system else { return }
                 self.mirror.setDefaultColors(GhosttyRuntime.defaultColors(for: .system))
@@ -210,12 +211,17 @@ final class PaneTerminal {
     /// Pastes through tmux so bracketed paste follows the pane's real mode.
     func paste(_ text: String) -> Bool {
         guard gate.isOpen else { return false }
-        gate.noteInput()
+        noteUserInput()
         return mirror.paste(text)
     }
 
     /// When the user last typed or pasted into this pane here.
     var lastInputAt: Date? { gate.lastInput }
+
+    private func noteUserInput() {
+        gate.noteInput()
+        onUserInput?()
+    }
 
     /// Whether input can currently be delivered (mirror live and on screen).
     var canSend: Bool { gate.isOpen }
@@ -224,7 +230,7 @@ final class PaneTerminal {
     /// the prompt. Returns false if input is not currently allowed.
     func send(_ text: String, submit: Bool) -> Bool {
         guard gate.isOpen else { return false }
-        gate.noteInput()
+        noteUserInput()
         guard mirror.paste(text) else { return false }
         if submit { mirror.sendInput(Data([0x0d])) }
         return true
@@ -235,6 +241,7 @@ final class PaneTerminal {
     /// as a newline, while plain Enter sends CR, which submits.
     func sendNewline() -> Bool {
         guard gate.isOpen else { return false }
+        noteUserInput()
         mirror.sendInput(Data([0x0a]))
         return true
     }
@@ -245,6 +252,7 @@ final class PaneTerminal {
     /// an image reference. A unique name means no overwrite prompt.
     func pasteImage(_ png: Data) {
         guard gate.isOpen else { return }
+        noteUserInput()
         let directory = "/tmp/agentmux-paste"
         let path = "\(directory)/\(UUID().uuidString).png"
         Task { @MainActor in
@@ -328,7 +336,9 @@ final class PasteInterceptingTerminalView: AppTerminalView {
     }
 
     override func keyDown(with event: NSEvent) {
-        onUserInput?()
+        // Copy, app navigation and other Command shortcuts do not type into
+        // the agent. Paste records actual input through onPaste/pasteImage.
+        if !event.modifierFlags.contains(.command) { onUserInput?() }
         // keyCode 36 is the main Return key; intercept Shift+Return only (no
         // other modifiers) so plain Enter still submits.
         if event.keyCode == 36,

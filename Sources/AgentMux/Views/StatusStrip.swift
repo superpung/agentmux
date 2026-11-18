@@ -11,6 +11,33 @@ enum StatusStrip {
     static let height: CGFloat = 28
 }
 
+/// Shared by error auto-continue and approval confirmation. Each caller owns
+/// its scheduling and validation; the countdown and controls have one layout.
+struct ScheduledActionControls: View {
+    let start: Date
+    let fireAt: Date
+    var countdownAction: String? = nil
+    var sendNow: (() -> Void)? = nil
+    var cancelHelp = "Cancel this scheduled action"
+    let cancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            NudgeRing(start: start, fireAt: fireAt, size: 12,
+                      helpText: countdownAction == nil ? "Continues automatically" : "Approves after the countdown")
+            if let countdownAction {
+                TimelineView(.periodic(from: start, by: 1)) { context in
+                    Text("\(countdownAction) in \(max(0, Int(ceil(fireAt.timeIntervalSince(context.date)))))s")
+                        .monospacedDigit()
+                }
+            }
+            if let sendNow { Button("Send Now", action: sendNow) }
+            Button("Cancel", action: cancel).help(cancelHelp)
+        }
+        .buttonStyle(.hover)
+    }
+}
+
 extension View {
     /// Pins a bottom status strip to the shared height and `.bar` material, with
     /// its content vertically centred. Callers pass only horizontal padding.

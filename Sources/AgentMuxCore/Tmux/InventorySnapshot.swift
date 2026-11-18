@@ -329,6 +329,8 @@ public struct InventorySnapshot: Sendable, Equatable {
     /// Pane id → the state the agent itself reports (Claude's per-process
     /// session record): "busy", "idle", "waiting-input" or "waiting-approval".
     public var agentStates: [String: String] = [:]
+    /// Verified live approval dialogs; only process identity and a digest leave the target.
+    public var approvals: [String: AgentApproval.Request] = [:]
     /// Panes whose agent is waiting out an API retry (shown on its screen).
     public var retrying: Set<String> = []
     /// Pane id → why its agent's last turn stopped short (usage limit or an

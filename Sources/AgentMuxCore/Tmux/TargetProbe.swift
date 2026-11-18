@@ -7,7 +7,8 @@ public enum TargetProbe {
         host: HostConfig,
         target: TargetConfig,
         options: SSHOptions = SSHOptions(),
-        timeoutSeconds: Int = 20
+        timeoutSeconds: Int = 20,
+        approvalAgents: [String: AgentApproval.Agent] = [:]
     ) async -> Result<InventorySnapshot, RemoteFailure> {
         let tmux: TmuxInvocation
         do {
@@ -17,7 +18,7 @@ public enum TargetProbe {
         }
         let nonce = makeNonce()
         let output = await RemoteScript.run(
-            InventoryProbe.script(tmux: tmux, nonce: nonce),
+            InventoryProbe.script(tmux: tmux, nonce: nonce, approvalAgents: approvalAgents),
             host: host, target: target, options: options, timeoutSeconds: timeoutSeconds
         )
         return output.flatMap { text in

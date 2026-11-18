@@ -281,13 +281,11 @@ private struct StatusBar: View {
             HStack(spacing: 10) {
                 metadata(ref)
                 Spacer(minLength: 8)
+                AutoApprovalStatus(ref: ref).layoutPriority(1)
                 if let pending = model.pendingNudges[ref] {
-                    HStack(spacing: 8) {
-                        NudgeRing(start: pending.start, fireAt: pending.fireAt, size: 12)
-                        Button("Send Now") { model.sendNudgeNow(ref) }
-                        Button("Cancel") { model.cancelNudge(ref) }
-                    }
-                    .buttonStyle(.hover)
+                    ScheduledActionControls(start: pending.start, fireAt: pending.fireAt,
+                                            sendNow: { model.sendNudgeNow(ref) },
+                                            cancel: { model.cancelNudge(ref) })
                     .layoutPriority(1)
                     .transition(.opacity)
                 }

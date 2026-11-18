@@ -13,6 +13,32 @@ The [README](../README.md) lists what AgentMux does; this page covers how some o
 - **Closing.** A tile's × (or ⌘-clicking its row again) takes it out; its mirror stays warm like any recently viewed agent.
 - Each tile sizes its agent's tmux window to the tile, as the single view does with the full area. If you also have that window attached elsewhere, you see it at the tile's size while the tile is open.
 
+## Auto mode for an agent
+
+Select an agent and click **Auto** in its bottom status bar. Auto mode is off by default
+and applies only to that agent process. A small orange bolt marks enabled
+agents in the sidebar, including while you are looking at another agent.
+
+For a recognized active Yes/No approval, the bottom bar shows **Yes in 5s**
+and **Cancel**. Cancel skips that request; the same request is not scheduled
+again. Turning Auto off stops future approvals. Typing into the terminal also
+cancels its current countdown. App restart, account switching or replacement
+of the agent process turns Auto off.
+**Manual approval** means the current request needs you.
+
+Auto chooses only the one-time **Yes** / **Yes, proceed** option. It leaves
+questions, free-text input, unrecognized dialogs and options that remember
+permissions for manual handling. The action can run commands or edit files,
+as if you chose Yes yourself. Before sending keys it checks that the agent,
+tmux server and visible request are still the same and that nobody recently
+typed in another attached terminal. Unsupported or changed requests get no
+confirmation. The countdown starts when the existing poll detects the prompt;
+it does not increase the global polling frequency.
+
+The container needs Python 3 for this optional feature. Only process identity
+and a request fingerprint leave the container; the background check returns no
+terminal text. Auto mode is independent of Settings' error auto-continue.
+
 ## Switching Codex accounts
 
 Choose **Switch Account** on an open agent and select the account directory.

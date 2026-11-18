@@ -8,6 +8,21 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Added
+
+- Enable **Auto** in an agent's bottom status bar to choose a recognized
+  one-time Yes after a five-second countdown. Cancel or type in the terminal to
+  skip the request. Auto is off by default for every agent and resets on app
+  restart, account switching or agent replacement.
+
+### Fixed
+
+- Visible agents show **Needs approval** as soon as AgentMux recognizes the
+  approval dialog, even if the agent's session status has yet to catch up.
+- Claude's own expiry timer, background repaints and local Command shortcuts
+  no longer interrupt supported approval countdowns. A change to the command
+  or approval options still requires a fresh check.
+
 ## [0.4.5] - 2026-11-17
 
 ### Fixed

@@ -189,6 +189,7 @@ struct NudgeRing: View {
     let start: Date
     let fireAt: Date
     var size: CGFloat = 11
+    var helpText = "Continues automatically"
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.1)) { context in
@@ -203,7 +204,7 @@ struct NudgeRing: View {
             }
             .frame(width: size, height: size)
         }
-        .help("Continues automatically")
+        .help(helpText)
     }
 }
 

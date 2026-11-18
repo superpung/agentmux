@@ -20,10 +20,11 @@ public enum InventoryProbe {
 
     /// `nonce` (ASCII letters and digits) marks the start and end of the
     /// output, so remote text can never fake the end of the probe.
-    public static func script(tmux: TmuxInvocation, nonce: String) -> String {
+    public static func script(tmux: TmuxInvocation, nonce: String, approvalAgents: [String: AgentApproval.Agent] = [:]) -> String {
         precondition(!nonce.isEmpty && nonce.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) })
         let binary = ShellQuote.word(tmux.executable ?? "tmux")
         let flags = ShellQuote.command(Array(tmux.argv.dropFirst()))
+        let approvalProbe = approvalAgents.isEmpty ? "" : AgentApproval.probeScript(tmux: tmux.argv, agents: approvalAgents)
         return """
         T=\(binary)
         tm() { "$T" \(flags) "$@"; }
@@ -409,6 +410,7 @@ public enum InventoryProbe {
             [ -n "$j" ] && printf '@@progress %s %s\\n' "$(basename "$pf" .json)" "$j"
           done
         fi
+        \(approvalProbe)
         echo "@@end \(nonce)"
 
         """
@@ -472,6 +474,8 @@ public enum InventoryProbe {
                 if f.count == 2, isID(f[0], "%") { snapshot.agentStates[String(f[0])] = String(f[1]) }
             } else if let rest = line.dropPrefix("@@retrying ") {
                 if isID(Substring(rest), "%") { snapshot.retrying.insert(rest) }
+            } else if let rest = line.dropPrefix("@@approval "), let parsed = AgentApproval.parse(rest) {
+                snapshot.approvals[parsed.pane] = parsed.request
             } else if let rest = line.dropPrefix("@@fault ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 2, isID(f[0], "%"), let fault = AgentFault.parse(f.dropFirst()) {
