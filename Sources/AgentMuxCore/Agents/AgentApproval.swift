@@ -2,7 +2,7 @@ import Foundation
 
 /// Structural approval evidence only. Terminal text stays in the container.
 public enum AgentApproval {
-    public struct Agent: Sendable, Equatable {
+    public struct Agent: Sendable, Equatable, Codable {
         public var pid: Int
         public var startTicks: Int
         public init(pid: Int, startTicks: Int) { self.pid = pid; self.startTicks = startTicks }

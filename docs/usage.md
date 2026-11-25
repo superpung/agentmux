@@ -22,8 +22,9 @@ agents in the sidebar, including while you are looking at another agent.
 For a recognized active Yes/No approval, the bottom bar shows **Yes in 5s**
 and **Cancel**. Cancel skips that request; the same request is not scheduled
 again. Turning Auto off stops future approvals. Typing into the terminal also
-cancels its current countdown. App restart, account switching or replacement
-of the agent process turns Auto off.
+cancels its current countdown. After an app restart, Auto resumes for the same
+process in the same tmux pane. An approval visible on the first check needs
+manual handling. Account switching and process replacement turn Auto off.
 **Manual approval** means the current request needs you.
 
 Auto chooses only the one-time **Yes** / **Yes, proceed** option. It leaves

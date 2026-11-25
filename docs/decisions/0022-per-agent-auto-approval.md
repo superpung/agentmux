@@ -12,6 +12,11 @@ is not persisted across launches. An opt-in binds to the exact pane/server
 generation, agent PID and process start ticks. Account switches, process
 replacement and target removal discard it.
 
+On 2026-11-24, the opt-in was made persistent at the user's request. The app
+restores it only after verifying the same SSH destination, container generation,
+tmux pane and agent process. A recognized prompt on the first approval check
+after restoration is skipped and shown for manual handling.
+
 ## Evidence and detection
 
 The supplied Claude approval screenshot shows an unnumbered menu whose default

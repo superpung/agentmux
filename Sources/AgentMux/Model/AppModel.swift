@@ -19,6 +19,7 @@ final class TargetState: Identifiable {
     var host: HostConfig
     let target: TargetConfig
     var snapshot: InventorySnapshot?
+    var snapshotDestination: String?
     var detections: [String: AgentDetection] = [:]
     /// Resolved activity per agent pane, recomputed each refresh.
     var activities: [String: AgentActivity] = [:]
@@ -563,7 +564,7 @@ final class AppModel {
         // Snapshot keys before mutating the dictionaries we iterate.
         for id in Array(targetStates.keys) where !desiredIDs.contains(id) {
             pollers.removeValue(forKey: id)?.cancel()
-            for ref in autoMode.enabledRefs where ref.targetID == id { autoMode.setEnabled(false, for: ref, model: self) }
+            autoMode.forgetTarget(id)
             for ref in Array(terminals.keys) where ref.targetID == id { closeTerminal(ref) }
             if selection?.targetID == id { selection = nil }
             releasedOrphans.remove(id)
@@ -573,6 +574,7 @@ final class AppModel {
         for (host, target) in desired {
             if let existing = targetStates[target.id] {
                 // Keep the live state, but pick up an edited host name / ssh.
+                if existing.host.sshDestination != host.sshDestination { autoMode.forgetTarget(target.id) }
                 if existing.host != host { existing.host = host }
             } else {
                 let state = TargetState(host: host, target: target)
@@ -974,13 +976,15 @@ final class AppModel {
         let watched = Set(visibleRefs.filter { $0.targetID == state.id }).union(autoMode.enabledRefs.filter { $0.targetID == state.id })
         var approvalAgents: [String: AgentApproval.Agent] = [:]
         for ref in watched {
-            if let detection = state.detections[ref.paneID], detection.kind.isAgent,
+            if let detection = state.detections[ref.paneID], detection.kind.supportsApproval,
                let pid = detection.pid, let ticks = detection.startTicks {
                 approvalAgents[ref.paneID] = AgentApproval.Agent(pid: pid, startTicks: ticks)
             }
         }
-        let result = await TargetProbe.run(host: state.host, target: state.target, approvalAgents: approvalAgents)
+        let host = state.host
+        let result = await TargetProbe.run(host: host, target: state.target, approvalAgents: approvalAgents)
         state.isRefreshing = false
+        guard !Task.isCancelled, state.host.sshDestination == host.sshDestination else { return }
         switch result {
         case .success(var snapshot):
             let previousServer = state.snapshot?.server
@@ -992,6 +996,7 @@ final class AppModel {
                 CommandLog.log("progress", state.id, "job=\(job.id) reported-pane=\(reported) resolved-pane=\(actual) thread=\(job.codexThreadID ?? "unknown")")
             }
             state.snapshot = snapshot
+            state.snapshotDestination = host.sshDestination
             if terminals.keys.contains(where: { $0.targetID == state.id }),
                codexAccountsByTarget[state.id] == nil || linkGroupsByTarget[state.id] == nil,
                Date().timeIntervalSince(accountLinksAttempted[state.id] ?? .distantPast) >= 15 {
@@ -1022,7 +1027,7 @@ final class AppModel {
                 invalidateTerminals(of: state)
             }
             closeOrphanedMirrors(state)
-            autoMode.reconcile(state, model: self)
+            autoMode.reconcile(state, probedAgents: approvalAgents, model: self)
             await releaseOrphansOnce(state)
             if let pending = pendingOpen, pending.targetID == state.id,
                snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)

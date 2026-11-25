@@ -6,7 +6,7 @@ struct AutoApprovalStatus: View {
     let ref: PaneRef
 
     var body: some View {
-        if model.agentEntry(ref) != nil {
+        if let agent = model.agentEntry(ref), agent.kind.supportsApproval {
             let entry = model.autoMode.entries[ref]
             HStack(spacing: 7) {
                 if let start = entry?.countdown.startedAt {
@@ -15,7 +15,7 @@ struct AutoApprovalStatus: View {
                                             cancelHelp: "Skip this request; Auto mode stays on for new requests",
                                             cancel: { model.autoMode.cancel(ref) })
                 } else if let entry {
-                    let unsupported = model.agentEntry(ref)?.activity.needsAttention == true
+                    let unsupported = agent.activity.needsAttention
                         && model.state(ref.targetID)?.snapshot?.approvals[ref.paneID] == nil
                     if entry.approving {
                         Text("Approving…")
@@ -35,7 +35,7 @@ struct AutoApprovalStatus: View {
                 .labelStyle(.titleAndIcon)
                 .accessibilityLabel("Auto mode for this agent")
                 .disabled(entry == nil && !model.autoMode.canEnable(ref, model: model))
-                .help("Automatically choose one-time Yes for this agent’s command and edit approvals after 5 seconds. Off on app restart or agent replacement.")
+                .help("Automatically choose one-time Yes for this agent’s command and edit approvals after 5 seconds. The switch is remembered for this running process.")
             }
             .help(entry?.message ?? "Recognized Yes/No approvals are confirmed after 5 seconds for this agent")
         }

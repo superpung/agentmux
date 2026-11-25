@@ -11,6 +11,9 @@ public enum AgentKind: String, Sendable, Equatable {
     /// A real agent CLI (Claude Code or Codex) runs in the pane, as opposed to
     /// a bare shell or an undetermined pane.
     public var isAgent: Bool { self == .codex || self == .claudeCode }
+
+    /// The approval probe recognizes this provider's terminal prompts.
+    public var supportsApproval: Bool { self == .codex || self == .claudeCode }
 }
 
 public enum Confidence: String, Sendable, Equatable, Comparable {
