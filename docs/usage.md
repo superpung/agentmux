@@ -56,9 +56,22 @@ reports the reason. Close duplicate views before retrying. Python 3 and a Codex
 version supporting `--no-daemon`, `sqlite_home` and the local app-server handoff
 protocol are required; the native integration tests cover Codex 0.169.0.
 
-This handoff applies to **Switch Account** in AgentMux. A separately launched
-`CODEX_HOME=… codex resume …` still uses that directory's own state unless an
-explicit `sqlite_home` override is supplied.
+For linked Codex accounts, install the resume guard on each machine or
+container with Python 3.11 or later and a standalone Codex installation:
+
+```sh
+python3 scripts/agentmux-codex-resume.py --install
+```
+
+AgentMux uses the installed guard for Codex resumes and account switches.
+New bash and zsh shells use it for `codex resume <UUID>`. The selected
+account still supplies credentials. The guard checks the session indexes and
+the recorded rollout continuation boundaries, pins the verified SQLite
+directory for that UUID, and holds a shared write lock until Codex exits.
+Conflicting histories or an existing writer produce a terminal error.
+The launcher lives on the shell's PATH ahead of the vendor CLI, which can
+continue updating through its normal installer. Name-based, remote, and
+explicitly configured resumes keep their native Codex behavior.
 
 ## Notifications and auto-continue
 

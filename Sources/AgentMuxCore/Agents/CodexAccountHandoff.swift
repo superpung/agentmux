@@ -120,9 +120,13 @@ def indexed_rollout(db, sid):
 def command(home, state, executable, sid):
     # Credentials/config remain in the selected home. All SQLite state, including
     # paginated history, stays with the source. A fresh server bypasses stale caches.
-    return ' '.join(['CODEX_HOME='+shlex.quote(home),
-                     'AGENTMUX_CODEX_SQLITE_HOME='+shlex.quote(state),
-                     shlex.quote(executable), '--no-daemon', '-c',
+    account = ['CODEX_HOME='+shlex.quote(home), 'AGENTMUX_CODEX_SQLITE_HOME='+shlex.quote(state)]
+    guard = Path.home()/'.local/lib/agentmux/bin/codex'
+    if os.access(guard, os.X_OK):
+        return ' '.join(account + ['AGENTMUX_CODEX_REAL='+shlex.quote(executable),
+                                   'AGENTMUX_CODEX_HANDOFF='+shlex.quote(sid),
+                                   shlex.quote(str(guard)), 'resume', shlex.quote(sid)])
+    return ' '.join(account + [shlex.quote(executable), '--no-daemon', '-c',
                      shlex.quote('sqlite_home='+json.dumps(state)), '-c',
                      'thread_unload_delay_secs=0', 'resume', shlex.quote(sid)])
 

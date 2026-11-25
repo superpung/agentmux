@@ -15,7 +15,7 @@ import Testing
 
     @Test func codexResumeCommand() {
         #expect(AgentCommand.launch(kind: .codex, configDir: "/root/.codex-2", resumeID: "019d82a3-d2ff-7e23-99c5-26bbefad8afe")
-            == "CODEX_HOME=/root/.codex-2 codex resume 019d82a3-d2ff-7e23-99c5-26bbefad8afe")
+            == #"if [ -x "$HOME/.local/lib/agentmux/bin/codex" ]; then CODEX_HOME=/root/.codex-2 "$HOME/.local/lib/agentmux/bin/codex" resume 019d82a3-d2ff-7e23-99c5-26bbefad8afe; else CODEX_HOME=/root/.codex-2 codex resume 019d82a3-d2ff-7e23-99c5-26bbefad8afe; fi"#)
     }
 
     @Test func configDirWithSpaceIsQuoted() {

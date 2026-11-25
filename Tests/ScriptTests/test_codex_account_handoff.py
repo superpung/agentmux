@@ -24,6 +24,9 @@ class CodexAccountHandoffTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name).resolve()
         self.cwd = '/data/ra/ra-v2'
+        fake_home = patch.object(handoff.Path, 'home', return_value=self.base)
+        fake_home.start()
+        self.addCleanup(fake_home.stop)
 
     def rollout(self, name, sid=SID):
         p = self.base / name
@@ -102,6 +105,17 @@ class CodexAccountHandoffTests(unittest.TestCase):
         cmd=shlex.split(handoff.command('/tmp/account space',state,'/tmp/bin/codex',SID))
         self.assertEqual(cmd[0],'CODEX_HOME=/tmp/account space')
         self.assertIn('sqlite_home='+json.dumps(state),cmd)
+
+    def test_installed_guard_receives_exact_verified_handoff(self):
+        guard = self.base / '.local/lib/agentmux/bin/codex'
+        guard.parent.mkdir(parents=True)
+        guard.touch(mode=0o700)
+        args = shlex.split(handoff.command('/root/.codex-3', '/root/.codex', '/native/codex', SID))
+        self.assertEqual(args, [
+            'CODEX_HOME=/root/.codex-3', 'AGENTMUX_CODEX_SQLITE_HOME=/root/.codex',
+            'AGENTMUX_CODEX_REAL=/native/codex', 'AGENTMUX_CODEX_HANDOFF='+SID,
+            str(guard), 'resume', SID,
+        ])
 
     def test_unreadable_or_missing_source_index_does_not_create_a_database(self):
         db=self.base/'absent.sqlite'

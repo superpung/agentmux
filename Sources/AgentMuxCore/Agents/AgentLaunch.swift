@@ -51,8 +51,10 @@ public enum AgentCommand {
             let resume = resumeID.map { " --resume \($0)" } ?? ""
             return "CLAUDE_CONFIG_DIR=\(dir) claude\(resume)"
         case .codex:
-            let resume = resumeID.map { " resume \($0)" } ?? ""
-            return "CODEX_HOME=\(dir) codex\(resume)"
+            guard let resumeID else { return "CODEX_HOME=\(dir) codex" }
+            let guardPath = "\"$HOME/.local/lib/agentmux/bin/codex\""
+            let args = "resume \(resumeID)"
+            return "if [ -x \(guardPath) ]; then CODEX_HOME=\(dir) \(guardPath) \(args); else CODEX_HOME=\(dir) codex \(args); fi"
         default:
             return nil
         }
