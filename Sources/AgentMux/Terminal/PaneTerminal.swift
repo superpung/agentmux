@@ -43,6 +43,7 @@ final class PaneTerminal {
     private let gate: InputGate
     private let host: HostConfig
     private let target: TargetConfig
+    private var connectionTimeout: Task<Void, Never>?
     /// The surface's forced palette; Ghostty reads the view's appearance to pick
     /// light vs dark, so this just sets that appearance.
     private var themePreference: TerminalThemePreference = .system
@@ -139,13 +140,28 @@ final class PaneTerminal {
                 self?.noteActivity()
             },
             onGeometry: { [weak self] geometry in
-                Task { @MainActor in self?.geometry = geometry }
+                Task { @MainActor in self?.didSync(geometry) }
             },
             onEnded: { [weak self] reason in
                 gate.close()
                 Task { @MainActor in self?.markEnded(reason) }
             }
         )
+        // SSH can connect without tmux delivering an initial screen, e.g.
+        // when a remote command stalls. Bound the wait for the first sync.
+        connectionTimeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled, let self, phase == .connecting else { return }
+            close()
+            markEnded("timed out waiting for the tmux screen")
+        }
+    }
+
+    private func didSync(_ geometry: PaneMirror.Geometry) {
+        guard !isTrouble else { return }
+        self.geometry = geometry
+        guard phase == .connecting else { return }
+        connectionTimeout?.cancel()
         gate.markLive()
         phase = .live
         scheduleSmokeIfRequested()
@@ -273,16 +289,19 @@ final class PaneTerminal {
     }
 
     func markStale(reason: String) {
+        connectionTimeout?.cancel()
         gate.close()
         phase = .stale(reason)
     }
 
     func close() {
+        connectionTimeout?.cancel()
         gate.close()
         mirror.close()
     }
 
     private func markEnded(_ reason: String) {
+        connectionTimeout?.cancel()
         if case .stale = phase { return }
         phase = .ended(reason)
     }

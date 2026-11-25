@@ -411,10 +411,10 @@ final class AppModel {
     var hosts: [HostConfig] { settings.hosts }
 
     /// AGENTMUX_OPEN=<target-id>/<pane-id>: select and open that pane once it
-    /// is discovered (used by scripted smoke tests).
+    /// is discovered (used by scripted smoke tests). Accept the older select
+    /// spelling too, and open it the same way as a sidebar selection.
     @ObservationIgnored private var pendingOpen = AppModel.paneFromEnvironment("AGENTMUX_OPEN")
-    /// AGENTMUX_SELECT=<target-id>/<pane-id>: only select it (no attach).
-    @ObservationIgnored private var pendingSelect = AppModel.paneFromEnvironment("AGENTMUX_SELECT")
+        ?? AppModel.paneFromEnvironment("AGENTMUX_SELECT")
     /// AGENTMUX_TILES=<target-id>/<pane-id>,…: show those panes side by side
     /// once all are found, to look at tiles without clicking.
     @ObservationIgnored private var pendingTiles = (ProcessInfo.processInfo.environment["AGENTMUX_TILES"] ?? "")
@@ -1024,12 +1024,6 @@ final class AppModel {
             closeOrphanedMirrors(state)
             autoMode.reconcile(state, model: self)
             await releaseOrphansOnce(state)
-            if let pending = pendingSelect, pending.targetID == state.id,
-               snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)
-            {
-                pendingSelect = nil
-                selection = ref
-            }
             if let pending = pendingOpen, pending.targetID == state.id,
                snapshot.pane(pending.paneID) != nil, let ref = state.ref(for: pending.paneID)
             {

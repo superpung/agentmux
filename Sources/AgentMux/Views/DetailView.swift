@@ -55,7 +55,7 @@ struct DetailView: View {
             }
         }
         .animation(Motion.quick, value: model.selection)
-        // "Connecting…" gives way to the terminal with a fade.
+        // The placeholder gives way to the terminal with a fade.
         .animation(Motion.quick, value: model.selection.map { model.terminal(for: $0) != nil })
         .navigationTitle(title)
         .toolbar { toolbarContent }
@@ -265,6 +265,20 @@ private struct MirroredSurfaceView: View {
         // reflows to fill the view like a normal terminal.
         TerminalSurfaceView(context: terminal.state)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if terminal.phase == .connecting {
+                    VStack(spacing: 10) {
+                        ProgressView()
+                        Text("Connecting…").foregroundStyle(.secondary)
+                    }
+                    .allowsHitTesting(false)
+                } else if terminal.isTrouble, terminal.geometry == nil {
+                    Text(terminal.phaseText)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                }
+            }
     }
 }
 
@@ -699,8 +713,7 @@ private struct PanePlaceholderView: View {
         VStack(spacing: 10) {
             if let state = model.state(ref.targetID) {
                 if state.target.access.allowsAttach {
-                    ProgressView()
-                    Text("Connecting…").foregroundStyle(.secondary)
+                    Text("Terminal unavailable").foregroundStyle(.secondary)
                 } else {
                     Image(systemName: "eye")
                         .font(.largeTitle)
