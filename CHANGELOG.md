@@ -8,6 +8,29 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+### Added
+
+- AgentMux recognizes running Antigravity CLI sessions and shows their icon,
+  conversation title, configuration directory, last activity, model and effort
+  when available. The optional Antigravity status-line script reports live
+  context usage.
+- The optional Codex resume guard protects AgentMux account switches and
+  `codex resume <UUID>` in new bash and zsh shells. It follows verified
+  continuation records across linked accounts and reports conflicts or an
+  existing writer before opening the conversation.
+
+### Changed
+
+- AgentMux remembers **Auto** for the same live agent process after an app
+  restart. A prompt already visible when Auto is restored needs manual approval.
+
+### Fixed
+
+- Selecting an agent opens its terminal. **Connecting…** covers the wait for
+  tmux's first screen and reports a timeout if no screen arrives in 15 seconds.
+
 ## [0.5.0] - 2026-11-18
 
 ### Added
@@ -366,7 +389,8 @@ First public release.
 - Avoids a tmux server segfault on grouped-session teardown by never destroying a
   session while its control client is attached.
 
-[Unreleased]: https://github.com/superpung/agentmux/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/superpung/agentmux/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/superpung/agentmux/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/superpung/agentmux/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/superpung/agentmux/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/superpung/agentmux/compare/v0.4.3...v0.4.4
