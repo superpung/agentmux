@@ -104,17 +104,21 @@ public enum InventoryProbe {
             [ -n "$mc" ] && echo "$qch|$mc|$(stat -c %Y "$rf" 2>/dev/null)|$rf"
           done
         done)
-        for pid in $(printf '%s\\n' "$procs" | awk '$5 !~ /^Z/ && $6 ~ /^(codex|claude|node|bun|deno)$/ { print $3 }' | head -n \(maxAgentCandidates)); do
+        for pid in $(printf '%s\\n' "$procs" | awk '$5 !~ /^Z/ && $6 ~ /^(codex|claude|agy|node|bun|deno)$/ { print $3 }' | head -n \(maxAgentCandidates)); do
+          agent_comm=$(cat "/proc/$pid/comm" 2>/dev/null)
           echo "@@agent $pid"
           echo "exe $(readlink "/proc/$pid/exe" 2>/dev/null)"
-          tr '\\0\\n' '\\n ' < "/proc/$pid/cmdline" 2>/dev/null | head -n 2 | cut -c1-160 | sed 's/^/arg /'
+          # Antigravity's executable identifies it without reading prompt arguments.
+          if [ "$agent_comm" != agy ]; then
+            tr '\\0\\n' '\\n ' < "/proc/$pid/cmdline" 2>/dev/null | head -n 2 | cut -c1-160 | sed 's/^/arg /'
+          fi
           tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -E '^(CODEX_HOME|CLAUDE_CONFIG_DIR|TMUX_PANE)=' | cut -c1-300 | sed 's/^/env /'
           echo "start $(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f20)"
           # Claude session log state — structural only (event type/subtype +
           # mtime age), never message content. Located by the process's own
           # session (see below); the newest file in the dir is wrong when
           # agents share a project dir.
-          if [ "$(cat /proc/$pid/comm 2>/dev/null)" = claude ] && command -v jq >/dev/null 2>&1; then
+          if [ "$agent_comm" = claude ] && command -v jq >/dev/null 2>&1; then
             clpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
             # Locate this pane's AgentMux status-line sidecar (our own file,
             # matched by tmux pane; freshest wins). It carries the rate-limit
@@ -242,7 +246,7 @@ public enum InventoryProbe {
           # token_count usage. A boundary older than the window yields no verdict
           # and falls back to the screen rule; reading only the last 500 lines
           # keeps the probe fast on multi-MB rollouts.
-          if [ "$(cat /proc/$pid/comm 2>/dev/null)" = codex ] && command -v jq >/dev/null 2>&1; then
+          if [ "$agent_comm" = codex ] && command -v jq >/dev/null 2>&1; then
             cpane=$(tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^TMUX_PANE=//p' | head -1)
             # Newer Codex runs a shared `codex app-server` daemon that holds the
             # rollout fds of several live sessions at once — including other
@@ -396,6 +400,12 @@ public enum InventoryProbe {
           else st=unknown; fi
           echo "@@screenstate $pane $st"
         done
+        agyprocs=$(printf '%s\\n' "$procs" | awk '$5 !~ /^Z/ && $6 == "agy" { print $1, $3 }' | head -n \(maxAgentCandidates))
+        if [ -n "$agyprocs" ] && command -v python3 >/dev/null 2>&1; then
+          python3 - "$agyprocs" "$T" \(flags) <<'__AGENTMUX_ANTIGRAVITY__'
+        \(AntigravityProbe.reader)
+        __AGENTMUX_ANTIGRAVITY__
+        fi
         # Per-pane progress files from the agentmux-progress wrapper (our own
         # small JSON, keyed by tmux pane; never the conversation).
         pgdir="${AGENTMUX_PROGRESS_DIR:-$HOME/.agentmux/progress}"
@@ -428,6 +438,7 @@ public enum InventoryProbe {
         var paneRows: [String: InventorySnapshot.Pane] = [:]
         var paneOrder: [String] = []
         var textFields: [String: [String: String]] = [:]
+        var antigravitySessions: [Int: AntigravityProbe.Session] = [:]
 
         for rawLine in output.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(rawLine)
@@ -525,6 +536,12 @@ public enum InventoryProbe {
             } else if let rest = line.dropPrefix("@@account ") {
                 let f = rest.split(separator: " ")
                 if f.count >= 2, isID(f[0], "%") { snapshot.accounts[String(f[0])] = String(f[1]) }
+            } else if let rest = line.dropPrefix("@@antigravity ") {
+                let fields = rest.split(separator: " ", maxSplits: 1)
+                if fields.count == 2, let pid = Int(fields[0]),
+                   let session = try? JSONDecoder().decode(AntigravityProbe.Session.self, from: Data(fields[1].utf8)) {
+                    antigravitySessions[pid] = session
+                }
             } else if let rest = line.dropPrefix("@@progress ") {
                 // "<file-key> <compact-json>": the key is the first token (the
                 // progress file name, which may be a custom --id), the rest is
@@ -603,6 +620,7 @@ public enum InventoryProbe {
             pane.title = textFields["pane_title"]?[id] ?? ""
             return pane
         }
+        if !antigravitySessions.isEmpty { AntigravityProbe.apply(antigravitySessions, to: &snapshot) }
         snapshot.resolveProgressOwners()
         return snapshot
     }

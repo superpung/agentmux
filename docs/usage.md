@@ -40,6 +40,34 @@ The container needs Python 3 for this optional feature. Only process identity
 and a request fingerprint leave the container; the background check returns no
 terminal text. Auto mode is independent of Settings' error auto-continue.
 
+## Antigravity metadata
+
+On Linux targets with Python 3, AgentMux reads the current Antigravity
+conversation's title, last update and activity from its summary database,
+matched to the live agy process. The built-in prompt footer supplies the
+model and effort when it is visible.
+
+For live context usage, install [the Antigravity status-line script](../scripts/agentmux-agy-statusline.py)
+in the container and use it as a custom status-line command with
+`stack_with_default` enabled in Antigravity. For example, after copying it to
+`~/.agentmux/agentmux-agy-statusline.py`, set the following in the existing
+`~/.gemini/antigravity-cli/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "python3 ~/.agentmux/agentmux-agy-statusline.py",
+    "stack_with_default": true
+  }
+}
+```
+
+The script writes per-process metadata next to AgentMux's other sidecars and
+prints no replacement status line. If you already use a custom command, keep
+it configured and call the script from that command with a copy of its JSON
+input.
+
 ## Switching Codex accounts
 
 Choose **Switch Account** on an open agent and select the account directory.

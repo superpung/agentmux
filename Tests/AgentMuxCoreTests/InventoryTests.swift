@@ -287,6 +287,29 @@ arg -p
         #expect(detections["%3"]?.kind == AgentKind.none)
     }
 
+    @Test func antigravityBinaryBelongsToItsTmuxPane() {
+        let pane = InventorySnapshot.Pane(id: "%109", pid: 121818, dead: false, width: 80, height: 24,
+                                          currentCommand: "agy", currentPath: "/workspace/ra", title: "Antigravity")
+        let process = InventorySnapshot.ProcessNode(paneID: pane.id, depth: 1, pid: 123168,
+                                                     ppid: pane.pid, state: "Sl+", command: "agy")
+        let binary = InventorySnapshot.AgentEvidence(pid: process.pid, executable: "/root/.local/bin/agy",
+                                                      arguments: [], environment: ["TMUX_PANE": pane.id, "CODEX_HOME": "/root/.codex-3"], startTicks: 42)
+
+        let detected = AgentDetector.detect(pane: pane, processes: [process], agents: [process.pid: binary], processTableAvailable: true)
+        #expect(detected.kind == .antigravity)
+        #expect(detected.kind.isAgent)
+        #expect(!detected.kind.supportsApproval)
+        #expect(detected.pid == process.pid)
+        #expect(detected.startTicks == 42)
+        #expect(detected.confidence == .high)
+        #expect(detected.configDirectory == nil)
+        #expect(AgentTitle.from(paneTitle: pane.title, kind: detected.kind) == nil)
+
+        let fallback = AgentDetector.detect(pane: pane, processes: [], agents: [:], processTableAvailable: false)
+        #expect(fallback.kind == .antigravity)
+        #expect(fallback.confidence == .low)
+    }
+
     @Test func editingAFileNamedAfterAnAgentIsNotAnAgent() {
         // T-10: `vim codex_notes.md`.
         #expect(detections["%28"]?.kind == AgentKind.none)
@@ -314,6 +337,42 @@ arg -p
         #expect(detection.confidence == .low)
         let shell = InventorySnapshot.Pane(id: "%6", pid: 1, dead: false, width: 80, height: 24, currentCommand: "bash", currentPath: "/", title: "")
         #expect(AgentDetector.detect(pane: shell, processes: [], agents: [:], processTableAvailable: false).kind == .unknown)
+    }
+
+    @Test func antigravityMetadataRequiresTheSamePaneAndProcessGeneration() throws {
+        let base = """
+        @@begin 1 agy
+        @@section panes
+        %109 10 0 80 24
+        @@section pane_current_command
+        %109 agy
+        @@section processes
+        %109 1 42 10 Sl+ agy
+        @@section agents
+        @@agent 42
+        exe /root/.local/bin/agy
+        start 123
+        """
+        let record = #"{"pane":"%109","start":123,"directory":"/root/.gemini/antigravity-cli","title":"A conversation title","age":58,"state":"idle","model":"Gemini 3.8 Flash","effort":"high","contextPercent":21}"#
+        func snapshot(_ metadata: String) throws -> InventorySnapshot {
+            try InventoryProbe.parse(base + "\n@@antigravity 42 \(metadata)\n@@end agy\n", nonce: "agy")
+        }
+        let current = try snapshot(record)
+        #expect(current.conversationTitles["%109"] == "A conversation title")
+        #expect(current.lastActiveSeconds["%109"] == 58)
+        #expect(current.logStates["%109"] == "idle")
+        #expect(current.models["%109"] == "Gemini 3.8 Flash")
+        #expect(current.efforts["%109"] == "high")
+        #expect(current.usage["%109"]?.contextPercent == 21)
+        #expect(AgentDetector.detect(current)["%109"]?.configDirectory == "/root/.gemini/antigravity-cli")
+
+        let differentPane = try snapshot(record.replacingOccurrences(of: "%109", with: "%108"))
+        let oldProcess = try snapshot(record.replacingOccurrences(of: "123", with: "124"))
+        for stale in [differentPane, oldProcess] {
+            #expect(stale.conversationTitles.isEmpty)
+            #expect(stale.lastActiveSeconds.isEmpty)
+            #expect(AgentDetector.detect(stale)["%109"]?.configDirectory == nil)
+        }
     }
 
     @Test func versionParsing() {

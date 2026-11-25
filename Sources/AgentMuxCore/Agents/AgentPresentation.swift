@@ -56,6 +56,13 @@ public enum ActivityDetector {
         title: String? = nil,
         agentState: String? = nil
     ) -> ActivityObservation {
+        if kind == .antigravity {
+            switch logState {
+            case "working": return ActivityObservation(.working, .high, "Antigravity conversation is running")
+            case "idle": return ActivityObservation(.idle, .high, "Antigravity conversation is idle")
+            default: return ActivityObservation(.unknown, .low, "Antigravity conversation state unavailable")
+            }
+        }
         // Claude reports its own state in its per-process session record:
         // busy while a turn runs (also while it waits out an API retry, whose
         // spinner no screen rule knows), waiting while a question, permission
@@ -213,8 +220,10 @@ public enum AgentTitle {
         if kind == .codex, title.range(of: "Action Required", options: .caseInsensitive) != nil {
             return nil
         }
+        let lower = title.lowercased()
+        if kind == .antigravity, ["agy", "antigravity", "antigravity cli"].contains(lower) { return nil }
         let generic: Set = ["", "claude", "claude code", "codex"]
-        return generic.contains(title.lowercased()) ? nil : title
+        return generic.contains(lower) ? nil : title
     }
 
     private static func isMark(_ scalar: Unicode.Scalar) -> Bool {

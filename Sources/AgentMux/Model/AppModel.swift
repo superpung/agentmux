@@ -1101,7 +1101,7 @@ final class AppModel {
     /// signals. Shared by the sidebar and by notification transitions.
     static func resolveActivities(snapshot: InventorySnapshot, detections: [String: AgentDetection]) -> [String: AgentActivity] {
         var result: [String: AgentActivity] = [:]
-        for (paneID, detection) in detections where detection.kind == .codex || detection.kind == .claudeCode {
+        for (paneID, detection) in detections where detection.kind.isAgent {
             if let request = snapshot.approvals[paneID], request.agent.pid == detection.pid,
                request.agent.startTicks == detection.startTicks {
                 result[paneID] = .waitingApproval

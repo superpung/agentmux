@@ -81,6 +81,7 @@ struct AgentEntry: Identifiable, Hashable {
         switch kind {
         case .claudeCode: return ".claude"
         case .codex: return ".codex"
+        case .antigravity: return "Antigravity"
         default: return kind.label
         }
     }
@@ -208,11 +209,12 @@ extension AppModel {
             let device = state.device
             return snapshot.panes.compactMap { pane in
                 guard let detection = state.detections[pane.id],
-                      detection.kind == .codex || detection.kind == .claudeCode,
+                      detection.kind.isAgent,
                       snapshot.hasRealSession(pane.id),
                       let ref = state.ref(for: pane.id) else { return nil }
                 let window = windowName(of: pane.id, in: snapshot)
-                let title = AgentTitle.from(paneTitle: pane.title, kind: detection.kind)
+                let terminalTitle = detection.kind == .antigravity ? nil : AgentTitle.from(paneTitle: pane.title, kind: detection.kind)
+                let title = snapshot.conversationTitles[pane.id] ?? terminalTitle
                     ?? window.flatMap { $0 == detection.kind.label ? nil : $0 }
                     ?? SpaceLabel.label(pane.currentPath)
                 let activity = state.activities[pane.id] ?? .unknown
@@ -248,7 +250,7 @@ extension AppModel {
             guard let snapshot = state.snapshot else { return [] }
             let device = state.device
             return snapshot.panes.compactMap { pane in
-                if let kind = state.detections[pane.id]?.kind, kind == .codex || kind == .claudeCode { return nil }
+                if state.detections[pane.id]?.kind.isAgent == true { return nil }
                 guard snapshot.hasRealSession(pane.id), let ref = state.ref(for: pane.id) else { return nil }
                 return PaneEntry(
                     ref: ref,

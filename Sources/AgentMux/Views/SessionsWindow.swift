@@ -276,7 +276,7 @@ struct SessionsWindow: View {
                 let panes = windowRows.compactMap { r -> Node? in
                     guard let pane = snapshot.pane(r.paneID) else { return nil }
                     let kind = state?.detections[pane.id]?.kind
-                    let agent = (kind == .codex || kind == .claudeCode) ? kind : nil
+                    let agent = kind?.isAgent == true ? kind : nil
                     return Node(id: pane.id, kind: .pane(command: pane.currentCommand, agent: agent, activity: state?.activities[pane.id] ?? .unknown), children: nil)
                 }
                 return Node(id: windowID, kind: .window(index: windowRows.first?.windowIndex ?? 0, name: window?.name ?? ""), children: panes)

@@ -48,6 +48,7 @@ enum BrandIconLoader {
         switch kind {
         case .codex: "codex"
         case .claudeCode: "claude-color"
+        case .antigravity: "antigravity-color"
         case .none, .unknown: nil
         }
     }
@@ -67,6 +68,7 @@ extension AgentKind {
         switch self {
         case .codex: "codex"
         case .claudeCode: "claude"
+        case .antigravity: "agy"
         case .none: "terminal"
         case .unknown: "unknown"
         }

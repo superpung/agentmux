@@ -79,6 +79,8 @@ public struct InventorySnapshot: Sendable, Equatable {
         public var logEvent: String?
         /// Seconds since the session log was last written.
         public var logAgeSeconds: Int?
+        public var antigravityDirectory: String? = nil
+        public var antigravityVersion: String? = nil
     }
 
     /// Token usage read from an agent's session log (structural numbers only).
@@ -345,6 +347,8 @@ public struct InventorySnapshot: Sendable, Equatable {
     /// Model id per agent pane (e.g. "claude-opus-5-5", "gpt-6-astra"), read
     /// from the session log (metadata only).
     public var models: [String: String] = [:]
+    /// A verified title from the current conversation, if reported by the provider.
+    public var conversationTitles: [String: String] = [:]
     /// Reasoning effort per agent pane ("medium"/"high"/"xhigh"), when known.
     public var efforts: [String: String] = [:]
     /// Non-secret account identity per agent pane ("claude:<uuid>" /

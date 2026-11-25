@@ -3,14 +3,19 @@ import Foundation
 public enum AgentKind: String, Sendable, Equatable {
     case codex
     case claudeCode
+    case antigravity
     /// Nothing agent-like runs in the pane.
     case none
     /// Not enough evidence either way (e.g. no process table).
     case unknown
 
-    /// A real agent CLI (Claude Code or Codex) runs in the pane, as opposed to
-    /// a bare shell or an undetermined pane.
-    public var isAgent: Bool { self == .codex || self == .claudeCode }
+    /// A recognized agent CLI runs in the pane.
+    public var isAgent: Bool {
+        switch self {
+        case .codex, .claudeCode, .antigravity: true
+        case .none, .unknown: false
+        }
+    }
 
     /// The approval probe recognizes this provider's terminal prompts.
     public var supportsApproval: Bool { self == .codex || self == .claudeCode }
@@ -56,8 +61,7 @@ public struct AgentDetection: Sendable, Equatable {
     public var children: [Child]
 }
 
-/// Answers "is there a Codex / Claude Code in this pane?" from process
-/// evidence. Whether it is working or waiting is a separate question.
+/// Identifies a supported agent in a pane from process evidence.
 public enum AgentDetector {
     public static func detect(_ snapshot: InventorySnapshot) -> [String: AgentDetection] {
         var result: [String: AgentDetection] = [:]
@@ -84,6 +88,7 @@ public enum AgentDetector {
             let kind: AgentKind = switch pane.currentCommand {
             case "codex": .codex
             case "claude": .claudeCode
+            case "agy": .antigravity
             default: .unknown
             }
             return AgentDetection(
@@ -120,14 +125,19 @@ public enum AgentDetector {
                 confidence = min(confidence, .medium)
             }
         }
-        let configKey = classification.kind == .codex ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"
+        let configKey: String? = switch classification.kind {
+        case .codex: "CODEX_HOME"
+        case .claudeCode: "CLAUDE_CONFIG_DIR"
+        default: nil
+        }
         return AgentDetection(
             paneID: pane.id,
             kind: classification.kind,
             pid: main.pid,
             startTicks: evidence?.startTicks,
-            version: classification.version,
-            configDirectory: evidence?.environment[configKey],
+            version: classification.kind == .antigravity ? evidence?.antigravityVersion : classification.version,
+            configDirectory: classification.kind == .antigravity
+                ? evidence?.antigravityDirectory : configKey.flatMap { evidence?.environment[$0] },
             confidence: confidence,
             evidence: reasons,
             children: matches.dropFirst()
@@ -153,12 +163,16 @@ public enum AgentDetector {
             switch node.command {
             case "codex": return Classification(kind: .codex, version: nil, confidence: .low, reasons: ["comm=codex; executable unreadable"])
             case "claude": return Classification(kind: .claudeCode, version: nil, confidence: .low, reasons: ["comm=claude; executable unreadable"])
+            case "agy": return Classification(kind: .antigravity, version: nil, confidence: .low, reasons: ["comm=agy; executable unreadable"])
             default: return nil
             }
         }
 
         let executable = evidence.executable.replacingOccurrences(of: " (deleted)", with: "")
         let name = (executable as NSString).lastPathComponent
+        if name == "agy" {
+            return Classification(kind: .antigravity, version: nil, confidence: .medium, reasons: ["executable agy"])
+        }
         let subcommand = evidence.arguments.dropFirst().first ?? ""
         let script = subcommand
 
