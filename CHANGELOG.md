@@ -8,6 +8,8 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-26
+
 ### Fixed
 
 - Following the Mac's light or dark appearance no longer crashes while a
@@ -396,7 +398,8 @@ First public release.
 - Avoids a tmux server segfault on grouped-session teardown by never destroying a
   session while its control client is attached.
 
-[Unreleased]: https://github.com/superpung/agentmux/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/superpung/agentmux/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/superpung/agentmux/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/superpung/agentmux/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/superpung/agentmux/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/superpung/agentmux/compare/v0.4.4...v0.4.5
