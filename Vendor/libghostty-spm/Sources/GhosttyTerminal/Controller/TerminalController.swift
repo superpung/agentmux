@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import GhosttyHostEnvironment
 import GhosttyKit
 
 #if canImport(UIKit)
@@ -46,7 +47,7 @@ public final class TerminalController {
     public static let shared = TerminalController()
 
     static let defaultRenderedConfig = TerminalConfiguration.default.rendered
-    private static var runtimeInitialized = false
+    private(set) static var runtimeReady: Bool?
 
     nonisolated(unsafe) var app: ghostty_app_t?
     nonisolated(unsafe) var config: ghostty_config_t?
@@ -186,11 +187,15 @@ public final class TerminalController {
         theme: TerminalTheme = .default,
         terminalConfiguration: TerminalConfiguration = .init(),
     ) {
-        Self.initializeRuntimeIfNeeded()
+        let ready = Self.prepareRuntime()
 
         self.theme = theme
         self.terminalConfiguration = terminalConfiguration
         self.configSource = configSource
+        guard ready else {
+            lastConfigurationIssue = "Could not initialize the Ghostty runtime environment"
+            return
+        }
 
         // Load the base config (without theme) so ghostty validates it.
         applyInitialConfig(source: configSource)
@@ -353,11 +358,17 @@ public final class TerminalController {
         }
     }
 
-    private static func initializeRuntimeIfNeeded() {
-        guard !runtimeInitialized else { return }
-        runtimeInitialized = true
+    /// Initialize once, before the host starts its background work. The
+    /// terminal controller and surfaces can still be created lazily.
+    @discardableResult
+    public static func prepareRuntime() -> Bool {
+        if let runtimeReady { return runtimeReady }
         GhosttyRuntimeResources.configureEnvironment()
-        ghostty_init(0, nil)
+        // Ghostty may set LANG during initialization. Preserve its final
+        // environment before libc can move it on a later setenv or unsetenv.
+        let ready = ghostty_init(0, nil) == 0 && ghostty_host_detach_environment()
+        runtimeReady = ready
+        return ready
     }
 
     deinit {

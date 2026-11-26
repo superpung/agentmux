@@ -134,6 +134,9 @@ extension TerminalController {
     private static func prepareConfig(
         source: ConfigSource,
     ) -> Result<PreparedConfig, ConfigurationIssue> {
+        guard runtimeReady == true else {
+            return .failure(ConfigurationIssue("Could not initialize the Ghostty runtime environment"))
+        }
         let resolvedContents: String
         let configPath: String
         let managedConfigURL: URL?

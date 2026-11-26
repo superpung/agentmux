@@ -5,8 +5,8 @@ let package = Package(
     name: "AgentMux",
     platforms: [.macOS(.v14)],
     dependencies: [
-        // libghostty-spm, vendored at a pinned tag with one resource-lookup
-        // patch; see scripts/vendor-libghostty.sh and Vendor/libghostty-spm/VENDORED.
+        // libghostty-spm, vendored at a pinned tag with host integration patches.
+        // See scripts/vendor-libghostty.sh and Vendor/libghostty-spm/VENDORED.
         // Its binary target still downloads the prebuilt GhosttyKit.xcframework.
         .package(path: "Vendor/libghostty-spm"),
         // Pinned source with an app-bundle resource lookup patch. See

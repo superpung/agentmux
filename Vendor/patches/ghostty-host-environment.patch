@@ -1,0 +1,104 @@
+diff --git a/Package.swift b/Package.swift
+index a37a9f5..9131370 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -31,0 +32 @@ let package = Package(
++        .target(name: "GhosttyHostEnvironment"),
+@@ -44 +45 @@ let package = Package(
+-            dependencies: ["GhosttyKit", "DisplayLink"],
++            dependencies: ["GhosttyKit", "DisplayLink", "GhosttyHostEnvironment"],
+diff --git a/Sources/GhosttyHostEnvironment/environment.c b/Sources/GhosttyHostEnvironment/environment.c
+new file mode 100644
+index 0000000..9b1a1f2
+--- /dev/null
++++ b/Sources/GhosttyHostEnvironment/environment.c
+@@ -0,0 +1,32 @@
++#include "GhosttyHostEnvironment.h"
++
++#include <crt_externs.h>
++#include <stdlib.h>
++#include <string.h>
++
++bool ghostty_host_detach_environment(void) {
++    char ***slot = _NSGetEnviron();
++    char **original = *slot;
++    if (original == NULL) return true;
++
++    size_t count = 0;
++    while (original[count] != NULL) count++;
++
++    char **replacement = calloc(count + 1, sizeof(*replacement));
++    if (replacement == NULL) return false;
++    for (size_t i = 0; i < count; i++) {
++        replacement[i] = strdup(original[i]);
++        if (replacement[i] == NULL) {
++            while (i > 0) free(replacement[--i]);
++            free(replacement);
++            return false;
++        }
++    }
++
++    // Ghostty borrows the original array and its strings. Darwin only
++    // reallocates or frees owned pointers in the current environment. A
++    // separate array and separate strings keep the borrowed data readable
++    // for the lifetime of the library.
++    *slot = replacement;
++    return true;
++}
+diff --git a/Sources/GhosttyHostEnvironment/include/GhosttyHostEnvironment.h b/Sources/GhosttyHostEnvironment/include/GhosttyHostEnvironment.h
+new file mode 100644
+index 0000000..313d3cd
+--- /dev/null
++++ b/Sources/GhosttyHostEnvironment/include/GhosttyHostEnvironment.h
+@@ -0,0 +1,10 @@
++#ifndef GHOSTTY_HOST_ENVIRONMENT_H
++#define GHOSTTY_HOST_ENVIRONMENT_H
++
++#include <stdbool.h>
++
++/// After Ghostty initializes, give libc a separate environment to mutate.
++/// Run once during startup, before starting work that may change the environment.
++bool ghostty_host_detach_environment(void);
++
++#endif
+diff --git a/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift b/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift
+index 07c22c7..1cfe341 100644
+--- a/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift
++++ b/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift
+@@ -136,0 +137,3 @@ extension TerminalController {
++        guard runtimeReady == true else {
++            return .failure(ConfigurationIssue("Could not initialize the Ghostty runtime environment"))
++        }
+diff --git a/Sources/GhosttyTerminal/Controller/TerminalController.swift b/Sources/GhosttyTerminal/Controller/TerminalController.swift
+index ea40d4e..62eaace 100644
+--- a/Sources/GhosttyTerminal/Controller/TerminalController.swift
++++ b/Sources/GhosttyTerminal/Controller/TerminalController.swift
+@@ -8,0 +9 @@ import Foundation
++import GhosttyHostEnvironment
+@@ -49 +50 @@ public final class TerminalController {
+-    private static var runtimeInitialized = false
++    private(set) static var runtimeReady: Bool?
+@@ -189 +190 @@ public final class TerminalController {
+-        Self.initializeRuntimeIfNeeded()
++        let ready = Self.prepareRuntime()
+@@ -193,0 +195,4 @@ public final class TerminalController {
++        guard ready else {
++            lastConfigurationIssue = "Could not initialize the Ghostty runtime environment"
++            return
++        }
+@@ -356,3 +361,5 @@ public final class TerminalController {
+-    private static func initializeRuntimeIfNeeded() {
+-        guard !runtimeInitialized else { return }
+-        runtimeInitialized = true
++    /// Initialize once, before the host starts its background work. The
++    /// terminal controller and surfaces can still be created lazily.
++    @discardableResult
++    public static func prepareRuntime() -> Bool {
++        if let runtimeReady { return runtimeReady }
+@@ -360 +367,5 @@ public final class TerminalController {
+-        ghostty_init(0, nil)
++        // Ghostty may set LANG during initialization. Preserve its final
++        // environment before libc can move it on a later setenv or unsetenv.
++        let ready = ghostty_init(0, nil) == 0 && ghostty_host_detach_environment()
++        runtimeReady = ready
++        return ready

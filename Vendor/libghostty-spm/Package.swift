@@ -29,6 +29,7 @@ let package = Package(
         .package(url: "https://github.com/Lakr233/DisplayLink.git", from: "3.0.1"),
     ],
     targets: [
+        .target(name: "GhosttyHostEnvironment"),
         .target(
             name: "GhosttyKit",
             dependencies: ["libghostty"],
@@ -41,7 +42,7 @@ let package = Package(
         ),
         .target(
             name: "GhosttyTerminal",
-            dependencies: ["GhosttyKit", "DisplayLink"],
+            dependencies: ["GhosttyKit", "DisplayLink", "GhosttyHostEnvironment"],
             path: "Sources/GhosttyTerminal",
             resources: [
                 .copy("Resources/Ghostty"),

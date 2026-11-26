@@ -1,5 +1,5 @@
 #!/bin/sh
-# Exercise the packaged code preview without access to build-directory bundles.
+# Exercise packaged code previews and terminal config without build-directory bundles.
 # Usage: scripts/check-app-resources.sh <App.app> <swiftpm-bin-directory>
 set -eu
 APP="${1:?usage: check-app-resources.sh <App.app> <swiftpm-bin-directory>}"
@@ -7,7 +7,9 @@ BIN="${2:?usage: check-app-resources.sh <App.app> <swiftpm-bin-directory>}"
 python3 - "$APP/Contents/MacOS/AgentMux" <<'PY'
 from pathlib import Path
 import sys
-assert b'AGENTMUX_RESOURCE_SMOKE_TEST' in Path(sys.argv[1]).read_bytes(), 'App has no resource smoke entrypoint'
+binary = Path(sys.argv[1]).read_bytes()
+assert b'AGENTMUX_RESOURCE_SMOKE_TEST' in binary, 'App has no resource smoke entrypoint'
+assert b'AGENTMUX_TERMINAL_SMOKE_TEST' in binary, 'App has no terminal smoke entrypoint'
 PY
 WORK="$(mktemp -d)"
 mkdir -p "$WORK/build-resources"
@@ -48,6 +50,13 @@ PY
 # A signed, relocated app must find the JS and themes in its own resources.
 codesign --verify --strict "$WORK/Relocated.app"
 run_check highlighted
+python3 - "$WORK/Relocated.app/Contents/MacOS/AgentMux" <<'PY'
+import os, subprocess, sys
+result = subprocess.run([sys.argv[1]], env=dict(os.environ, AGENTMUX_TERMINAL_SMOKE_TEST='1', MallocScribble='1'),
+                        timeout=20, check=True, text=True, capture_output=True)
+assert 'Terminal runtime verified both palettes' in result.stdout, result
+print(result.stdout, end='')
+PY
 
 # An incomplete highlighting bundle must fall back to plain text in both cases.
 RESOURCES="$WORK/Relocated.app/Contents/Resources/Highlightr_Highlightr.bundle"

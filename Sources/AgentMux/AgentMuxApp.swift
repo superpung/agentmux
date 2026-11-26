@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyTerminal
 import SwiftUI
 import UserNotifications
 
@@ -9,6 +10,8 @@ struct AgentMuxApp: App {
 
     init() {
         AppResourceSmoke.runIfRequested()
+        TerminalRuntimeSmoke.runIfRequested()
+        TerminalController.prepareRuntime()
         _model = State(initialValue: AppModel())
     }
 

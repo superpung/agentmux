@@ -37,10 +37,11 @@ scripts/check-app-resources.sh build/AgentMux.app "$BIN"
 
 The check relocates the signed app and temporarily hides the build directory's
 resource bundles. It exercises the real preview highlighter in light and dark
-appearances, then verifies plain-text fallback with missing resources. Run it
-after the build finishes; avoid concurrent builds while bundles are hidden. The
-release workflow runs this check before packaging. The diagnostic process exits
-before loading user settings, opening windows or connecting to agents.
+appearances, verifies plain-text fallback with missing resources, and stresses
+terminal palette reloads after environment changes. Run it after the build
+finishes. Avoid concurrent builds while bundles are hidden. The release workflow
+runs this check before packaging. The diagnostic process exits before loading
+user settings, opening windows or connecting to agents.
 
 On Linux, set `AGENTMUX_CODEX_TEST_BINARY` to an installed Codex binary to also
 run the native account-switch tests. These use disposable accounts, synthetic
@@ -83,7 +84,7 @@ Sources/AgentMuxCore/  config, remote commands, tmux inventory, agent detection,
 Sources/AgentMux/      macOS app (SwiftUI + AppKit + GhosttyTerminal)
 Sources/agentmux-cli/  development tool for the remote path
 Tests/                 swift-testing unit tests
-Vendor/libghostty-spm/ pinned terminal engine with one resource-lookup patch
+Vendor/libghostty-spm/ pinned terminal engine with host integration patches
 docs/                  requirements, decision records, observed compatibility
 ```
 

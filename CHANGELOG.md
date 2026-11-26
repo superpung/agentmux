@@ -8,6 +8,13 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Following the Mac's light or dark appearance no longer crashes while a
+  terminal reloads its colors after process environment changes. Packaged-app
+  checks now stress repeated palette reloads after environment growth,
+  replacement and removal.
+
 ## [0.6.0] - 2026-11-25
 
 ### Added

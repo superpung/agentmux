@@ -1,7 +1,6 @@
 #!/bin/sh
-# Vendors libghostty-spm at a tag, with one local patch: GhosttyTerminal looks
-# for its resource bundle in Contents/Resources before SwiftPM's Bundle.module
-# (which only checks the .app root, where codesign rejects unsealed content).
+# Vendors libghostty-spm at a tag, with local resource lookup and host runtime
+# integration patches.
 #
 # Usage: scripts/vendor-libghostty.sh <tag>
 set -eu
@@ -19,6 +18,9 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -R "$WORK/src/Package.swift" "$WORK/src/LICENSE" "$WORK/src/Sources" "$WORK/src/Tests" "$DEST/"
 
+mkdir -p "$DEST/Sources/GhosttyHostEnvironment/include"
+patch -s -p1 -d "$DEST" < "$ROOT/Vendor/patches/ghostty-host-environment.patch"
+
 TERMINAL="$DEST/Sources/GhosttyTerminal"
 grep -rl -e 'Bundle\.module' -e 'bundle: \.module' "$TERMINAL" | while read -r f; do
   sed -i '' -e 's/Bundle\.module/Bundle.ghosttyTerminalResources/g' \
@@ -26,6 +28,6 @@ grep -rl -e 'Bundle\.module' -e 'bundle: \.module' "$TERMINAL" | while read -r f
 done
 cp "$ROOT/Vendor/patches/Bundle+GhosttyTerminalResources.swift" "$TERMINAL/Configuration/"
 
-printf 'tag=%s\ncommit=%s\npatch=Vendor/patches/Bundle+GhosttyTerminalResources.swift\n' \
+printf 'tag=%s\ncommit=%s\npatch=Vendor/patches/Bundle+GhosttyTerminalResources.swift\npatch=Vendor/patches/ghostty-host-environment.patch\n' \
   "$TAG" "$COMMIT" > "$DEST/VENDORED"
 echo "Vendored libghostty-spm $TAG ($COMMIT)"
