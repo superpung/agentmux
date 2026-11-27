@@ -8,6 +8,17 @@ features and may change behavior; a patch version only fixes). Commits follow
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-27
+
+### Fixed
+
+- Closing or replacing a terminal no longer hangs AgentMux while macOS display
+  links are being reconfigured. The embedded Ghostty engine now includes its
+  main-thread display-link lifecycle fix.
+- Packaged-app checks now create and destroy real terminal surfaces repeatedly
+  and verify the exact embedded Ghostty engine, preventing this deadlock or a
+  stale vulnerable binary from silently returning in a release.
+
 ## [0.6.1] - 2026-11-26
 
 ### Fixed
@@ -398,7 +409,8 @@ First public release.
 - Avoids a tmux server segfault on grouped-session teardown by never destroying a
   session while its control client is attached.
 
-[Unreleased]: https://github.com/superpung/agentmux/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/superpung/agentmux/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/superpung/agentmux/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/superpung/agentmux/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/superpung/agentmux/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/superpung/agentmux/compare/v0.4.5...v0.5.0
