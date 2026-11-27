@@ -2,6 +2,7 @@
 # Exercise packaged code previews and terminal config without build-directory bundles.
 # Usage: scripts/check-app-resources.sh <App.app> <swiftpm-bin-directory>
 set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="${1:?usage: check-app-resources.sh <App.app> <swiftpm-bin-directory>}"
 BIN="${2:?usage: check-app-resources.sh <App.app> <swiftpm-bin-directory>}"
 python3 - "$APP/Contents/MacOS/AgentMux" <<'PY'
@@ -11,6 +12,17 @@ binary = Path(sys.argv[1]).read_bytes()
 assert b'AGENTMUX_RESOURCE_SMOKE_TEST' in binary, 'App has no resource smoke entrypoint'
 assert b'AGENTMUX_TERMINAL_SMOKE_TEST' in binary, 'App has no terminal smoke entrypoint'
 PY
+ENGINE="$(sed -n 's/^engine=//p' "$ROOT/Vendor/libghostty-spm/VENDORED")"
+case "$ENGINE" in
+  ''|*[!0-9a-f]*) echo "VENDORED has no valid Ghostty engine commit" >&2; exit 1 ;;
+esac
+# Ghostty's build string records the first nine commit characters. This checks
+# the packaged executable, rather than trusting SwiftPM's artifact cache.
+ENGINE_PREFIX="$(printf '%s' "$ENGINE" | cut -c1-9)"
+strings "$APP/Contents/MacOS/AgentMux" | grep -qF "+$ENGINE_PREFIX" || {
+  echo "Packaged app does not contain Ghostty engine $ENGINE" >&2
+  exit 1
+}
 WORK="$(mktemp -d)"
 mkdir -p "$WORK/build-resources"
 cleanup() {

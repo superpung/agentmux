@@ -1,6 +1,5 @@
 #!/bin/sh
-# Vendors libghostty-spm at a tag, with local resource lookup and host runtime
-# integration patches.
+# Vendors libghostty-spm at a tag, with the AgentMux host runtime patch.
 #
 # Usage: scripts/vendor-libghostty.sh <tag>
 set -eu
@@ -14,20 +13,26 @@ git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$TAG" \
   https://github.com/Lakr233/libghostty-spm.git "$WORK/src"
 COMMIT="$(git -C "$WORK/src" rev-parse HEAD)"
 
-rm -rf "$DEST"
-mkdir -p "$DEST"
-cp -R "$WORK/src/Package.swift" "$WORK/src/LICENSE" "$WORK/src/Sources" "$WORK/src/Tests" "$DEST/"
+STAGED="$WORK/staged"
+mkdir -p "$STAGED"
+cp -R "$WORK/src/Package.swift" "$WORK/src/LICENSE" "$WORK/src/Sources" "$WORK/src/Tests" "$STAGED/"
 
-mkdir -p "$DEST/Sources/GhosttyHostEnvironment/include"
-patch -s -p1 -d "$DEST" < "$ROOT/Vendor/patches/ghostty-host-environment.patch"
+mkdir -p "$STAGED/Sources/GhosttyHostEnvironment/include"
+patch -s -F 0 -p1 -d "$STAGED" < "$ROOT/Vendor/patches/ghostty-host-environment.patch"
 
-TERMINAL="$DEST/Sources/GhosttyTerminal"
-grep -rl -e 'Bundle\.module' -e 'bundle: \.module' "$TERMINAL" | while read -r f; do
-  sed -i '' -e 's/Bundle\.module/Bundle.ghosttyTerminalResources/g' \
-            -e 's/bundle: \.module/bundle: .ghosttyTerminalResources/g' "$f"
-done
-cp "$ROOT/Vendor/patches/Bundle+GhosttyTerminalResources.swift" "$TERMINAL/Configuration/"
+ENGINE="$(sed -n 's#.*releases/download/upstream\.\([0-9a-f][0-9a-f]*\)/.*#\1#p' "$STAGED/Package.swift")"
+case "$ENGINE" in
+  ''|*[!0-9a-f]*) echo "Could not read the pinned Ghostty engine commit" >&2; exit 1 ;;
+esac
+printf 'tag=%s\ncommit=%s\nengine=%s\npatch=Vendor/patches/ghostty-host-environment.patch\n' \
+  "$TAG" "$COMMIT" "$ENGINE" > "$STAGED/VENDORED"
 
-printf 'tag=%s\ncommit=%s\npatch=Vendor/patches/Bundle+GhosttyTerminalResources.swift\npatch=Vendor/patches/ghostty-host-environment.patch\n' \
-  "$TAG" "$COMMIT" > "$DEST/VENDORED"
+# Keep the old tree recoverable until the prepared replacement is in place.
+if [ -d "$DEST" ]; then
+  mv "$DEST" "$WORK/previous"
+fi
+if ! mv "$STAGED" "$DEST"; then
+  [ ! -d "$WORK/previous" ] || mv "$WORK/previous" "$DEST"
+  exit 1
+fi
 echo "Vendored libghostty-spm $TAG ($COMMIT)"

@@ -9,7 +9,7 @@
 
         extension UITerminalView {
             /// Direct-touch grammar: single tap for selection dismissal/keyboard,
-            /// double tap for a word, triple tap for a row, long press for the menu.
+            /// double tap for a word, triple tap for a row, long press for a word or the menu.
             func setupTouchSelectionGestures() {
                 for count in 1 ... 3 {
                     let tap = UITapGestureRecognizer(target: self, action: #selector(handleSelectionTap(_:)))
@@ -33,8 +33,15 @@
 
             @objc func handleSelectionTap(_ gesture: UITapGestureRecognizer) {
                 guard usesInlineTextSelection, gesture.state == .ended, surface != nil else { return }
-                stopMomentumScrolling()
-                let point = gesture.location(in: self)
+                // A tap that stopped a moving scroll leaves the viewport
+                // where it stopped, to be aligned in a moment, not at once.
+                var point = gesture.location(in: self)
+                if touchSelection.tapStopsMomentum {
+                    stopMomentumScrolling(settle: .later)
+                } else {
+                    stopMomentumScrolling(settle: .none)
+                    point = settleScrollNow(keeping: point)
+                }
                 defer {
                     touchSelection.tapBeganWithMenu = false
                     touchSelection.tapStopsMomentum = false
@@ -57,8 +64,9 @@
                     } else {
                         // Report the click before the keyboard changes the grid,
                         // including while a TUI owns mouse input.
-                        sendTapClick(at: point)
-                        toggleSoftwareKeyboard()
+                        if !sendTapClick(at: point) {
+                            toggleSoftwareKeyboard()
+                        }
                     }
                 }
             }

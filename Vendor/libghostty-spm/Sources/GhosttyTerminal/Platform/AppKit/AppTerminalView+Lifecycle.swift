@@ -58,6 +58,11 @@
             // A new window (or none) starts visible; its next occlusion
             // change says otherwise.
             core.setWindowVisible(true)
+            if window == nil {
+                cancelDirectTouchPan()
+                stopDirectTouchMomentum()
+                stopDirectTouchFrames()
+            }
             if window != nil {
                 // SwiftUI/AppKit can temporarily detach and reattach the terminal view while
                 // diffing the view hierarchy. Rebuilding on every reattach discards Ghostty's

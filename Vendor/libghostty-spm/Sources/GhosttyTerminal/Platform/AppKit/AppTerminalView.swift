@@ -23,6 +23,8 @@
         var keyEcho: KeyEchoState = .init()
         var pointer: PointerSelectionState = .init()
         var focusBridge: FocusBridgeState = .init()
+        var drop: DropState = .init()
+        var directTouch: DirectTouchState = .init()
 
         open weak var delegate: (any TerminalSurfaceViewDelegate)? {
             get { core.delegate }
@@ -81,9 +83,14 @@
 
             inputHandler = TerminalKeyEventHandler(view: self)
             setupTrackingArea()
+            setupDropInput()
+            setupDirectTouchInput()
 
             core.isAttached = { [weak self] in self?.window != nil }
             core.displayLinkContext = .view(self)
+            core.wakeupSkipsDraw = { [weak self] in
+                self?.directTouchIsScrolling ?? false
+            }
             core.scaleFactor = { [weak self] in
                 self?.currentScaleFactor() ?? 2.0
             }
@@ -130,7 +137,7 @@
         open func selectionContextMenu() -> NSMenu {
             let menu = NSMenu()
             let copyItem = NSMenuItem(
-                title: String(localized: "Copy", bundle: .ghosttyTerminalResources),
+                title: String(localized: "Copy", bundle: .ghosttyTerminal),
                 action: #selector(copy(_:)),
                 keyEquivalent: "",
             )

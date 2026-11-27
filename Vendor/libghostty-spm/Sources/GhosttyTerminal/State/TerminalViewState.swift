@@ -100,6 +100,43 @@ public final class TerminalViewState: ObservableObject {
     /// read the clipboard, or wants a say on unsafe pastes, sets it.
     public var onClipboardConfirmationRequest: ((TerminalClipboardConfirmationRequest) -> Void)?
 
+    /// Host hook for the link under the pointer: the URL Ghostty reports as
+    /// a pointer comes to rest on a highlighted link (with the link
+    /// modifier held, Cmd by default), and nil as it leaves. An OSC 8
+    /// hyperlink reports its URI, whatever text it shows. Called as Ghostty
+    /// reports it, so a host that moves the pointer with
+    /// ``sendMousePos(x:y:modifiers:)`` on the main thread hears about the
+    /// link there before the call returns. Ghostty reports a matched URL
+    /// only while `link-previews` allows it, which by default it does.
+    ///
+    /// Ghostty calls this while it works on the surface. Keep what the
+    /// closure does to the URL it was given; to read the surface back
+    /// (its selection, its text), wait for the next main-queue turn.
+    public var onHoverLink: ((String?) -> Void)?
+
+    /// Host hook for an activated link (cmd-click). Return `true` when the
+    /// host opened it, `false` to leave it to Ghostty's own opener. On
+    /// macOS that opener refuses every link found in the terminal, a URL
+    /// detected in the text (`.unknown`) as much as an OSC 8 hyperlink
+    /// (`.osc8`): Ghostty's own app checks those before it opens them, and
+    /// the fallback will not skip that check. It opens only the files
+    /// Ghostty writes itself (`.text`, `.html`), and on iOS nothing. A host
+    /// that wants links to open sets this and applies its own policy. While
+    /// it is `nil`, every link goes to Ghostty's opener.
+    public var onOpenURL: ((_ url: String, _ kind: TerminalOpenURLKind) -> Bool)?
+
+    /// Host hook for Ghostty's scrollback search. The search is driven
+    /// with binding actions on the surface — `search:<needle>` (an empty
+    /// needle stops it), `navigate_search:next` / `:previous`,
+    /// `end_search`, `start_search`, `search_selection` — and everything it
+    /// reports arrives here (``TerminalSearchEvent``). Each report is
+    /// passed on as it comes, one call per report and in order, never
+    /// coalesced: a count or selection can still belong to the previous
+    /// needle after a new `search:`, and a host that matches them up needs
+    /// every one. Counts come from Ghostty's search thread, so they arrive
+    /// on a later main-queue turn than the action that started the search.
+    public var onSearch: ((TerminalSearchEvent) -> Void)?
+
     /// Hands keyboard focus to the attached terminal view, imperatively.
     ///
     /// The SwiftUI `terminalFocused` bridge is best-effort: with no native
@@ -138,6 +175,18 @@ public final class TerminalViewState: ObservableObject {
             return false
         }
         return surface.paste(text: text)
+    }
+
+    /// Pastes text into the attached surface through paste protection — see
+    /// ``TerminalSurface/pasteWithProtection(text:)``. Unsafe text waits for
+    /// ``onClipboardConfirmationRequest``.
+    @discardableResult
+    public func pasteWithProtection(text: String) -> Bool {
+        guard let surface else {
+            TerminalDebugLog.log(.input, "view state protected paste ignored: missing surface")
+            return false
+        }
+        return surface.pasteWithProtection(text: text)
     }
 
     /// Presses and releases a key on the attached surface, as if typed on a
@@ -182,6 +231,13 @@ public final class TerminalViewState: ObservableObject {
     /// Whether the application currently owns the mouse (DEC 1000/1002/1003).
     public var isMouseCaptured: Bool {
         surface?.isMouseCaptured ?? false
+    }
+
+    /// Where the selection lies on screen, nil when there is none or none
+    /// of it is in view. See ``TerminalSurface/selectionRegion()``; the
+    /// views add the point-to-cell test (`selectionContains(_:)`).
+    public var selectionRegion: TerminalSelectionRegion? {
+        surface?.selectionRegion()
     }
 
     public func sendMousePos(

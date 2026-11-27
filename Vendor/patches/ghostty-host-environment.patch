@@ -1,5 +1,4 @@
 diff --git a/Package.swift b/Package.swift
-index a37a9f5..9131370 100644
 --- a/Package.swift
 +++ b/Package.swift
 @@ -31,0 +32 @@ let package = Package(
@@ -9,7 +8,6 @@ index a37a9f5..9131370 100644
 +            dependencies: ["GhosttyKit", "DisplayLink", "GhosttyHostEnvironment"],
 diff --git a/Sources/GhosttyHostEnvironment/environment.c b/Sources/GhosttyHostEnvironment/environment.c
 new file mode 100644
-index 0000000..9b1a1f2
 --- /dev/null
 +++ b/Sources/GhosttyHostEnvironment/environment.c
 @@ -0,0 +1,32 @@
@@ -47,7 +45,6 @@ index 0000000..9b1a1f2
 +}
 diff --git a/Sources/GhosttyHostEnvironment/include/GhosttyHostEnvironment.h b/Sources/GhosttyHostEnvironment/include/GhosttyHostEnvironment.h
 new file mode 100644
-index 0000000..313d3cd
 --- /dev/null
 +++ b/Sources/GhosttyHostEnvironment/include/GhosttyHostEnvironment.h
 @@ -0,0 +1,10 @@
@@ -62,15 +59,13 @@ index 0000000..313d3cd
 +
 +#endif
 diff --git a/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift b/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift
-index 07c22c7..1cfe341 100644
 --- a/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift
 +++ b/Sources/GhosttyTerminal/Controller/TerminalController+Config.swift
-@@ -136,0 +137,3 @@ extension TerminalController {
+@@ -154,0 +155,3 @@ extension TerminalController {
 +        guard runtimeReady == true else {
 +            return .failure(ConfigurationIssue("Could not initialize the Ghostty runtime environment"))
 +        }
 diff --git a/Sources/GhosttyTerminal/Controller/TerminalController.swift b/Sources/GhosttyTerminal/Controller/TerminalController.swift
-index ea40d4e..62eaace 100644
 --- a/Sources/GhosttyTerminal/Controller/TerminalController.swift
 +++ b/Sources/GhosttyTerminal/Controller/TerminalController.swift
 @@ -8,0 +9 @@ import Foundation
@@ -78,27 +73,30 @@ index ea40d4e..62eaace 100644
 @@ -49 +50 @@ public final class TerminalController {
 -    private static var runtimeInitialized = false
 +    private(set) static var runtimeReady: Bool?
-@@ -189 +190 @@ public final class TerminalController {
+@@ -195 +196 @@ public final class TerminalController {
 -        Self.initializeRuntimeIfNeeded()
 +        let ready = Self.prepareRuntime()
-@@ -193,0 +195,4 @@ public final class TerminalController {
+@@ -199,0 +201,4 @@ public final class TerminalController {
 +        guard ready else {
 +            lastConfigurationIssue = "Could not initialize the Ghostty runtime environment"
 +            return
 +        }
-@@ -356,3 +361,5 @@ public final class TerminalController {
+@@ -362,6 +368,12 @@ public final class TerminalController {
 -    private static func initializeRuntimeIfNeeded() {
 -        guard !runtimeInitialized else { return }
 -        runtimeInitialized = true
+-        GhosttyRuntimeResources.configureEnvironment()
+-        TerminalLocaleEnvironment.configureEnvironment()
+-        ghostty_init(0, runtimeArguments)
 +    /// Initialize once, before the host starts its background work. The
 +    /// terminal controller and surfaces can still be created lazily.
 +    @discardableResult
 +    public static func prepareRuntime() -> Bool {
 +        if let runtimeReady { return runtimeReady }
-@@ -360 +367,5 @@ public final class TerminalController {
--        ghostty_init(0, nil)
++        GhosttyRuntimeResources.configureEnvironment()
++        TerminalLocaleEnvironment.configureEnvironment()
 +        // Ghostty may set LANG during initialization. Preserve its final
 +        // environment before libc can move it on a later setenv or unsetenv.
-+        let ready = ghostty_init(0, nil) == 0 && ghostty_host_detach_environment()
++        let ready = ghostty_init(0, runtimeArguments) == 0 && ghostty_host_detach_environment()
 +        runtimeReady = ready
 +        return ready

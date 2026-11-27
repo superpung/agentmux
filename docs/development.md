@@ -84,7 +84,7 @@ Sources/AgentMuxCore/  config, remote commands, tmux inventory, agent detection,
 Sources/AgentMux/      macOS app (SwiftUI + AppKit + GhosttyTerminal)
 Sources/agentmux-cli/  development tool for the remote path
 Tests/                 swift-testing unit tests
-Vendor/libghostty-spm/ pinned terminal engine with host integration patches
+Vendor/libghostty-spm/ pinned terminal engine with one host environment patch
 docs/                  requirements, decision records, observed compatibility
 ```
 

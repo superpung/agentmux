@@ -26,14 +26,65 @@
             inputMethodHandler = TerminalTextInputHandler(view: view)
         }
 
-        nonisolated static func shouldReplayInterpretedCommand(
-            _ selector: Selector,
+        /// Whether a key that `interpretKeyEvents` answered with a command
+        /// (`doCommand(by:)`) still carries the event's text to Ghostty.
+        ///
+        /// It does, as in Ghostty's own view, which sends the text whatever
+        /// the key bindings made of the key. A terminal has no text to edit,
+        /// so the command means nothing here, and the encoder needs the text
+        /// for any chord it cannot rebuild from the key alone: Cocoa binds
+        /// Ctrl+Shift+A to `moveToBeginningOfParagraphAndModifySelection:`
+        /// and Ctrl+' to `insertSingleQuoteIgnoringSubstitution:`, and
+        /// without the text both reached the program as nothing; under
+        /// modifyOtherKeys Ctrl+A went out as 0x01, not `CSI 27;5;97~`.
+        /// `keyEventText` still drops text that starts with a C0 or DEL
+        /// byte, so Tab, Return, Escape and Backspace arrive as the key
+        /// alone, and a function key's private-use scalar never gets this
+        /// far.
+        ///
+        /// With Command held the chord stays without text: the host's to
+        /// claim, not the program's.
+        nonisolated static func interpretedCommandKeepsText(modifierFlags: NSEvent.ModifierFlags) -> Bool {
+            !modifierFlags.contains(.command)
+        }
+
+        private static func isQuotedKeystroke(_ event: NSEvent) -> Bool {
+            let binding = UserDefaults.standard.string(forKey: "NSQuotedKeystrokeBinding") ?? "^q"
+            return keyBinding(
+                binding,
+                matches: event.charactersIgnoringModifiers,
+                modifierFlags: event.modifierFlags,
+            )
+        }
+
+        /// Whether a key in Cocoa's key binding syntax (`^` Control, `~`
+        /// Option, `$` Shift, `@` Command, then the character; an uppercase
+        /// letter implies Shift) names this key. `characters` is the event's
+        /// `charactersIgnoringModifiers`, which keeps Shift. An empty
+        /// binding, or one this does not read (a keypad `#`, an escaped
+        /// character), matches nothing.
+        nonisolated static func keyBinding(
+            _ binding: String,
+            matches characters: String?,
+            modifierFlags: NSEvent.ModifierFlags,
         ) -> Bool {
-            // AppKit sometimes resolves non-text keys into editing commands
-            // (for example Shift-Tab -> insertBacktab:). In a terminal, those
-            // commands still need to reach Ghostty as the original hardware key.
-            let _ = selector
-            return true
+            let prefixes: [Character: NSEvent.ModifierFlags] = [
+                "^": .control, "~": .option, "$": .shift, "@": .command,
+            ]
+            var required: NSEvent.ModifierFlags = []
+            var rest = Substring(binding)
+            while rest.count > 1, let first = rest.first, let flag = prefixes[first] {
+                required.insert(flag)
+                rest.removeFirst()
+            }
+            guard rest.count == 1, let key = rest.first,
+                  let characters, characters.count == 1, let typed = characters.first
+            else { return false }
+            if key.isUppercase {
+                required.insert(.shift)
+            }
+            let held = modifierFlags.intersection([.control, .option, .shift, .command])
+            return held == required && typed.lowercased() == key.lowercased()
         }
 
         func handleKeyDown(with event: NSEvent) {
@@ -42,10 +93,30 @@
             let action: ghostty_input_action_e = event.isARepeat
                 ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
             let translationEvent = translatedEvent(for: event, on: surface)
+            let markedTextBefore = inputMethodHandler?.hasMarkedText == true
+            interpretedCommandSelector = nil
+
+            // Cocoa's quoted-keystroke binding (`NSQuotedKeystrokeBinding`,
+            // Ctrl+Q unless the user moved it) makes `interpretKeyEvents`
+            // swallow the next key and insert it literally: a Ctrl+[ after a
+            // tmux prefix of Ctrl+Q went nowhere (Ghostty discussion 5067),
+            // and in this package's tests Ctrl+Q then x reached the program
+            // as `\x11xx`. Programs read Ctrl+Q themselves (XON, a tmux
+            // prefix, vim's visual block), so the key binding system never
+            // sees it. A composition keeps the key: it is the input method's
+            // then.
+            if !markedTextBefore, Self.isQuotedKeystroke(translationEvent) {
+                sendKeyEvent(
+                    for: event,
+                    translationEvent: translationEvent,
+                    action: action,
+                    to: surface,
+                    includeText: true,
+                )
+                return
+            }
 
             inputMethodHandler?.startCollectingText()
-            interpretedCommandSelector = nil
-            let markedTextBefore = inputMethodHandler?.hasMarkedText == true
             let keyboardIdBefore = markedTextBefore ? nil : KeyboardLayout.id
             view.keyEcho.lastPerformKeyEvent = nil
             view.interpretKeyEvents([translationEvent])
@@ -69,27 +140,15 @@
                 return
             }
 
-            if let selector = interpretedCommandSelector {
-                interpretedCommandSelector = nil
-                if Self.shouldReplayInterpretedCommand(selector) {
-                    sendKeyEvent(
-                        for: event,
-                        translationEvent: translationEvent,
-                        action: action,
-                        to: surface,
-                        includeText: false,
-                        composing: inputMethodHandler?.hasMarkedText == true || markedTextBefore,
-                    )
-                    return
-                }
-            }
-
+            let includeText = interpretedCommandSelector == nil
+                || Self.interpretedCommandKeepsText(modifierFlags: event.modifierFlags)
+            interpretedCommandSelector = nil
             sendKeyEvent(
                 for: event,
                 translationEvent: translationEvent,
                 action: action,
                 to: surface,
-                includeText: true,
+                includeText: includeText,
                 composing: inputMethodHandler?.hasMarkedText == true || markedTextBefore,
             )
         }
@@ -160,8 +219,7 @@
             )
             input.composing = composing
             guard includeText,
-                  let chars = translationEvent.filteredCharacters,
-                  !chars.isEmpty
+                  let chars = TerminalInputText.keyEventText(translationEvent.filteredCharacters)
             else {
                 surface.sendKeyEvent(input)
                 return

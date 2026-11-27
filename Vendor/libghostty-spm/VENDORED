@@ -1,4 +1,4 @@
-tag=2.2.2026100901
-commit=d139d99a5b10ab45a0a0704d4c1fb1d595710837
-patch=Vendor/patches/Bundle+GhosttyTerminalResources.swift
+tag=2.2.2026112401
+commit=df874b7f276f03e6341199af49a8c040fc045251
+engine=56de3f0f6786
 patch=Vendor/patches/ghostty-host-environment.patch

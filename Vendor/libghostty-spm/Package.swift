@@ -47,7 +47,7 @@ let package = Package(
             resources: [
                 .copy("Resources/Ghostty"),
                 .copy("Resources/terminfo"),
-                .process("Resources/Localizable.xcstrings"),
+                .process("Resources/Localization"),
             ],
             swiftSettings: swiftSettings
         ),
@@ -66,8 +66,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "libghostty",
-            url: "https://github.com/Lakr233/libghostty-spm/releases/download/upstream.35a81a980bb9/GhosttyKit.xcframework.zip",
-            checksum: "80e9bbfc89f5bd23ee028cff03024e3a788509f87812ab0bc9d697bf22a9472b"
+            url: "https://github.com/Lakr233/libghostty-spm/releases/download/upstream.56de3f0f6786/GhosttyKit.xcframework.zip",
+            checksum: "d3082a602e5e7ef908f7665ab5cf804f9cedf97e8898e49777554bdb59a157dc"
         ),
         .testTarget(
             name: "GhosttyKitTest",

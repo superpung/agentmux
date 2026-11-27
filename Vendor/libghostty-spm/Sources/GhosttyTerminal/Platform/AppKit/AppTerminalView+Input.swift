@@ -110,16 +110,14 @@
                 return
             }
 
-            if TerminalKeyEventHandler.shouldReplayInterpretedCommand(selector) {
-                inputHandler?.recordInterpretedCommand(selector)
-            }
+            inputHandler?.recordInterpretedCommand(selector)
         }
 
         @IBAction open func copy(_: Any?) {
             _ = copySelectedTextToPasteboard()
         }
 
-        @IBAction func paste(_: Any?) {
+        @IBAction open func paste(_: Any?) {
             if let text = NSPasteboard.general.string(forType: .string) {
                 TerminalDebugLog.log(
                     .input,
@@ -134,12 +132,22 @@
         }
 
         func mousePoint(from event: NSEvent) -> (x: CGFloat, y: CGFloat) {
-            let point = convert(event.locationInWindow, from: nil)
-            return (point.x, bounds.height - point.y)
+            let point = surfacePoint(convert(event.locationInWindow, from: nil))
+            return (point.x, point.y)
+        }
+
+        /// `TerminalSurfaceCoordinator.pointerRowOffsetPixels`, in points.
+        var pointerRowOffset: CGFloat {
+            let pixels = core.pointerRowOffsetPixels
+            guard pixels != 0 else { return 0 }
+            return CGFloat(pixels) / (window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
         }
 
         override open func mouseDown(with event: NSEvent) {
             window?.makeFirstResponder(self)
+            // Hit testing counts whole rows: a viewport smooth scrolling
+            // left between two is brought to one before the click lands.
+            core.settleScrollForPointer()
             let (x, y) = mousePoint(from: event)
             let mods = TerminalInputModifiers(from: event.modifierFlags)
             pointer.pendingSelectionMenuPoint = nil
@@ -164,6 +172,7 @@
 
         override open func rightMouseDown(with event: NSEvent) {
             window?.makeFirstResponder(self)
+            core.settleScrollForPointer()
             let (x, y) = mousePoint(from: event)
             let mods = TerminalInputModifiers(from: event.modifierFlags)
             surface?.sendMousePos(x: x, y: y, mods: mods.ghosttyMods)
@@ -204,6 +213,7 @@
 
         override open func otherMouseDown(with event: NSEvent) {
             window?.makeFirstResponder(self)
+            core.settleScrollForPointer()
             let (x, y) = mousePoint(from: event)
             let mods = TerminalInputModifiers(from: event.modifierFlags)
             surface?.sendMousePos(x: x, y: y, mods: mods.ghosttyMods)
@@ -253,13 +263,25 @@
         }
 
         override open func scrollWheel(with event: NSEvent) {
+            smoothScrollWillScroll(event)
+            defer { smoothScrollDidScroll(event) }
             let scrollMods = TerminalScrollModifiers(
                 precision: event.hasPreciseScrollingDeltas,
                 momentum: TerminalScrollModifiers.momentumFrom(phase: event.momentumPhase),
             )
+            // A precise delta is in view points and Ghostty reads it as
+            // pixels (`TerminalScrollDistance`). A wheel notch is a line
+            // count and takes no scale.
+            var delta = CGPoint(x: event.scrollingDeltaX, y: event.scrollingDeltaY)
+            if event.hasPreciseScrollingDeltas {
+                delta = TerminalScrollDistance.scrollPixels(
+                    for: delta,
+                    displayScale: CGFloat(currentScaleFactor()),
+                )
+            }
             surface?.sendMouseScroll(
-                x: event.scrollingDeltaX,
-                y: event.scrollingDeltaY,
+                x: Double(delta.x),
+                y: Double(delta.y),
                 mods: scrollMods.rawValue,
             )
         }

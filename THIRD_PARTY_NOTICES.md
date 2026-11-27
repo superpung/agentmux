@@ -7,7 +7,7 @@ licenses.
 
 | Component | Use | License |
 |---|---|---|
-| [libghostty-spm](https://github.com/Lakr233/libghostty-spm) 2.2.2026100901 | Terminal engine (vendored in `Vendor/libghostty-spm`, one local patch) | MIT |
+| [libghostty-spm](https://github.com/Lakr233/libghostty-spm) 2.2.2026112401 | Terminal engine (vendored in `Vendor/libghostty-spm`, one local patch) | MIT |
 | [Ghostty](https://ghostty.org) (inside the prebuilt GhosttyKit.xcframework) | Terminal emulation and rendering | MIT |
 | [DisplayLink](https://github.com/Lakr233/DisplayLink) 3.0.1 | Dependency of libghostty-spm | MIT |
 | [Highlightr](https://github.com/raspu/Highlightr) 2.3.0 | Syntax-highlighted file previews (vendored in `Vendor/Highlightr` with an app resource lookup patch) | MIT; bundles [highlight.js](https://github.com/highlightjs/highlight.js) (BSD-3-Clause) |

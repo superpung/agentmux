@@ -29,6 +29,9 @@ final class TerminalSurfaceCoordinator {
 
     var configuration: TerminalSurfaceOptions = .init() {
         didSet {
+            if configuration.scrollBehavior != oldValue.scrollBehavior {
+                applyScrollBehavior()
+            }
             guard !configuration.isEquivalent(to: oldValue) else { return }
             rebuildIfReady()
         }
@@ -42,6 +45,9 @@ final class TerminalSurfaceCoordinator {
     /// `.exec` would otherwise free a surface the old session still uses.
     private var surfaceSession: InMemoryTerminalSession?
     let bridge = TerminalCallbackBridge()
+    /// Brings a viewport that smooth scrolling left between rows back to a
+    /// row (Patches/ghostty/0022); the views hold it during their gestures.
+    lazy var scrollSettler = TerminalSmoothScrollSettler { [weak self] in self?.surface }
 
     // MARK: - Platform Hooks
 
@@ -112,6 +118,26 @@ final class TerminalSurfaceCoordinator {
     private var isWindowVisible = true
     private var isApplicationActive = true
     private var pendingImmediateTick = true
+    /// The tick owed draws on the main thread whatever the wakeup policy:
+    /// it was asked for from the host's side (size, metrics, visibility,
+    /// selection, focus, the first frame), which the renderer thread does
+    /// not know about.
+    private var pendingDraw = true
+
+    /// Whether a tick only an engine wakeup asked for leaves out the
+    /// `refresh()` and the synchronous `draw()`; it still ticks the app,
+    /// and the renderer thread draws what changed in the engine on its
+    /// own. UIKit's view says yes while its system scroll moves. Each row
+    /// a scroll crosses posts a wakeup. The next tick's draw waited for
+    /// the frame the renderer thread was drawing, about a whole frame at
+    /// 120 Hz, so the main thread missed one at every row; a frame the
+    /// main thread drew could also land before an older one the renderer
+    /// thread had queued, and the picture stepped back; and the refresh
+    /// made the renderer draw the position the scroll had just queued a
+    /// second time. The tick left out is owed (`owesWakeupFrame`) and
+    /// runs once the scroll rests.
+    var wakeupSkipsDraw: () -> Bool = { false }
+    private var owesWakeupFrame = false
 
     /// Running only while frames are owed. The engine's wakeups arrive at
     /// PTY speed, not display speed; rendering straight from them draws far
@@ -150,7 +176,25 @@ final class TerminalSurfaceCoordinator {
     }
 
     func requestImmediateTick() {
+        pendingDraw = true
+        requestWakeupTick()
+    }
+
+    /// A tick for the engine's wakeup: it refreshes and draws unless
+    /// `wakeupSkipsDraw`.
+    func requestWakeupTick() {
         pendingImmediateTick = true
+        ensureDisplayLink()
+    }
+
+    /// The system scroll moved: keeps the display link running, at its
+    /// 120 Hz, until `idleFramesBeforeRelease` frames after the last call.
+    /// The link draws nothing by itself. It holds the display at one
+    /// rate: left alone, UIKit's deceleration steps down through 80 Hz
+    /// (frames 8 and 17 ms apart in turn) and 40 Hz on its way to rest,
+    /// and a picture that is a fixed number of frames behind the scroll
+    /// view then moves too little in one frame and too much in the next.
+    func holdDisplayLinkForScroll() {
         ensureDisplayLink()
     }
 
@@ -243,15 +287,51 @@ final class TerminalSurfaceCoordinator {
                 return isApplicationActive && isAttached()
             },
             onWakeup: { [weak self] in
-                self?.requestImmediateTick()
+                self?.requestWakeupTick()
             },
         )
         TerminalDebugLog.log(.lifecycle, "surface rebuild succeeded")
         startFontSizeTracking(on: newSurface, controller: controller)
+        // The views settle every precision scroll on a row, or offset what
+        // they hit-test, so the surfaces they build may move by the pixel;
+        // nothing else turns it on.
+        applyScrollBehavior()
+        newSurface.onPrecisionScroll = { [weak self] y in
+            self?.scrollSettler.didScroll(up: y)
+        }
         (delegate as? any TerminalSurfaceLifecycleDelegate)?
             .terminalDidAttachSurface(newSurface)
         synchronizeMetrics()
         requestImmediateTick()
+    }
+
+    // MARK: - Scroll behavior
+
+    /// The engine clears the fraction when smooth scrolling goes off, and a
+    /// viewport left between rows is brought to one when settling comes on.
+    private func applyScrollBehavior() {
+        let behavior = configuration.scrollBehavior
+        surface?.setSmoothScrolling(behavior != .rowAtATime)
+        scrollSettler.settlesAutomatically = behavior == .settlesOnRow
+        if behavior == .settlesOnRow, !scrollSettler.isHeld {
+            scrollSettler.release(followingTravel: false)
+        }
+    }
+
+    /// What a view adds to a position before it goes to the engine, in
+    /// pixels: the engine counts rows from the viewport's first, and a
+    /// viewport resting between rows is drawn that much higher.
+    var pointerRowOffsetPixels: Double {
+        guard configuration.scrollBehavior == .restsAnywhere,
+              let position = surface?.smoothScrollPosition(), position.isAvailable else { return 0 }
+        return position.fraction
+    }
+
+    /// Before a pointer press. A viewport that settles is brought to a row;
+    /// one that rests anywhere stays, its positions carrying the offset.
+    func settleScrollForPointer() {
+        guard configuration.scrollBehavior != .restsAnywhere else { return }
+        scrollSettler.settleNow()
     }
 
     // MARK: - Metrics
@@ -525,6 +605,10 @@ final class TerminalSurfaceCoordinator {
             releaseDisplayLink()
             return
         }
+        if !pendingImmediateTick, owesWakeupFrame, !wakeupSkipsDraw() {
+            // The scroll rests: the wakeup frame left out while it moved.
+            pendingImmediateTick = true
+        }
         guard pendingImmediateTick else {
             idleFrameCount += 1
             if idleFrameCount >= Self.idleFramesBeforeRelease {
@@ -536,9 +620,19 @@ final class TerminalSurfaceCoordinator {
         pendingImmediateTick = false
         TerminalDebugLog.log(.render, "tick")
         controller?.tick()
-        surface?.refresh()
-        surface?.draw()
+        if tickDraws {
+            pendingDraw = false
+            owesWakeupFrame = false
+            surface?.refresh()
+            surface?.draw()
+        } else {
+            owesWakeupFrame = true
+        }
         onPostRender?()
+    }
+
+    private var tickDraws: Bool {
+        pendingDraw || !wakeupSkipsDraw()
     }
 
     // MARK: - Focus
@@ -578,6 +672,18 @@ final class TerminalSurfaceCoordinator {
 
         var testHooks_canRenderFrame: Bool {
             canRenderFrame
+        }
+
+        var testHooks_tickDraws: Bool {
+            tickDraws
+        }
+
+        var testHooks_owesWakeupFrame: Bool {
+            owesWakeupFrame
+        }
+
+        var testHooks_displayLinkIsRunning: Bool {
+            displayLink.map { !$0.isPaused } ?? false
         }
     #endif
 
@@ -623,6 +729,7 @@ final class TerminalSurfaceCoordinator {
         bridge.rawSurface = nil
         bridge.scrollbar = nil
         let hadSurface = surface != nil
+        scrollSettler.cancel()
         surface?.setFocus(false)
         surface?.free()
         surface = nil
@@ -637,8 +744,16 @@ final class TerminalSurfaceCoordinator {
         resizeThrottleArmed = false
         resizeThrottleTrailing = false
         pendingImmediateTick = true
+        pendingDraw = true
         controller?.remove(bridge)
         if hadSurface {
+            // A message the IO thread queued for this surface names it by
+            // address, and the app checks that address only by membership.
+            // The allocator gives it straight to the next surface on this
+            // app, so an exit still queued would land there: the live child
+            // reads as exited and the next key closes the surface. Draining
+            // while the address is unknown drops those messages.
+            controller?.tick()
             (delegate as? any TerminalSurfaceLifecycleDelegate)?
                 .terminalDidDetachSurface()
         }
@@ -701,6 +816,7 @@ final class TerminalSurfaceCoordinator {
         }
 
         pendingImmediateTick = true
+        pendingDraw = true
         tick()
         ensureDisplayLink()
     }

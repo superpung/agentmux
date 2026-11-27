@@ -37,6 +37,18 @@ public protocol TerminalSurfaceBellDelegate: TerminalSurfaceViewDelegate {
     func terminalDidRingBell()
 }
 
+/// Scrollback search, driven by the `start_search`, `search:<needle>`, `navigate_search:next` /
+/// `:previous` and `end_search` binding actions. The core reports back here: a search to show
+/// (with the needle it starts from, such as the selection), its end, the number of matches and
+/// which one is selected. A count or index the core doesn't know yet arrives as nil.
+@MainActor
+public protocol TerminalSurfaceSearchDelegate: TerminalSurfaceViewDelegate {
+    func terminalDidStartSearch(needle: String?)
+    func terminalDidEndSearch()
+    func terminalDidUpdateSearchTotal(_ total: Int?)
+    func terminalDidUpdateSearchSelected(_ selected: Int?)
+}
+
 @MainActor
 public protocol TerminalSurfaceCloseDelegate: TerminalSurfaceViewDelegate {
     func terminalDidClose(processAlive: Bool)
@@ -185,20 +197,42 @@ public enum TerminalOpenURLKind: Sendable {
     case unknown
     case text
     case html
+    case osc8
 
     init(_ raw: ghostty_action_open_url_kind_e) {
         switch raw {
         case GHOSTTY_ACTION_OPEN_URL_KIND_TEXT: self = .text
         case GHOSTTY_ACTION_OPEN_URL_KIND_HTML: self = .html
+        case GHOSTTY_ACTION_OPEN_URL_KIND_OSC8: self = .osc8
         default: self = .unknown
         }
     }
 }
 
 /// User activated (cmd-clicked) a hyperlink inside the terminal grid.
+///
+/// Adopting this protocol takes every link: Ghostty is told the host opened
+/// it, whatever the delegate does with it. A delegate that decides per link
+/// adopts ``TerminalSurfaceOpenURLHandlingDelegate`` instead.
 @MainActor
 public protocol TerminalSurfaceOpenURLDelegate: TerminalSurfaceViewDelegate {
     func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind)
+}
+
+/// User activated (cmd-clicked) a hyperlink, and the delegate decides
+/// whether it opens it.
+///
+/// Return `true` when the host opened the link (or chose to drop it).
+/// Return `false` to leave it to Ghostty's own opener, which on macOS
+/// refuses a URL detected in the text (`.unknown`) and an OSC 8 hyperlink
+/// (`.osc8`) alike and opens only the files Ghostty writes itself (`.text`,
+/// `.html`), and on iOS opens nothing: links open only when a host takes
+/// them. When a
+/// delegate adopts both protocols, this one is asked and
+/// ``TerminalSurfaceOpenURLDelegate`` is not called.
+@MainActor
+public protocol TerminalSurfaceOpenURLHandlingDelegate: TerminalSurfaceViewDelegate {
+    func terminalShouldHandleOpenURL(_ url: String, kind: TerminalOpenURLKind) -> Bool
 }
 
 /// Mouse hovered over a recognized hyperlink. nil = hover ended / link lost.

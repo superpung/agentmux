@@ -48,6 +48,12 @@ public final class TerminalController {
 
     static let defaultRenderedConfig = TerminalConfiguration.default.rendered
     private(set) static var runtimeReady: Bool?
+    // Ghostty retains the argv slice globally, even when its length is zero.
+    private static let runtimeArguments: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?> = {
+        let arguments = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: 1)
+        arguments.initialize(to: nil)
+        return arguments
+    }()
 
     nonisolated(unsafe) var app: ghostty_app_t?
     nonisolated(unsafe) var config: ghostty_config_t?
@@ -364,9 +370,10 @@ public final class TerminalController {
     public static func prepareRuntime() -> Bool {
         if let runtimeReady { return runtimeReady }
         GhosttyRuntimeResources.configureEnvironment()
+        TerminalLocaleEnvironment.configureEnvironment()
         // Ghostty may set LANG during initialization. Preserve its final
         // environment before libc can move it on a later setenv or unsetenv.
-        let ready = ghostty_init(0, nil) == 0 && ghostty_host_detach_environment()
+        let ready = ghostty_init(0, runtimeArguments) == 0 && ghostty_host_detach_environment()
         runtimeReady = ready
         return ready
     }

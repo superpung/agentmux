@@ -11,7 +11,7 @@ Only results that were actually measured are recorded here. Concrete host addres
 | Swift | swift.org 6.4.0 toolchain in `~/Library/Developer/Toolchains` (current user only), invoked by path through `scripts/env.sh` |
 | SwiftPM build engine | `--build-system native`. The default swiftbuild engine in 6.4 needs `xcstringstool`, which ships only with Xcode |
 | ssh | OpenSSH 9.9p2 (system `/usr/bin/ssh`) |
-| Terminal engine | libghostty-spm 2.2.2026100901, vendored (see `Vendor/libghostty-spm/VENDORED`) |
+| Terminal engine | libghostty-spm 2.2.2026112401, vendored (see `Vendor/libghostty-spm/VENDORED`) |
 
 ## Remote target (read-only probe, 2026-10-10)
 

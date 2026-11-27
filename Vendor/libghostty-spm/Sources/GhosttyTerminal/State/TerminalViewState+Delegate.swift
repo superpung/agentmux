@@ -20,8 +20,11 @@ extension TerminalViewState:
     TerminalSurfaceCommandFinishedDelegate,
     TerminalSurfaceLifecycleDelegate,
     TerminalSurfaceClipboardConfirmationDelegate,
+    TerminalSurfaceOpenURLHandlingDelegate,
     TerminalSurfaceColorChangeDelegate,
-    TerminalSurfaceFontSizeDelegate
+    TerminalSurfaceFontSizeDelegate,
+    TerminalSurfaceHoverLinkDelegate,
+    TerminalSurfaceSearchDelegate
 {
     /// Applies a change to this state on the main queue's next turn.
     ///
@@ -49,8 +52,10 @@ extension TerminalViewState:
     ///
     /// The closures further down are deliberately *not* routed through this.
     /// They are requests with an answer expected, not state: a clipboard
-    /// confirmation must reach its host while the request is still live, and a
-    /// close must act before the surface goes.
+    /// confirmation must reach its host while the request is still live, a
+    /// close must act before the surface goes, a host asking which link is
+    /// under a point needs the answer before its `sendMousePos` returns, and
+    /// whether Ghostty opens a URL itself is decided before the turn ends.
     func publishSoon(
         _ key: TerminalPendingPublishes.Key,
         _ apply: @escaping TerminalPendingPublishes.Apply,
@@ -176,6 +181,37 @@ extension TerminalViewState:
             return
         }
         onClipboardConfirmationRequest(request)
+    }
+
+    /// Not routed through `publishSoon`: a host that moved the pointer
+    /// itself reads the link before its `sendMousePos` returns.
+    public func terminalDidUpdateHoverLink(_ url: String?) {
+        onHoverLink?(url)
+    }
+
+    /// Not routed through `publishSoon`: Ghostty waits for the answer.
+    public func terminalShouldHandleOpenURL(_ url: String, kind: TerminalOpenURLKind) -> Bool {
+        onOpenURL?(url, kind) ?? false
+    }
+
+    /// The search reports below are not routed through `publishSoon`
+    /// either: they are events, not state. Coalesced newest-per-key, the nil
+    /// selection a restarted search reports would be lost behind the next
+    /// one, and the host could not tell the two searches apart.
+    public func terminalDidStartSearch(needle: String?) {
+        onSearch?(.started(needle: needle))
+    }
+
+    public func terminalDidEndSearch() {
+        onSearch?(.ended)
+    }
+
+    public func terminalDidUpdateSearchTotal(_ total: Int?) {
+        onSearch?(.total(total))
+    }
+
+    public func terminalDidUpdateSearchSelected(_ selected: Int?) {
+        onSearch?(.selected(selected))
     }
 
     public func terminalDidAttachSurface(_ surface: TerminalSurface) {

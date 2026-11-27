@@ -35,11 +35,14 @@
                 return
             }
             #if targetEnvironment(macCatalyst)
+                // A finger on a touch display: it stops a glide the way it
+                // does on iOS, and claims the keyboard the way a click does.
+                stopMomentumScrolling()
                 becomeFirstResponder()
             #else
-                if momentumScroll.displayLink != nil {
+                if momentumScroll.displayLink != nil || systemScrollInMotion {
                     // A touch during momentum is a scroll-stop, not a tap.
-                    stopMomentumScrolling()
+                    stopMomentumForTouchDown()
                     softwareKeyboard.tapCandidateArmed = false
                 } else if let touch = touches.first,
                           // View-scoped on purpose: `allTouches` spans the
@@ -85,6 +88,11 @@
             if handleIndirectPointerTouches(touches, phase: .ended, event: event) {
                 return
             }
+            #if !targetEnvironment(macCatalyst)
+                if event?.touches(for: self)?.allSatisfy({ $0.phase == .ended || $0.phase == .cancelled }) ?? true {
+                    systemScrollTouchEnded()
+                }
+            #endif
             if usesInlineTextSelection {
                 super.touchesEnded(touches, with: event)
                 return
@@ -103,11 +111,12 @@
                         // mouse gets its press before the resize the
                         // keyboard causes, and the shell sees the
                         // click-to-move at its prompt either way.
-                        sendTapClick(at: touch.location(in: self))
                         // Overridable: a host keyboard lock overrides
                         // `toggleSoftwareKeyboard()` to swallow the toggle;
-                        // the click above still lands either way.
-                        toggleSoftwareKeyboard()
+                        // the click still lands either way.
+                        if !sendTapClick(at: touch.location(in: self)) {
+                            toggleSoftwareKeyboard()
+                        }
                     }
                 }
             #endif
@@ -145,10 +154,32 @@
             hover.delegate = self
             addGestureRecognizer(hover)
             pointer.hoverRecognizer = hover
-            #if !targetEnvironment(macCatalyst)
+            #if targetEnvironment(macCatalyst)
+                setupDirectTouchInput()
+            #else
                 setupTouchScrollInput()
             #endif
         }
+
+        #if targetEnvironment(macCatalyst)
+            /// A Mac with a touch display (or a Sidecar iPad) hands a
+            /// finger to a Catalyst app as a `.direct` touch, the type no
+            /// mouse or trackpad reports here: those are `.indirectPointer`
+            /// and scroll events. One finger scrolls with the same pan and
+            /// glide as on iOS and two pinch the font size. Neither
+            /// recognizer can begin on a Mac without touch input.
+            func setupDirectTouchInput() {
+                let gesture = UIPanGestureRecognizer(
+                    target: self,
+                    action: #selector(handleTouchScrollGesture(_:)),
+                )
+                gesture.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+                gesture.maximumNumberOfTouches = 1
+                gesture.delegate = self
+                addGestureRecognizer(gesture)
+                setupPinchZoomGesture()
+            }
+        #endif
 
         #if !targetEnvironment(macCatalyst)
             func setupTouchScrollInput() {
@@ -184,23 +215,35 @@
             /// One left click at `point`, the way a finger tap reaches the
             /// terminal: a press and a release with no drag between them.
             /// Any pointer-drag selection is over by definition — ghostty
-            /// clears its selection on the click.
-            func sendTapClick(at point: CGPoint) {
-                guard let surface else { return }
-                let mods = pointerMods()
+            /// clears its selection on the click. Returns true when the tap
+            /// opened a link or carried ⌘, which leave the keyboard alone.
+            func sendTapClick(at point: CGPoint) -> Bool {
+                guard let surface else { return false }
+                var mods = TerminalInputModifiers(rawValue: pointerMods().rawValue)
+                mods.formUnion(stickyModifiers.consumeForNextKey())
+                pointer.lastSelectionRect = nil
+                pointer.selectionStartPoint = nil
+                if !surface.isMouseCaptured {
+                    if mods.contains(.super_) {
+                        sendCommandClick(at: point, mods: mods, on: surface)
+                        return true
+                    }
+                    if mods.isDisjoint(with: [.shift, .ctrl, .alt]), openWebLink(at: point, on: surface) {
+                        return true
+                    }
+                }
                 sendPointerPosition(at: tapClickPoint(for: point, on: surface))
                 surface.sendMouseButton(
                     state: GHOSTTY_MOUSE_PRESS,
                     button: GHOSTTY_MOUSE_LEFT,
-                    mods: mods,
+                    modifiers: mods,
                 )
                 surface.sendMouseButton(
                     state: GHOSTTY_MOUSE_RELEASE,
                     button: GHOSTTY_MOUSE_LEFT,
-                    mods: mods,
+                    modifiers: mods,
                 )
-                pointer.lastSelectionRect = nil
-                pointer.selectionStartPoint = nil
+                return mods.contains(.super_)
             }
 
             /// Where a tap's click lands. A program tracking the mouse gets
@@ -221,14 +264,30 @@
                 return CGPoint(x: cursor.x, y: cursor.y - cursor.height / 2)
             }
 
-            /// Long press opens the touch menu; with inline selection off
-            /// the recognizer never begins (see `gestureRecognizerShouldBegin`).
+            /// Long press selects the word under the finger, or opens the touch
+            /// menu over blank cells; with inline selection off the recognizer
+            /// never begins (see `gestureRecognizerShouldBegin`).
             @objc func handleLongPressForSelection(
                 _ gesture: UILongPressGestureRecognizer,
             ) {
-                guard gesture.state == .began, usesInlineTextSelection else { return }
-                softwareKeyboard.tapCandidateArmed = false
-                presentTouchMenu(at: gesture.location(in: self))
+                guard usesInlineTextSelection else { return }
+                let point = gesture.location(in: self)
+                switch gesture.state {
+                case .began:
+                    softwareKeyboard.tapCandidateArmed = false
+                    beginTouchSelection(at: point, selectAll: false, fromLongPress: true)
+                case .changed:
+                    guard touchSelection.endpoint != nil else { return }
+                    touchSelection.dragPoint = point
+                    extendTouchSelection(to: point, endpoint: .end)
+                    moveTouchSelectionLoupe(to: point)
+                    startTouchSelectionScrolling()
+                case .ended, .cancelled, .failed:
+                    guard touchSelection.endpoint != nil else { return }
+                    finishTouchSelectionDrag(at: point)
+                default:
+                    break
+                }
             }
         #endif
 
@@ -241,9 +300,13 @@
             }
             if usesInlineTextSelection, gestureRecognizer === touchSelection.tapRecognizers.first {
                 touchSelection.tapBeganWithMenu = isTouchMenuVisible
-                touchSelection.tapStopsMomentum = momentumScroll.displayLink != nil
+                #if targetEnvironment(macCatalyst)
+                    touchSelection.tapStopsMomentum = momentumScroll.displayLink != nil
+                #else
+                    touchSelection.tapStopsMomentum = momentumScroll.displayLink != nil || systemScrollInMotion
+                #endif
                 if touchSelection.tapStopsMomentum {
-                    stopMomentumScrolling()
+                    stopMomentumForTouchDown()
                 }
             }
             return true
@@ -259,6 +322,15 @@
             if gestureRecognizer is UILongPressGestureRecognizer {
                 return usesInlineTextSelection
             }
+            #if !targetEnvironment(macCatalyst)
+                // One finger over scrollback is the scroll view's
+                // (+SystemScroll); the view's own pan stands aside for it.
+                if gestureRecognizer === touchSelection.scrollGesture,
+                   gestureRecognizer.numberOfTouches == 1, systemPanWouldBegin
+                {
+                    return false
+                }
+            #endif
             return true
         }
     }

@@ -36,8 +36,68 @@ enum TerminalRuntimeSmoke {
         }
         checkPalette(controller, dark: false)
         checkPalette(controller, dark: true)
-        print("Terminal runtime verified both palettes after environment changes")
+        checkSurfaceLifecycle(controller)
+        print("Terminal runtime verified both palettes and 24 surface teardown cycles")
         exit(0)
+    }
+
+    /// Reproduce the lifecycle involved in the 2026-11-27 hang: a live
+    /// surface receives display-change callbacks and is then destroyed. The
+    /// old engine could wait forever in CVDisplayLinkStop from
+    /// ghostty_surface_free; the resource checker runs this process with a
+    /// timeout so any recurrence fails the build.
+    private static func checkSurfaceLifecycle(_ controller: TerminalController) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+
+        for index in 0..<24 {
+            weak var releasedView: AppTerminalView?
+            weak var releasedSurface: TerminalSurface?
+            autoreleasepool {
+                let session = InMemoryTerminalSession(write: { _ in }, resize: { _ in })
+                let state = TerminalViewState(controller: controller)
+                let options = TerminalSurfaceOptions(backend: .inMemory(session))
+                state.configuration = options
+
+                let view = AppTerminalView(frame: window.contentRect(forFrameRect: window.frame))
+                view.delegate = state
+                view.controller = controller
+                view.configuration = options
+                window.contentView = view
+                guard state.surface != nil else { fail("Surface cycle \(index) did not attach") }
+                releasedView = view
+                releasedSurface = state.surface
+
+                session.receive("surface cycle \(index)\r\n")
+                guard session.waitForPendingOutput() else {
+                    fail("Surface cycle \(index) did not drain its output")
+                }
+                NotificationCenter.default.post(
+                    name: NSApplication.didChangeScreenParametersNotification,
+                    object: NSApp
+                )
+                NotificationCenter.default.post(
+                    name: NSWindow.didChangeScreenNotification,
+                    object: window
+                )
+                window.contentView = nil
+            }
+
+            // Deliver the display-change follow-up queued by the view. It has
+            // a weak receiver and must not keep the old surface alive.
+            for _ in 0..<3 {
+                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.002))
+            }
+            guard releasedView == nil, releasedSurface == nil else {
+                fail("Surface cycle \(index) did not release its renderer")
+            }
+        }
+        window.close()
     }
 
     private static func checkPalette(_ controller: TerminalController, dark: Bool) {

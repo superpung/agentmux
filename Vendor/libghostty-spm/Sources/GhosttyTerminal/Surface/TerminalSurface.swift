@@ -22,6 +22,11 @@ public final class TerminalSurface {
     /// hardware keyboard, a host's `sendKey`. Ghostty cannot report the
     /// resulting size, so the coordinator keeps it (`TerminalFontSize`).
     var onFontSizeAction: ((TerminalFontSizeAction) -> Void)?
+    /// A precision scroll went to the surface: `y`, positive toward the
+    /// scrollback. Every one goes through here, a host's included, so the
+    /// view can bring a viewport left between rows back to a row
+    /// (`TerminalSmoothScrollSettler`).
+    var onPrecisionScroll: ((Double) -> Void)?
 
     init(_ surface: ghostty_surface_t) {
         self.surface = surface
@@ -68,6 +73,28 @@ public final class TerminalSurface {
         )
         text.withCString { cStr in
             ghostty_surface_text(s, cStr, UInt(text.utf8.count))
+        }
+        return true
+    }
+
+    /// Pastes text the way a clipboard paste goes: paste protection reads it
+    /// first, and text it flags as unsafe — a newline for a program without
+    /// bracketed paste — reaches the host as a
+    /// ``TerminalClipboardConfirmationRequest`` and lands only if allowed.
+    /// For text the user has not read, such as a drop. ``paste(text:)``
+    /// sends without asking.
+    @discardableResult
+    public func pasteWithProtection(text: String) -> Bool {
+        guard let s = surface else {
+            TerminalDebugLog.log(.input, "surface protected paste ignored: missing surface")
+            return false
+        }
+        TerminalDebugLog.log(
+            .input,
+            "surface protected paste text=\(TerminalDebugLog.describe(text))",
+        )
+        text.withCString { cStr in
+            ghostty_surface_paste_text(s, cStr, UInt(text.utf8.count))
         }
         return true
     }
@@ -137,6 +164,9 @@ public final class TerminalSurface {
             "surface scroll x=\(String(format: "%.2f", x)) y=\(String(format: "%.2f", y)) mods=0x\(String(mods, radix: 16))",
         )
         ghostty_surface_mouse_scroll(s, x, y, mods)
+        if TerminalScrollModifiers(rawValue: mods).precision, y != 0 {
+            onPrecisionScroll?(y)
+        }
     }
 
     /// Whether the application currently owns the mouse (DEC 1000/1002/1003).
